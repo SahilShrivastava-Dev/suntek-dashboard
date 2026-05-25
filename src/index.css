@@ -1,0 +1,361 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: #ECEEF1;
+    --bg-soft: #F6F7F9;
+    --card: #FFFFFF;
+    --text: #0F172A;
+    --text-2: #334155;
+    --muted: #64748B;
+    --muted-2: #94A3B8;
+    --border: #E2E8F0;
+    --border-2: #F1F5F9;
+    --accent: #F47651;
+    --accent-2: #FF8A66;
+    --accent-soft: #FFEDE5;
+    --accent-deep: #C5421F;
+    --dark: #0F172A;
+    --green: #16A34A;
+    --green-soft: #DCFCE7;
+    --amber: #D97706;
+    --amber-soft: #FEF3C7;
+    --red: #DC2626;
+    --red-soft: #FEE2E2;
+    --blue: #2563EB;
+    --blue-soft: #DBEAFE;
+    --purple: #7C3AED;
+    --purple-soft: #EDE9FE;
+    --sidebar-width: 260px;
+  }
+
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    text-rendering: optimizeLegibility;
+  }
+}
+
+@layer components {
+  /* ── Typography ── */
+  .serif {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--card);
+    border-radius: 24px;
+    box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  }
+
+  /* ── Pills & Chips ── */
+  .pill {
+    border-radius: 9999px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #F1F5F9;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 150ms ease;
+    user-select: none;
+  }
+  .chip:hover { background: #E2E8F0; }
+  .chip.active { background: var(--dark); color: #fff; }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+
+  /* ── Badge ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* ── Density pill ── */
+  .density-pill {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-weight: 700;
+    font-size: 12px;
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+  }
+
+  /* ── Pic badge ── */
+  .pic-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--green-soft);
+    color: var(--green);
+  }
+  .pic-badge.missing {
+    background: #F1F5F9;
+    color: var(--muted-2);
+  }
+
+  /* ── Buttons ── */
+  .btn-accent {
+    background: var(--accent);
+    color: #fff;
+    transition: all 180ms ease;
+    box-shadow: 0 1px 2px rgba(244, 118, 81, 0.25);
+    cursor: pointer;
+    border: none;
+  }
+  .btn-accent:hover {
+    background: var(--accent-deep);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(244, 118, 81, 0.35);
+  }
+
+  .btn-dark {
+    background: var(--dark);
+    color: #fff;
+    transition: all 180ms ease;
+    cursor: pointer;
+    border: none;
+  }
+  .btn-dark:hover { background: #000; }
+
+  .btn-ghost {
+    background: #F1F5F9;
+    color: var(--text);
+    transition: all 180ms ease;
+    cursor: pointer;
+    border: none;
+  }
+  .btn-ghost:hover { background: #E2E8F0; }
+
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    transition: all 180ms ease;
+    cursor: pointer;
+  }
+  .btn-outline:hover { background: #F8FAFC; border-color: #CBD5E1; }
+
+  /* ── Nav links ── */
+  .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 12px;
+    border-radius: 12px;
+    color: #94A3B8;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 150ms;
+    user-select: none;
+    text-decoration: none;
+  }
+  .nav-link:hover { color: var(--text); background: #F8FAFC; }
+  .nav-link.active { background: var(--dark); color: #fff; }
+  .nav-link .pill-count {
+    margin-left: auto;
+    padding: 1px 7px;
+    border-radius: 9999px;
+    font-size: 10px;
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    font-weight: 700;
+  }
+  .nav-link.active .pill-count { background: rgba(255,255,255,0.15); color: #fff; }
+
+  /* ── Sub nav ── */
+  .nav-sub {
+    padding-left: 16px;
+    border-left: 2px solid #F1F5F9;
+    margin-left: 18px;
+    margin-top: 2px;
+    margin-bottom: 4px;
+  }
+  .nav-sub .nav-link { padding: 7px 12px; font-size: 12.5px; }
+
+  /* ── Data table ── */
+  table.dt {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  table.dt thead th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+  }
+  table.dt tbody td {
+    padding: 14px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-2);
+    color: var(--text-2);
+  }
+  table.dt tbody tr { transition: background 120ms; }
+  table.dt tbody tr:hover { background: #F8FAFC; }
+  table.dt .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ── Progress bar ── */
+  .progress {
+    background: #F1F5F9;
+    height: 8px;
+    border-radius: 9999px;
+    overflow: hidden;
+  }
+  .progress > div {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border-radius: 9999px;
+    transition: width 360ms ease;
+  }
+
+  /* ── Subtabs (Purchase hub) ── */
+  .subtab {
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 150ms;
+    white-space: nowrap;
+  }
+  .subtab:hover { color: var(--text); background: #F8FAFC; }
+  .subtab.active { background: var(--dark); color: #fff; }
+  .subtab .count {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 9999px;
+    font-size: 10px;
+    background: rgba(255,255,255,0.18);
+    color: inherit;
+  }
+  .subtab:not(.active) .count { background: #F1F5F9; color: var(--muted); }
+
+  /* ── Tile ── */
+  .tile {
+    padding: 14px;
+    border-radius: 18px;
+    background: #F8FAFC;
+    transition: background 150ms;
+    cursor: pointer;
+  }
+  .tile:hover { background: #F1F5F9; }
+
+  /* ── Status dots ── */
+  .sd-green  { background: var(--green); }
+  .sd-amber  { background: var(--amber); }
+  .sd-red    { background: var(--red); }
+  .sd-grey   { background: #94A3B8; }
+  .sd-blue   { background: var(--blue); }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(120%);
+    background: var(--dark);
+    color: #fff;
+    padding: 12px 22px;
+    border-radius: 9999px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: transform 240ms cubic-bezier(.2,.9,.3,1.2);
+    z-index: 100;
+    pointer-events: none;
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.32);
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* ── Menu dropdown ── */
+  .menu {
+    position: absolute;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 6px;
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    min-width: 200px;
+    z-index: 30;
+  }
+
+  /* ── KBD ── */
+  kbd {
+    background: #F1F5F9;
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  /* ── Scrollbar ── */
+  .scroll-x::-webkit-scrollbar { height: 6px; }
+  .scroll-x::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+
+  /* ── Map grid ── */
+  .map-grid {
+    background-image: linear-gradient(to right, rgba(15,23,42,0.05) 1px, transparent 1px),
+                      linear-gradient(to bottom, rgba(15,23,42,0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  /* ── Page animation ── */
+  @keyframes fadein {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .page-enter {
+    animation: fadein 320ms ease both;
+  }
+}

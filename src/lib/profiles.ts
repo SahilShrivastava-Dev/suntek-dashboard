@@ -81,15 +81,15 @@ export const MOCK_PROFILES: MockProfile[] = [
     accessNote: 'No sales, customer or finance-only data',
   },
 
-  // ── L2: Warehouse Manager — physical stock in/out ─────────────────────────
+  // ── L2: Warehouse Dispatch — physical stock in/out ────────────────────────
   // Sees: CPM Stock levels, Store requisitions, Warehouse app
   // Hidden: Overview (has financial KPIs), Batches, Sales, everything else
   {
     id: 'warehouse_manager',
     name: 'Ramesh Yadav',
     role: 'L2',
-    roleLabel: 'Warehouse Manager',
-    roleDescription: 'Stock levels · drums in/out · store reqs',
+    roleLabel: 'Warehouse Dispatch',
+    roleDescription: 'Dispatch · shipping · inventory out',
     initials: 'RY',
     avatarFrom: 'from-teal-400',
     avatarTo: 'to-teal-600',
@@ -147,15 +147,15 @@ export const MOCK_PROFILES: MockProfile[] = [
     accessNote: 'Check-in form only · no other dashboard access',
   },
 
-  // ── L1: Factory Operator — batch logger embedded in dashboard ─────────────
-  // Single-purpose: log batch readings. Sidebar shows, batch logger form
-  // appears on the right. No access to any other dashboard section.
+  // ── L1: Technical Team — document digitisation + batch logging ────────────
+  // Data entry and document digitisation via image uploads.
+  // Can upload Sales, Purchase, and Batch Sheet images for OCR extraction.
   {
     id: 'factory_operator',
     name: 'Shyam Patel',
     role: 'L1',
-    roleLabel: 'Factory Operator',
-    roleDescription: 'Batch logging · machine readings',
+    roleLabel: 'Technical Team',
+    roleDescription: 'Data entry · OCR uploads · batch logging',
     initials: 'SP',
     avatarFrom: 'from-purple-400',
     avatarTo: 'to-purple-600',
@@ -166,6 +166,59 @@ export const MOCK_PROFILES: MockProfile[] = [
     ],
     standaloneOnly: false,
     accessNote: 'Batch logger only · no other dashboard access',
+  },
+
+  // ── L2: Accountant (Delhi) — Delhi factory financial/operational data ─────
+  // Can view and process financial/operational data for the Delhi factory only.
+  // Purchase sheets are read-only for all accountants (anti-tampering rule).
+  {
+    id: 'accountant_delhi',
+    name: 'Priya Sharma',
+    role: 'L2',
+    roleLabel: 'Accountant · Delhi',
+    roleDescription: 'Delhi factory financial & operational data',
+    initials: 'PS',
+    avatarFrom: 'from-rose-400',
+    avatarTo: 'to-rose-600',
+    plant: 'Delhi',
+    homeRoute: '/dashboard',
+    allowedDashboardRoutes: [
+      '/dashboard',                       // Overview (financial KPIs)
+      '/dashboard/sales',                 // Sales contracts & dispatch
+      '/dashboard/customers',             // Customer history
+      '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
+      '/dashboard/purchase/marine',       // Marine insurance fund
+      '/dashboard/purchase/labour',       // Labour cost tracking
+      '/dashboard/audit',                 // Audit trail
+    ],
+    standaloneOnly: false,
+    accessNote: 'Delhi factory data only · purchase data is read-only',
+  },
+
+  // ── L2: Accountant (Other Factories) — all factories except Delhi ─────────
+  // Can view data for all factories EXCLUDING the Delhi factory.
+  {
+    id: 'accountant_other',
+    name: 'Deepak Verma',
+    role: 'L2',
+    roleLabel: 'Accountant · Other',
+    roleDescription: 'All factories (excl. Delhi) financial data',
+    initials: 'DV',
+    avatarFrom: 'from-amber-400',
+    avatarTo: 'to-amber-600',
+    plant: 'Rehla · Jharsuguda',
+    homeRoute: '/dashboard',
+    allowedDashboardRoutes: [
+      '/dashboard',                       // Overview (financial KPIs)
+      '/dashboard/sales',                 // Sales contracts & dispatch
+      '/dashboard/customers',             // Customer history
+      '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
+      '/dashboard/purchase/marine',       // Marine insurance fund
+      '/dashboard/purchase/labour',       // Labour cost tracking
+      '/dashboard/audit',                 // Audit trail
+    ],
+    standaloneOnly: false,
+    accessNote: 'All factories except Delhi · purchase data is read-only',
   },
 ];
 

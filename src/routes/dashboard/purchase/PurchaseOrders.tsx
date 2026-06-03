@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { REQUIREMENTS } from '../../../data/mockData';
+import { exportToXlsx } from '../../../lib/utils/exportXlsx';
+import { useRoleContext } from '../../../contexts/RoleContext';
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -26,6 +28,27 @@ const KIND_STYLE: Record<string, { bg: string; color: string }> = {
 
 export function PurchaseOrders() {
   const [filter, setFilter] = useState('all');
+  const { activeProfile } = useRoleContext();
+
+  function handleExport() {
+    const rows = (filter === 'all' ? REQUIREMENTS : REQUIREMENTS.filter(r => r.status === filter));
+    exportToXlsx(
+      rows.map(r => ({ id: r.id, material: r.mat, type: r.kind, supplier: r.sup, destination: r.dest, quantity: r.qty, value: r.val, status: r.status })),
+      [
+        { header: 'REQ #', key: 'id' },
+        { header: 'Material / Asset', key: 'material' },
+        { header: 'Type', key: 'type' },
+        { header: 'Supplier', key: 'supplier' },
+        { header: 'Destination', key: 'destination' },
+        { header: 'Qty', key: 'quantity' },
+        { header: 'Value', key: 'value' },
+        { header: 'Status', key: 'status' },
+      ],
+      'purchase-orders',
+      activeProfile,
+      'Purchase Orders',
+    );
+  }
 
   const list = filter === 'all'
     ? REQUIREMENTS
@@ -79,6 +102,15 @@ export function PurchaseOrders() {
                 {f.val === 'all' && <span className="ml-1 text-slate-400">12</span>}
               </div>
             ))}
+            <button
+              className="btn-ghost pill px-4 py-2 font-semibold text-sm flex items-center gap-2"
+              onClick={handleExport}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Export
+            </button>
             <button className="btn-accent pill px-4 py-2 font-semibold text-sm">+ New PO</button>
           </div>
         </div>

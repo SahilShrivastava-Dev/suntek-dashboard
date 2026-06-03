@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Daily Progress Report
+Suntek_Project_DPR.csv

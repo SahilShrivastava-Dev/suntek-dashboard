@@ -186,6 +186,15 @@ export function CheckIn({ embedded = false }: CheckInProps) {
   // ── Submit: upload → Supabase ──────────────────────────────────────────────
   async function handleSubmit() {
     if (!photoBlob || !gpsData) return;
+
+    // Warn if out of zone, but allow override
+    if (!gpsData.isOnSite) {
+      const ok = window.confirm(
+        `⚠️ Out of Zone\n\nYou are ${gpsData.distanceM.toLocaleString()} m away from ${PLANT_NAME}.\n\nThis check-in will be flagged for review. Submit anyway?`
+      );
+      if (!ok) return;
+    }
+
     setSubmitState('uploading');
     setSubmitError(null);
     setUploadProgress(0);

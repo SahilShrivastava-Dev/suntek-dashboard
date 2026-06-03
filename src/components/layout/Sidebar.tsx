@@ -120,6 +120,16 @@ function IconBatch() {
     </svg>
   );
 }
+function IconClipboard() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+      <line x1="9" y1="12" x2="15" y2="12"/>
+      <line x1="9" y1="16" x2="13" y2="16"/>
+    </svg>
+  );
+}
 
 // ── Section header ─────────────────────────────────────────────────────────────
 
@@ -173,11 +183,15 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
 
   // L1 entry views — shown ONLY for the specific role that owns the task.
   // Admin/Unit Head monitor via boards (Batch Sheet, Night Manager, CPM Stock) — not entry terminals.
+  // Accountants do not see operations — they only access Finance and Reference sections.
+  const isAccountant = activeProfile.id === 'accountant_delhi' || activeProfile.id === 'accountant_other';
   const showWarehouseEntry = activeProfile.id === 'warehouse_manager';
   const showNightEntry     = activeProfile.id === 'night_manager';
   const showBatchEntry     = activeProfile.id === 'factory_operator';
+  // Daily log upload: visible to admin, unit_head, and factory_operator
+  const showDailyLog = ['admin','unit_head','factory_operator'].includes(activeProfile.id);
 
-  const showOperations = showBatches || showNightMgr || showStock || showWarehouseEntry || showNightEntry || showBatchEntry;
+  const showOperations = !isAccountant && (showBatches || showNightMgr || showStock || showWarehouseEntry || showNightEntry || showBatchEntry || showDailyLog);
 
   // Finance items
   const showSales     = canSee('/dashboard/sales');
@@ -354,6 +368,18 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             <span className="pill-count" style={{ background: '#FAF5FF', color: '#7C3AED' }}>entry</span>
           </a>
         )}
+
+        {/* Daily Unit Log — OCR upload for hourly monitoring sheets */}
+        {showDailyLog && (
+          <a
+            className={`nav-link${isActive('/dashboard/daily-log') ? ' active' : ''}`}
+            onClick={() => navTo('/dashboard/daily-log')}
+          >
+            <IconClipboard />
+            <span>Daily Unit Log</span>
+            <span className="pill-count" style={{ background: '#FFFBEB', color: '#D97706' }}>OCR</span>
+          </a>
+        )}
       </nav>
 
       {/* ── FINANCE ───────────────────────────────────────────────────────── */}
@@ -431,6 +457,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             <div className="text-[11px] text-slate-500">{activeProfile.roleLabel}</div>
             {activeProfile.plant && (
               <div className="text-[10px] text-slate-400">📍 {activeProfile.plant}</div>
+            )}
+            {activeProfile.accessNote && (
+              <div className="text-[9px] text-slate-400 truncate mt-0.5" title={activeProfile.accessNote}>
+                {activeProfile.accessNote}
+              </div>
             )}
           </div>
         </div>

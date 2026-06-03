@@ -20,6 +20,7 @@ import { AuditLog } from './routes/dashboard/AuditLog';
 import { NightEntry } from './routes/dashboard/NightEntry';
 import { BatchEntry } from './routes/dashboard/BatchEntry';
 import { WarehouseEntry } from './routes/dashboard/WarehouseEntry';
+import { DailyLogPage } from './routes/dashboard/DailyLogPage';
 
 // L1 Operator apps (standalone — no DashboardLayout)
 import { CheckIn } from './routes/night-manager/CheckIn';
@@ -74,6 +75,7 @@ function App() {
             <Route path="night-entry"       element={<NightEntry />} />
             <Route path="batch-entry"       element={<BatchEntry />} />
             <Route path="warehouse-entry"   element={<WarehouseEntry />} />
+            <Route path="daily-log"         element={<DailyLogPage />} />
           </Route>
 
           {/* L1 Operator apps — standalone, no sidebar */}

@@ -1,0 +1,5 @@
+# AI Assistant Rules
+
+- **Daily Progress Report (DPR) Updates**: 
+  Whenever you complete a significant coding task, feature, or end a working session for the day, you MUST update the `Suntek_Project_DPR.csv` file in the root directory. 
+  Add a new row with the current date, the phase/day, the major work completed, and the current status/notes. Ensure the format matches existing rows.

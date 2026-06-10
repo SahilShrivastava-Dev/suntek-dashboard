@@ -49,14 +49,14 @@ export function PurchaseOrders() {
 
   async function handleSave() {
     if (!form.material.trim() || !form.supplier.trim()) return;
-    const { data, error } = await (supabase.from('oil_contracts').insert({
+    const { data, error } = await (supabase.from('oil_contracts') as any).insert({
       oil_type: form.material,
       company: form.supplier,
       date: new Date().toISOString().split('T')[0],
       book_qty_mt: parseFloat(form.qty) || null,
       price: form.value ? parseFloat(form.value.replace(/[^0-9.]/g, '')) : null,
       port: form.destination,
-    }).select('*').single() as any);
+    }).select('*').single();
 
     if (error) { alert(`Save failed: ${error.message}`); return; }
     if (data) setOrders(prev => [data, ...prev]);

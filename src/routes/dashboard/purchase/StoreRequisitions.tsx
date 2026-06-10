@@ -67,14 +67,14 @@ export function StoreRequisitions() {
   async function handleSave() {
     if (!form.item.trim() || !form.qty) return;
     const plant = dbPlants.find(p => p.name === form.plant);
-    const { data, error } = await (supabase.from('store_requisitions').insert({
+    const { data, error } = await (supabase.from('store_requisitions') as any).insert({
       item: form.item,
       plant_id: plant?.id || null,
       qty: parseFloat(form.qty) || 0,
       urgency: URGENCY_MAP[form.priority] || 'medium',
       status: 'pending',
       remarks: [form.unit ? `Unit: ${form.unit}` : '', form.notes].filter(Boolean).join(' · ') || null,
-    }).select('*, plants(name)').single() as any);
+    }).select('*, plants(name)').single();
 
     if (error) {
       alert(`Save failed: ${error.message}`);

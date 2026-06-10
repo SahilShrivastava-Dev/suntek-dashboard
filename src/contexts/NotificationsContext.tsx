@@ -99,11 +99,17 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         : n
       )
     );
-    // Persist read state to DB (non-blocking)
+    // Persist read state to DB (non-blocking) — optimistic local state is primary
     (supabase.from('notifications') as any)
-      .update({ read_by: supabase.rpc('array_append_if_not_exists', { arr: [], val: roleId }) })
-      .eq('id', id)
-      .then(() => {}).catch(() => {});
+      .select('read_by').eq('id', id).single()
+      .then(({ data }: any) => {
+        if (data && !data.read_by?.includes(roleId)) {
+          (supabase.from('notifications') as any)
+            .update({ read_by: [...(data.read_by || []), roleId] })
+            .eq('id', id)
+            .then(() => {}).catch(() => {});
+        }
+      }).catch(() => {});
   }
 
   function markAllRead() {

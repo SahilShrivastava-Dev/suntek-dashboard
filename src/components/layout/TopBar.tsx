@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { useRoleContext } from '../../contexts/RoleContext';
-import { useNotifications, AppNotification } from '../../contexts/NotificationsContext';
+import { useNotifications } from '../../contexts/NotificationsContext';
+import type { AppNotification } from '../../contexts/NotificationsContext';
 
 type NType = 'urgent' | 'warning' | 'info';
 

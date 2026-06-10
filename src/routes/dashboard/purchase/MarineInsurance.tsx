@@ -32,13 +32,13 @@ export function MarineInsurance() {
     if (!form.amount.trim()) return;
     const topUpAmt = parseFloat(form.amount) || 0;
     const newBal = currentBalance + topUpAmt;
-    const { data, error } = await (supabase.from('marine_insurance').insert({
+    const { data, error } = await (supabase.from('marine_insurance') as any).insert({
       date: form.date,
       type: 'top_up',
       reference: form.reference || null,
       amount: topUpAmt,
       balance: newBal,
-    }).select('*').single() as any);
+    }).select('*').single();
 
     if (error) {
       alert(`Save failed: ${error.message}`);

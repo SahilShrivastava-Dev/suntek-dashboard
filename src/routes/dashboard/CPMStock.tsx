@@ -64,7 +64,7 @@ export function CPMStock() {
       plant_id: plantId,
       date: today,
     }));
-    const { error } = await (supabase.from('stock_levels').insert(inserts) as any);
+    const { error } = await (supabase.from('stock_levels') as any).insert(inserts);
     if (error) { alert(`Save failed: ${error.message}`); return; }
     const { data } = await (supabase.from('stock_levels').select('*, plants(name)').order('updated_at', { ascending: false }) as any);
     setStockItems(data || []);

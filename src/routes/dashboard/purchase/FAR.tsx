@@ -59,14 +59,17 @@ export function FAR() {
       ...(data.model    ? { model: data.model }          : {}),
       ...(data.capacity ? { capacity: data.capacity }    : {}),
       ...(data.purchaseDate ? { purchaseDate: data.purchaseDate } : {}),
+      // Auto-fill identification mark from model if not already set
+      ...(data.model && !f.mark ? { mark: data.model } : {}),
     }));
   }
 
   async function handleSave() {
     if (!form.mark.trim() || !form.model.trim()) return;
     const plant = dbPlants.find(p => p.name === form.plant);
-    const { data, error } = await (supabase.from('fixed_assets').insert({
-      plant_id: plant?.id || dbPlants[0]?.id || '',
+    const plantId = plant?.id || dbPlants[0]?.id || null;
+    const { data, error } = await (supabase.from('fixed_assets') as any).insert({
+      ...(plantId ? { plant_id: plantId } : {}),
       name: form.mark,
       identification_mark: form.mark,
       model: form.model || null,
@@ -77,7 +80,7 @@ export function FAR() {
       invoice_no: form.invoice || null,
       purchase_date: form.purchaseDate || null,
       account_head: form.account || null,
-    }).select('*, plants(name)').single() as any);
+    }).select('*, plants(name)').single();
 
     if (error) {
       alert(`Save failed: ${error.message}`);

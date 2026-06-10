@@ -71,22 +71,21 @@ export function Sales() {
     if (existingCustomers && existingCustomers.length > 0) {
       customerId = existingCustomers[0].id;
     } else {
-      const { data: newCust } = await (supabase
-        .from('customers')
+      const { data: newCust } = await (supabase.from('customers') as any)
         .insert({ name: form.customer.trim(), outstanding: 0, is_active: true })
         .select('id')
-        .single() as any);
+        .single();
       if (newCust) customerId = newCust.id;
     }
     if (!customerId) { alert('Failed to find or create customer. Please try again.'); return; }
-    const { error } = await (supabase.from('sales_contracts').insert({
+    const { error } = await (supabase.from('sales_contracts') as any).insert({
       customer_id: customerId,
       density: parseInt(form.density) || 1400,
       locked_price: parseFloat(form.lockedPrice) || 0,
       booked_qty: parseFloat(form.bookedQty) || 0,
       dispatched_qty: 0,
       status: 'open',
-    }) as any);
+    });
     if (error) { alert(`Save failed: ${error.message}`); return; }
     setFormSaved(true);
     setTimeout(() => {

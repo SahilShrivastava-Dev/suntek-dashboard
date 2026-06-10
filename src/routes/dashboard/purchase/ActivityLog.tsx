@@ -45,14 +45,14 @@ export function ActivityLog() {
   async function handleSave() {
     if (!form.equipment.trim() || !form.doneBy.trim()) return;
     const plant = dbPlants.find(p => p.name === form.plant);
-    const { data, error } = await (supabase.from('activity_logs').insert({
+    const { data, error } = await (supabase.from('activity_logs') as any).insert({
       equipment: form.equipment,
       type: form.type.toLowerCase(),
       date: form.date,
       done_by: form.doneBy,
       verified_by: form.verifiedBy || null,
       plant_id: plant?.id || null,
-    }).select('*, plants(name)').single() as any);
+    }).select('*, plants(name)').single();
 
     if (error) {
       alert(`Save failed: ${error.message}`);

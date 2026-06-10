@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { CONTRACTS } from '../../data/mockData';
+import { useSalesMTD, useSalesContracts, useAnalyticsKPIs, fmtINR } from '../../hooks/useBusyData';
+import { DeltaBadge, BulletCompare } from '../../components/charts/AnalyticsViz';
+import { KpiInfoButton } from '../../components/KpiInfoButton';
 import { exportToXlsx } from '../../lib/utils/exportXlsx';
 import { useRoleContext } from '../../contexts/RoleContext';
 
@@ -16,6 +19,9 @@ export function Sales() {
   const [showModal, setShowModal] = useState(false);
   const [selectedContract, setSelectedContract] = useState<typeof CONTRACTS[0] | null>(null);
   const { activeProfile } = useRoleContext();
+  const { data: salesKPIs } = useSalesMTD();
+  const { data: liveContracts } = useSalesContracts();
+  const { data: analytics } = useAnalyticsKPIs();
 
   function handleExport() {
     exportToXlsx(
@@ -73,29 +79,170 @@ export function Sales() {
 
   return (
     <>
-      {/* KPIs */}
+      {/* KPIs — live from BUSY — blue tiles */}
       <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">CP sales · MTD</div>
-          <div className="text-[28px] font-extrabold mt-1 num">₹ 1.28 Cr</div>
-          <div className="text-[11px] text-green-600 mt-1">↑ 18.4%</div>
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Total Sales MTD', what: 'Gross sales value invoiced this calendar month across all customers and plants. Counts non-cancelled sales vouchers only.', source: 'BUSY DB', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0, current month' }} />
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total sales · MTD · BUSY</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-blue-700">
+            {salesKPIs ? fmtINR(salesKPIs.totalSalesMTD) : '…'}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">{salesKPIs ? salesKPIs.dispatchesMTD + ' dispatches MTD' : ''}</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">HCL · MTD</div>
-          <div className="text-[28px] font-extrabold mt-1 num">₹ 32.4 L</div>
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'GST Output MTD', what: 'Total GST collected from customers on sales invoices this month. Net payable = Output GST minus Input ITC. This is what must be remitted to the government.', source: 'BUSY DB', tables: ['VchGSTSumItemWise', 'Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > VchGSTSumItemWise', filter: 'VchType=9, current month' }} />
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">GST output · MTD</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-blue-700">
+            {salesKPIs ? fmtINR(salesKPIs.gstOutputMTD) : '…'}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">net payable {salesKPIs ? fmtINR(salesKPIs.netGSTPayable) : ''}</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Open contracts</div>
-          <div className="text-[28px] font-extrabold mt-1 num">28</div>
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Customers with Outstanding', what: 'Count of unique parties in the Sundry Debtors group that have a non-zero Dr balance — i.e., customers who owe money.', source: 'BUSY DB', tables: ['DailySum', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > DailySum\nBusyFY2026 > dbo > Tables > Master1', filter: 'Master1.ParentGrp=116 (Sundry Debtors), MasterType=2' }} />
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Customers with outstanding</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-blue-700">
+            {salesKPIs ? salesKPIs.openContracts : '…'}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">parties in Sundry Debtors</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Avg dispatch / day</div>
-          <div className="text-[28px] font-extrabold mt-1 num">86</div>
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Receipts MTD', what: 'Cash actually received from customers this month via receipt vouchers. Excludes sales invoices not yet paid. Key indicator of real cash inflow.', source: 'BUSY DB', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=16 (Receipt), Cancelled=0, current month' }} />
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Receipts · MTD</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-blue-700">
+            {salesKPIs ? fmtINR(salesKPIs.receiptsMTD) : '…'}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">customer payments received</div>
         </div>
       </div>
 
+      {/* Analytics KPI row */}
+      {analytics && (
+        <div className="grid grid-cols-12 gap-5 mb-5">
+          {/* Avg Ticket */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Average Invoice Ticket', what: 'Mean value of each sales invoice for the full financial year. Tracks if orders are growing larger or fragmenting into smaller deals.', source: 'Derived', formula: 'Avg Ticket = FY Revenue / FY Invoice Count', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider">Avg Invoice Ticket · FY</div>
+            <div className="text-[24px] font-extrabold mt-1 num text-slate-800">
+              {fmtINR(analytics.avgTicketFY)}
+            </div>
+            <div className="flex items-center gap-2 mt-1.5">
+              <DeltaBadge value={analytics.momInvoiceGrowthPct} />
+              <span className="text-[10px] text-slate-500">invoice count MoM</span>
+            </div>
+          </div>
+
+          {/* Daily Sales Velocity */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Daily Sales Velocity', what: 'Average revenue generated per working day so far this month. Useful to project end-of-month sales and spot early slowdowns.', source: 'Derived', formula: 'Velocity = MTD Sales / Days elapsed in month', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0, current month' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider">Daily Sales Velocity · MTD</div>
+            <div className="text-[24px] font-extrabold mt-1 num text-slate-800">
+              {fmtINR(analytics.dailyVelocity)}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">per working day this month</div>
+          </div>
+
+          {/* Unique customers FY vs MTD */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Active Customers', what: 'Number of unique customer parties that have received at least one sales invoice this month (MTD) vs. the full year (FY). MTD percentage shows what share of the annual customer base is active now.', source: 'BUSY DB', tables: ['Tran1', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0 · COUNT DISTINCT MasterCode1' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider">Active Customers</div>
+            <div className="flex items-end gap-2 mt-1">
+              <span className="text-[24px] font-extrabold num text-slate-800">{analytics.uniqueCustomersMTD}</span>
+              <span className="text-sm text-slate-500 mb-0.5">/ {analytics.uniqueCustomersFY} FY</span>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              {((analytics.uniqueCustomersMTD / (analytics.uniqueCustomersFY || 1)) * 100).toFixed(0)}% of FY base active this month
+            </div>
+          </div>
+
+          {/* Customer Concentration */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Top-5 Customer Revenue Concentration', what: 'Percentage of total FY revenue coming from the 5 highest-spending customers. High concentration (>60%) signals customer dependency risk — losing one party would have significant impact.', source: 'Derived', formula: 'Concentration = Sum(top 5 FY revenue) / Total FY Revenue × 100', tables: ['Tran1', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0 · TOP 5 by SUM(VchAmtBaseCur)' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider">Top-5 Revenue Concentration</div>
+            <div className="text-[24px] font-extrabold mt-1 num text-amber-600">{analytics.top5ConcentrationPct}%</div>
+            <div className="text-[11px] text-slate-500 mt-1">
+              {analytics.top5[0]?.name} leads at {analytics.top5[0]?.sharePct}%
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Analytics KPI row 2 — Supplier & Customer Dynamics */}
+      {analytics && analytics.activeSuppliersFY !== undefined && (
+        <div className="grid grid-cols-12 gap-5 mb-5">
+
+          {/* Active Suppliers */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Active Suppliers FY / MTD', what: 'Number of unique supplier parties that had at least one purchase invoice this financial year (FY) and this month (MTD). The top-5 concentration % shows if spend is dangerously concentrated in a few vendors.', source: 'BUSY DB', tables: ['Tran1', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=14, Cancelled=0 · COUNT DISTINCT MasterCode1' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider">Active Suppliers</div>
+            <div className="text-[28px] font-extrabold mt-1 num text-blue-700">{analytics.activeSuppliersFY}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">FY · <strong>{analytics.activeSuppliersMTD}</strong> this month</div>
+            <div className="mt-2 text-[10px] text-slate-400">
+              Top-5 hold <strong className="text-amber-600">{analytics.top5SupplierConcentrationPct}%</strong> of spend
+            </div>
+          </div>
+
+          {/* New vs Lapsed Customers */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Customer Flow MTD', what: 'New = customers whose very first-ever invoice was this month. Lapsed = customers active last month who have zero invoices so far this month. Net = New minus Lapsed — an early churn signal.', source: 'BUSY DB', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0 · MIN(Date) per party for New; EXCEPT query for Lapsed', note: 'Lapsed uses an EXCEPT between last-month buyers and this-month buyers.' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Customer Flow · MTD</div>
+            <div className="flex items-center gap-4">
+              <div>
+                <div className="text-[24px] font-extrabold text-green-600">{analytics.newCustomersMTD}</div>
+                <div className="text-[10px] text-slate-500">New</div>
+              </div>
+              <div className="h-8 w-px bg-blue-200"/>
+              <div>
+                <div className="text-[24px] font-extrabold text-red-500">{analytics.lapsedCustomersMTD}</div>
+                <div className="text-[10px] text-slate-500">Lapsed</div>
+              </div>
+            </div>
+            <div className="mt-2">
+              <DeltaBadge value={analytics.newCustomersMTD - analytics.lapsedCustomersMTD} unit=" net" />
+            </div>
+          </div>
+
+          {/* GST Net Position */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'GST Net Position MTD', what: 'GST Output (collected from customers) minus GST Input ITC (paid to suppliers). Positive = amount payable to government. Negative = ITC refund position.', source: 'Derived', formula: 'GST Net = Output MTD − Input ITC MTD', tables: ['VchGSTSumItemWise'], dbPath: 'BusyFY2026 > dbo > Tables > VchGSTSumItemWise', filter: 'Output: VchType=9 · Input: VchType=14, current month' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">GST Net Position · MTD</div>
+            <div className={`text-[22px] font-extrabold num mt-1 ${analytics.gstNetMTD > 0 ? 'text-red-600' : 'text-green-600'}`}>
+              {analytics.gstNetMTD > 0 ? '+' : ''}{fmtINR(Math.abs(analytics.gstNetMTD))}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5 mb-3">
+              {analytics.gstNetMTD > 0 ? 'payable to government' : 'ITC refund position'}
+            </div>
+            <BulletCompare
+              left={analytics.gstOutputMTD || 0}
+              right={analytics.gstInputMTD || 0}
+              leftLabel={`Output ${fmtINR(analytics.gstOutputMTD || 0)}`}
+              rightLabel={`ITC ${fmtINR(analytics.gstInputMTD || 0)}`}
+              leftColor="#DC2626"
+              rightColor="#16A34A"
+            />
+          </div>
+
+          {/* Invoice Frequency */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Invoice Frequency', what: 'Average number of invoices raised per customer over the full financial year. >3× = sticky repeat buyers. 2-3× = moderate repeat. <2× = largely transactional, one-off purchases.', source: 'Derived', formula: 'Frequency = FY Invoice Count / Unique Customers FY', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Invoice Frequency · FY</div>
+            <div className="text-[28px] font-extrabold num text-blue-700">{analytics.invoiceFrequency}×</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">avg invoices per customer</div>
+            <div className="mt-2">
+              <span style={{
+                padding: '2px 8px', borderRadius: 12, fontSize: 10, fontWeight: 700,
+                background: analytics.invoiceFrequency >= 3 ? '#F0FDF4' : analytics.invoiceFrequency >= 2 ? '#FEF3C7' : '#FEF2F2',
+                color: analytics.invoiceFrequency >= 3 ? '#15803D' : analytics.invoiceFrequency >= 2 ? '#92400E' : '#DC2626',
+              }}>
+                {analytics.invoiceFrequency >= 3 ? 'Sticky buyers' : analytics.invoiceFrequency >= 2 ? 'Moderate repeat' : 'Transactional'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Info banner */}
-      <div className="card p-5 mb-5" style={{ background: '#FFF7E6', border: '1px solid #FCD9C5' }}>
+      <div className="card p-5 mb-5" style={{ background: '#FFF7E6', border: '1px solid #FCD9C5', position: 'relative' }}>
+        <KpiInfoButton info={{ title: 'Sales → Ops Pipeline', what: 'Explains the auto-cascade: when a sale is logged in BUSY, it triggers stock deduction, contract balance update, labour cost posting, and syncs back to this dashboard — all without manual re-entry. This card is an informational note, not a data tile.', source: 'Mock data', note: 'Static explainer banner. No data source.' }} />
         <div className="flex items-start gap-3">
           <div className="w-9 h-9 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -112,7 +259,8 @@ export function Sales() {
       </div>
 
       {/* Contracts table — green-soft */}
-      <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
+      <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
+        <KpiInfoButton info={{ title: 'Sales Contracts Table', what: 'All customer contracts with locked-in price and density spread. Shows FY sales, MTD sales, invoice count, and outstanding balance per customer. Status (On Track / Overdue / Cleared) is derived from BUSY outstanding balance. Live data from BUSY DB.', source: 'BUSY DB', tables: ['Tran1', 'Master1', 'DailySum'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1\nBusyFY2026 > dbo > Tables > Master1', filter: 'VchType=9, Cancelled=0 · outstanding from DailySum/Master1 ParentGrp=116' }} />
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
             <div className="text-base font-bold">Sales contracts</div>
@@ -138,42 +286,30 @@ export function Sales() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Customer</th>
-                <th>Density</th>
-                <th className="num">Locked ₹</th>
-                <th className="num">Booked</th>
-                <th className="num">Dispatched</th>
-                <th className="num">Pending</th>
-                <th>Progress</th>
+                <th>Customer · BUSY</th>
+                <th className="num">FY Sales</th>
+                <th className="num">MTD Sales</th>
+                <th className="num">Invoices</th>
+                <th className="num">Outstanding</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {CONTRACTS.map(c => {
-                const pct = Math.round(c.dispatched / c.booked * 100);
-                const sc = c.status === 'on track' ? '#16A34A' : c.status === 'closed' ? '#475569' : '#DC2626';
-                const sb = c.status === 'on track' ? '#DCFCE7' : c.status === 'closed' ? '#F1F5F9' : '#FEE2E2';
-                const pending = c.booked - c.dispatched;
-                const isSelected = selectedContract?.cust === c.cust;
+              {(liveContracts && liveContracts.length > 0 ? liveContracts : CONTRACTS.map(c => ({
+                customer: c.cust, totalSales: 0, mtdSales: 0, invoiceCount: 0,
+                outstanding: 0, status: c.status as 'on track' | 'overdue' | 'cleared',
+              }))).map(c => {
+                const sc = c.status === 'on track' ? '#16A34A' : c.status === 'cleared' ? '#475569' : '#DC2626';
+                const sb = c.status === 'on track' ? '#DCFCE7' : c.status === 'cleared' ? '#F1F5F9' : '#FEE2E2';
                 return (
-                  <React.Fragment key={c.cust}>
-                    <tr
-                      style={{ cursor: 'pointer' }}
-                      className={isSelected ? 'bg-orange-50' : ''}
-                      onClick={() => setSelectedContract(isSelected ? null : c)}
-                    >
-                      <td className="font-semibold">{c.cust}</td>
-                      <td><span className="density-pill">{c.d}</span></td>
-                      <td className="num">₹ {c.lock}</td>
-                      <td className="num">{c.booked}</td>
-                      <td className="num">{c.dispatched}</td>
-                      <td className="num font-semibold" style={{ color: pending > 0 ? '#F47651' : '#475569' }}>
-                        {pending}
-                      </td>
-                      <td>
-                        <div className="progress" style={{ width: '80px' }}>
-                          <div style={{ width: `${pct}%` }}></div>
-                        </div>
+                  <React.Fragment key={c.customer}>
+                    <tr style={{ cursor: 'pointer' }}>
+                      <td className="font-semibold">{c.customer}</td>
+                      <td className="num">{fmtINR(c.totalSales)}</td>
+                      <td className="num">{fmtINR(c.mtdSales)}</td>
+                      <td className="num">{c.invoiceCount}</td>
+                      <td className="num font-semibold" style={{ color: c.outstanding > 0 ? '#F47651' : '#475569' }}>
+                        {c.outstanding > 0 ? fmtINR(c.outstanding) : '—'}
                       </td>
                       <td>
                         <span className="badge" style={{ background: sb, color: sc }}>
@@ -181,42 +317,6 @@ export function Sales() {
                         </span>
                       </td>
                     </tr>
-                    {isSelected && (
-                      <tr>
-                        <td colSpan={8} style={{ padding: 0 }}>
-                          <div className="px-4 py-4 bg-orange-50 border-t border-orange-100 flex flex-wrap gap-6">
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Contract progress</div>
-                              <div className="text-2xl font-extrabold num">{pct}%</div>
-                              <div className="text-xs text-slate-500">{c.dispatched} of {c.booked} drums dispatched</div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Pending dispatch</div>
-                              <div className="text-2xl font-extrabold num" style={{ color: pending > 0 ? '#F47651' : '#16A34A' }}>
-                                {pending} drums
-                              </div>
-                              <div className="text-xs text-slate-500">@ ₹{c.lock}/drum locked</div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Pending value</div>
-                              <div className="text-2xl font-extrabold num">₹ {(pending * c.lock).toLocaleString('en-IN')}</div>
-                              <div className="text-xs text-slate-500">estimated</div>
-                            </div>
-                            <div className="flex items-end gap-2 ml-auto">
-                              <button
-                                className="btn-ghost pill px-3 py-2 text-xs font-semibold"
-                                onClick={() => setSelectedContract(null)}
-                              >
-                                Close
-                              </button>
-                              <button className="btn-accent pill px-3 py-2 text-xs font-semibold">
-                                Log dispatch
-                              </button>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
                   </React.Fragment>
                 );
               })}

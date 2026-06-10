@@ -1,9 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  MOVEMENTS, ALERTS, MODULES, CUSTOMERS, TANKS, CP_LOCATIONS, CP_DENSITIES,
+  ALERTS, MODULES, TANKS, CP_LOCATIONS, CP_DENSITIES,
   CP_MATRIX, BATCH_GRID_PATTERN
 } from '../../data/mockData';
+import {
+  useOverviewKPIs, useTopCustomers, useRecentMovements, useAnalyticsKPIs, fmtINR,
+} from '../../hooks/useBusyData';
+import { DSOGauge, RingProgress, MiniBarChart, BulletCompare, DeltaBadge, OverdueAgingBar } from '../../components/charts/AnalyticsViz';
+import { KpiInfoButton } from '../../components/KpiInfoButton';
 
 const now = new Date();
 
@@ -43,6 +48,12 @@ export function Overview() {
   const [moveFilter, setMoveFilter] = useState('all');
   const [moveSearch, setMoveSearch] = useState('');
 
+  // Live BUSY DB data
+  const { data: kpis } = useOverviewKPIs();
+  const { data: topCustomers } = useTopCustomers(3);
+  const { data: busyMovements } = useRecentMovements(3);
+  const { data: analytics } = useAnalyticsKPIs();
+
   // Company + period filter dropdowns
   const [company, setCompany]         = useState('All');
   const [period, setPeriod]           = useState('FY 26-27 · Q1');
@@ -65,11 +76,15 @@ export function Overview() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filteredMoves = MOVEMENTS
+  // Use live BUSY movements (last 3 days) with fallback to empty
+  const movementsSource = busyMovements && busyMovements.length > 0 ? busyMovements : [];
+  const filteredMoves = movementsSource
     .filter(m => moveFilter === 'all' || m.type === moveFilter)
     .filter(m => (m.title + m.sub).toLowerCase().includes(moveSearch.toLowerCase()));
 
-  const topCustomers = CUSTOMERS.slice(0, 3);
+  const displayCustomers = topCustomers && topCustomers.length > 0
+    ? topCustomers.map(c => ({ name: c.name, mtdVal: fmtINR(c.mtdRevenue).replace('₹ ', '') }))
+    : [{ name: '—', mtdVal: '—' }];
 
   const sevColor: Record<string, string> = { red: '#DC2626', amber: '#D97706', low: '#475569' };
 
@@ -159,8 +174,9 @@ export function Overview() {
       {/* ── KPI Grid (12-col) ── */}
       <div className="grid grid-cols-12 gap-5 mb-5">
 
-        {/* All Companies card — green-soft */}
-        <div className="col-span-12 lg:col-span-4 card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
+        {/* All Companies card — blue (live BUSY data) */}
+        <div className="col-span-12 lg:col-span-4 card p-6" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'All Companies Summary', what: 'Top-level FY revenue, total debtors outstanding, and FY customer receipts consolidated across all 4 Suntek group companies: SCPL, SPPL, KG, Madan. Data is live from BUSY accounting.', source: 'BUSY DB', tables: ['Tran1', 'DailySum', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1\nBusyFY2026 > dbo > Tables > DailySum', filter: 'VchType=9 (Revenue) · VchType=16 (Receipts) · ParentGrp=116 (Debtors)' }} style={{ top: 48, right: 10 }} />
           <div className="flex items-start justify-between mb-3">
             <div className="text-[10px] font-bold tracking-[0.18em] text-slate-400 uppercase">
               SCPL · SPPL · KG · MADAN
@@ -194,7 +210,11 @@ export function Overview() {
               )}
             </div>
           </div>
-          <div className="text-slate-500 text-sm">Linked to all godowns and Busy</div>
+          <div className="text-slate-500 text-sm">
+            FY Revenue: <strong>{kpis ? fmtINR(kpis.fyRevenue) : '…'}</strong>
+            &nbsp;·&nbsp;
+            Debtors: <strong>{kpis ? fmtINR(kpis.debtorsOutstanding) : '…'}</strong>
+          </div>
           <div className="serif text-[40px] leading-[1] mt-2 mb-5">All companies</div>
           <div className="grid grid-cols-2 gap-3 mb-5">
             <button
@@ -218,8 +238,8 @@ export function Overview() {
           </div>
           <div className="flex items-end justify-between border-t border-slate-100 pt-4">
             <div>
-              <div className="text-xs text-slate-500">Today's labour cost</div>
-              <div className="text-xl font-bold mt-0.5 num">₹ 2,84,500</div>
+              <div className="text-xs text-slate-500">FY receipts from customers</div>
+              <div className="text-xl font-bold mt-0.5 num">{kpis ? fmtINR(kpis.receiptsMTD) : '…'}</div>
             </div>
             <button
               className="text-orange-600 font-medium text-xs flex items-center gap-1.5 hover:gap-2 transition-all"
@@ -235,37 +255,39 @@ export function Overview() {
 
         {/* Sales + Purchase stacked */}
         <div className="col-span-12 lg:col-span-3 grid gap-5">
-          {/* Sales — clickable card */}
+          {/* Sales — clickable card — blue (live BUSY data) */}
           <div
             className="card p-5 cursor-pointer hover:shadow-md transition-shadow"
-            style={{ background: 'var(--red-soft)', border: '1px solid #fecaca' }}
+            style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}
             onClick={() => navigate('/dashboard/sales')}
           >
+            <KpiInfoButton info={{ title: 'Sales MTD', what: 'Total sales invoiced to customers in the current calendar month, plus full FY revenue. Counts only non-cancelled sales vouchers.', source: 'BUSY DB', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0, current month / FY' }} />
             <div className="flex items-center justify-between mb-3">
-              <div className="w-9 h-9 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 19V5M5 12l7-7 7 7"/>
                 </svg>
               </div>
               <div className="chip text-xs">
-                <span>This week</span>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
-                  <path d="m6 9 6 6 6-6"/>
-                </svg>
+                <span>MTD · BUSY</span>
               </div>
             </div>
-            <div className="text-sm text-slate-500">Sales (Busy + system)</div>
-            <div className="text-[26px] font-extrabold text-orange-600 mt-1 leading-none num">₹ 23,19,480</div>
+            <div className="text-sm text-slate-500">Sales · FY {kpis ? fmtINR(kpis.fyRevenue) : ''}</div>
+            <div className="text-[26px] font-extrabold text-blue-600 mt-1 leading-none num">
+              {kpis ? fmtINR(kpis.salesMTD) : '…'}
+            </div>
             <div className="text-xs text-slate-500 mt-1.5">
-              <span className="text-green-600 font-semibold">↑ 12.4%</span> vs last week
+              <span className="text-slate-400">{kpis ? kpis.salesInvoiceCount + ' invoices FY' : ''}</span>
             </div>
           </div>
 
-          {/* Purchase — clickable card */}
+          {/* Purchase — clickable card — blue (live BUSY data) */}
           <div
             className="card p-5 cursor-pointer hover:shadow-md transition-shadow"
+            style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}
             onClick={() => navigate('/dashboard/purchase/far')}
           >
+            <KpiInfoButton info={{ title: 'Purchase MTD', what: 'Total purchase amount paid to suppliers in the current month. Includes raw material and marine insurance. All plant purchases consolidated.', source: 'BUSY DB', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=14, Cancelled=0, current month' }} />
             <div className="flex items-center justify-between mb-3">
               <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -276,8 +298,10 @@ export function Overview() {
                 incl. Marine ins.
               </span>
             </div>
-            <div className="text-sm text-slate-500">RM purchase paid</div>
-            <div className="text-[26px] font-extrabold mt-1 leading-none num">₹ 8,14,520</div>
+            <div className="text-sm text-slate-500">Purchase paid · MTD</div>
+            <div className="text-[26px] font-extrabold mt-1 leading-none num">
+              {kpis ? fmtINR(kpis.purchaseMTD) : '…'}
+            </div>
             <div className="text-orange-600 text-xs font-medium mt-2 flex items-center gap-1">
               All purchase modules
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
@@ -289,7 +313,8 @@ export function Overview() {
 
         {/* Lock + Progress stacked */}
         <div className="col-span-6 lg:col-span-2 grid gap-5">
-          <div className="card p-5 flex flex-col items-center justify-center text-center">
+          <div className="card p-5 flex flex-col items-center justify-center text-center" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'System Lock Status', what: 'Indicates whether 2-step verification is active for the Admin role. When locked, sensitive actions require a second authentication step. This is a UI status indicator only.', source: 'Mock data', note: 'Dummy — not connected to any auth system. Future: read from Supabase auth or role config.' }} />
             <div className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center mb-2">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="11" width="18" height="11" rx="2"/>
@@ -301,7 +326,8 @@ export function Overview() {
           </div>
 
           {/* Circular progress chart */}
-          <div className="card p-3 flex flex-col items-center justify-center">
+          <div className="card p-3 flex flex-col items-center justify-center" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Quarterly Revenue Target', what: 'Progress ring showing 36% of the quarterly revenue target achieved so far. This is a placeholder / dummy widget — the target value and actual progress are hardcoded and not yet pulled from any data source.', source: 'Mock data', note: 'Dummy — hardcoded 36%. Future: set quarterly target in config, compute from BUSY Tran1 revenue.' }} />
             <svg width="120" height="120" viewBox="0 0 120 120">
               <circle cx="60" cy="60" r="48" fill="none" stroke="#0F172A" strokeWidth="14"/>
               <circle
@@ -321,8 +347,10 @@ export function Overview() {
           {/* Active batches — clickable */}
           <div
             className="card p-5 cursor-pointer hover:shadow-md transition-shadow"
+            style={{ position: 'relative' }}
             onClick={() => navigate('/dashboard/batches')}
           >
+            <KpiInfoButton info={{ title: 'Active Batches', what: 'Count of CP manufacturing batches currently running across all 4 factory plants, with average elapsed time. The dot grid visualises batch status — orange = active, light = aging, grey = queued. Click to open full Batch Sheet.', source: 'Mock data', note: 'Dummy data from BATCH_GRID_PATTERN. Future: Supabase batches table, real-time status.' }} />
             <div className="flex items-center justify-between mb-2">
               <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -348,14 +376,15 @@ export function Overview() {
             </div>
           </div>
 
-          {/* Customer mini */}
-          <div className="card p-5">
+          {/* Customer mini — blue (live BUSY data) */}
+          <div className="card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Customer History Snapshot', what: 'Top 3 customers ranked by MTD sales revenue, pulled live from BUSY. Shows how key accounts are performing this month.', source: 'BUSY DB', tables: ['Tran1', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1\nBusyFY2026 > dbo > Tables > Master1', filter: 'VchType=9, Cancelled=0, TOP 3 by MTD revenue' }} />
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              Customer history snapshot
+              Customer history snapshot · BUSY
             </div>
-            <div className="text-sm text-slate-500 mt-2">Top 3 by MTD value</div>
+            <div className="text-sm text-slate-500 mt-2">Top 3 by MTD revenue</div>
             <div className="space-y-2 mt-2">
-              {topCustomers.map(c => (
+              {displayCustomers.map(c => (
                 <div
                   key={c.name}
                   className="flex items-center justify-between py-1 border-b border-slate-50 last:border-0 cursor-pointer hover:bg-slate-50 rounded-lg px-1 -mx-1 transition-colors"
@@ -376,20 +405,151 @@ export function Overview() {
         </div>
       </div>
 
+      {/* ── Analytics Insight Row ── */}
+      {analytics && (
+        <div className="grid grid-cols-12 gap-5 mb-5">
+
+          {/* DSO Gauge */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Days Sales Outstanding (DSO)', what: 'How many days on average it takes to collect payment after a sale is made. Lower is better — below 30d is best-in-class.', source: 'Derived', formula: 'DSO = (Debtors Outstanding / FY Revenue) × 365', tables: ['DailySum', 'Master1', 'Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > DailySum\nBusyFY2026 > dbo > Tables > Master1', note: 'Debtors = Master1 WHERE ParentGrp=116. Target < 30 days.' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Days Sales Outstanding</div>
+            <div className="flex items-center gap-3">
+              <DSOGauge value={analytics.dso} />
+              <div>
+                <div className="text-xs text-slate-500 leading-snug">Target&nbsp;&lt;&nbsp;30 d<br/>Turnover <strong className="text-slate-700">{analytics.debtorTurnover}×</strong></div>
+                <div className="mt-2">
+                  <DeltaBadge value={-(analytics.dso - 30)} unit=" d gap" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Gross Margin Ring */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Gross Margin %', what: 'Percentage of FY revenue remaining after subtracting total purchases. Measures operational profitability before overheads.', source: 'Derived', formula: 'Gross Margin = (FY Revenue − FY Purchase) / FY Revenue × 100', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9 (Sales), VchType=14 (Purchase)', note: 'Industry benchmark for chemical mfg is ~28%.' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Gross Margin · FY</div>
+            <div className="flex items-center gap-3">
+              <RingProgress pct={analytics.grossMarginPct} color="#16A34A" label="margin" />
+              <div>
+                <div className="text-[22px] font-extrabold text-green-700">{analytics.grossMarginPct}%</div>
+                <div className="text-xs text-slate-500 mt-1">Cost ratio <strong className="text-slate-700">{analytics.purchaseToCostPct}%</strong></div>
+                <div className="text-xs text-slate-500 mt-0.5">Industry avg ~28%</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Revenue Run Rate + bar sparkline */}
+          <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Annualised Revenue Run Rate', what: 'Projects full-year revenue based on the average of the last 2 complete months. Useful to spot whether the business is growing or contracting in real time.', source: 'Derived', formula: 'Run Rate = avg(last 2 complete months revenue) × 12', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0, GROUP BY month' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Annualised Revenue Run Rate</div>
+            <div className="text-[22px] font-extrabold text-slate-800 num">{fmtINR(analytics.revenueRunRate)}</div>
+            <div className="flex items-center gap-2 mt-1 mb-2">
+              <DeltaBadge value={analytics.momRevGrowthPct} />
+              <span className="text-[10px] text-slate-500">MoM rev growth</span>
+            </div>
+            <MiniBarChart
+              data={analytics.monthly.map(m => m.revenue)}
+              labels={analytics.monthly.map(m => m.label)}
+              color="#F47651"
+              height={36}
+            />
+          </div>
+
+          {/* Working Capital — debtors vs creditors */}
+          <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Net Working Capital', what: 'Total debtors outstanding minus total creditors outstanding. Positive = company holds more receivables than payables. Negative = creditors exceed debtors (short-term liquidity risk).', source: 'Derived', formula: 'NWC = Debtors Outstanding − Creditors Outstanding', tables: ['DailySum', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > DailySum\nBusyFY2026 > dbo > Tables > Master1', note: 'Debtors: ParentGrp=116 · Creditors: ParentGrp=117' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Net Working Capital</div>
+            <div className={`text-[22px] font-extrabold num ${analytics.netWorkingCapital >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+              {analytics.netWorkingCapital >= 0 ? '+' : ''}{fmtINR(analytics.netWorkingCapital)}
+            </div>
+            <div className="text-[10px] text-slate-500 mb-3 mt-0.5">Debtors minus Creditors</div>
+            <BulletCompare
+              left={kpis?.debtorsOutstanding ?? 0}
+              right={analytics.creditorsOutstanding}
+              leftLabel={`Debtors ${fmtINR(kpis?.debtorsOutstanding ?? 0)}`}
+              rightLabel={`Creditors ${fmtINR(analytics.creditorsOutstanding)}`}
+              leftColor="#F47651"
+              rightColor="#2563EB"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Analytics Insight Row 2 — Liquidity & Risk ── */}
+      {analytics && analytics.dpo !== undefined && (
+        <div className="grid grid-cols-12 gap-5 mb-5">
+
+          {/* DPO + Cash Conversion Cycle */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'DPO & Cash Conversion Cycle', what: 'DPO = how many days before the company pays its suppliers. CCC = DSO minus DPO — negative means cash-positive (collect before you pay). Very favourable for working capital.', source: 'Derived', formula: 'DPO = (Creditors Outstanding / FY Purchase) × 365\nCCC = DSO − DPO', tables: ['DailySum', 'Master1', 'Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > DailySum\nBusyFY2026 > dbo > Tables > Master1', note: 'Creditors: Master1 WHERE ParentGrp=117' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Payables Cycle · DPO</div>
+            <div className="text-[28px] font-extrabold num text-blue-700">{analytics.dpo} d</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Days Payable Outstanding</div>
+            <div className="mt-3 pt-3 border-t border-blue-100">
+              <div className="text-[10px] text-slate-400 uppercase tracking-wider">Cash Conversion Cycle</div>
+              <div className={`text-[18px] font-extrabold num mt-0.5 ${analytics.cashConversionCycle <= 0 ? 'text-green-700' : 'text-amber-600'}`}>
+                {analytics.cashConversionCycle > 0 ? '+' : ''}{analytics.cashConversionCycle} d
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {analytics.cashConversionCycle <= 0 ? '✓ Cash-positive cycle' : 'DSO − DPO · cash tied up'}
+              </div>
+            </div>
+          </div>
+
+          {/* Collection Ratio */}
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Collection Ratio MTD', what: 'Percentage of this month\'s sales revenue that has already been received as cash. 100% = all invoices collected. Lower % = paper revenue not yet turned into cash.', source: 'Derived', formula: 'Collection Ratio = MTD Receipts / MTD Sales × 100', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'Receipts: VchType=16 · Sales: VchType=9, current month' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Collection Ratio · MTD</div>
+            <div className="flex items-center gap-3">
+              <RingProgress pct={Math.min(analytics.collectionRatioMTD, 100)} color="#2563EB" label="collected" />
+              <div>
+                <div className="text-[22px] font-extrabold text-blue-700">{analytics.collectionRatioMTD.toFixed(0)}%</div>
+                <div className="text-[10px] text-slate-400 mt-1 leading-snug">
+                  Receipts vs<br/>invoiced MTD
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Overdue Aging */}
+          <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Overdue Aging Buckets', what: 'Outstanding bills broken into 4 age bands: 1-30 days, 31-60 days, 61-90 days, and 90+ days overdue. Older buckets have higher collection risk — chemicals businesses rarely recover >90d debt.', source: 'BUSY DB', tables: ['Tran3'], dbPath: 'BusyFY2026 > dbo > Tables > Tran3', filter: 'RecType=5, Status=1 (pending), DueDate < today', note: 'Status is a smallint: 1 = pending, not the string "pending".' }} />
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Overdue Aging</div>
+              <div className="text-[11px] font-bold text-red-600">
+                {fmtINR(analytics.overdueAging.d1_30 + analytics.overdueAging.d31_60 + analytics.overdueAging.d61_90 + analytics.overdueAging.d90plus)} total
+              </div>
+            </div>
+            <OverdueAgingBar aging={analytics.overdueAging} />
+          </div>
+
+          {/* Revenue vs Cash Gap */}
+          <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+            <KpiInfoButton info={{ title: 'Revenue vs Cash Received Gap', what: 'FY revenue invoiced minus FY receipts actually received. This gap is the total amount still owed across all customers — the difference between accounting revenue and real cash.', source: 'Derived', formula: 'Gap = FY Revenue − FY Receipts (VchType=16)', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'Revenue: VchType=9 · Receipts: VchType=16, Cancelled=0' }} />
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Revenue vs Cash Received · FY</div>
+            <div className="text-[22px] font-extrabold num text-amber-600">{fmtINR(analytics.revenueReceiptsGap)}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5 mb-3">uncollected gap · invoiced minus cash in</div>
+            <BulletCompare
+              left={analytics.fyReceipts}
+              right={analytics.revenueReceiptsGap}
+              leftLabel={`Received ${fmtINR(analytics.fyReceipts)}`}
+              rightLabel={`Gap ${fmtINR(analytics.revenueReceiptsGap)}`}
+              leftColor="#16A34A"
+              rightColor="#F59E0B"
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Movements + Modules + Alerts ── */}
       <div className="grid grid-cols-12 gap-5 mb-5">
 
         {/* Movements feed — green-soft */}
-        <div className="col-span-12 lg:col-span-5 card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
+        <div className="col-span-12 lg:col-span-5 card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
+          <KpiInfoButton info={{ title: "Today's Movements Feed", what: 'Real-time activity feed showing all sales, purchase, batch, stock, and maintenance events from the last 3 days. Each entry is logged once (in the relevant module) and automatically appears here. Click any row to navigate to the source module.', source: 'BUSY DB', tables: ['Tran1', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1\nBusyFY2026 > dbo > Tables > Master1', filter: 'VchType in (9,14,16,19), last 3 days', note: 'Batch, stock, and maintenance events currently from mock data.' }} />
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <div className="text-base font-bold">Today's movements</div>
-              <button
-                className="ml-1 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center"
-                onClick={() => toast('Logged once, visible everywhere')}
-              >
-                <span className="text-xs font-bold text-slate-500">i</span>
-              </button>
             </div>
           </div>
 
@@ -449,7 +609,8 @@ export function Overview() {
         </div>
 
         {/* Modules card */}
-        <div className="col-span-12 lg:col-span-4 card p-6">
+        <div className="col-span-12 lg:col-span-4 card p-6" style={{ position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Modules Directory', what: 'Quick navigation to all operational modules in the dashboard. The badge counts (e.g. "7 open") are mock data placeholders — future releases will pull live pending counts from the relevant Supabase or BUSY tables.', source: 'Mock data', note: 'Module list and pending counts are hardcoded in MODULES constant (mockData.ts).' }} />
           <div className="flex items-center justify-between mb-2">
             <div>
               <div className="text-base font-bold">Modules</div>
@@ -500,7 +661,8 @@ export function Overview() {
         </div>
 
         {/* Alerts card — items navigate to relevant section */}
-        <div className="col-span-12 lg:col-span-3 card p-6">
+        <div className="col-span-12 lg:col-span-3 card p-6" style={{ position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Open Alerts', what: 'Operational alerts across all modules — marine insurance balance, stock levels, batch timing, maintenance overdue. Colour-coded by severity (red=high, amber=medium, grey=low). Click any alert to navigate to the relevant module.', source: 'Mock data', note: 'Currently hardcoded in ALERTS constant (mockData.ts). Future: Supabase alerts table with real-time triggers.' }} />
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="text-base font-bold">Open alerts</div>
@@ -540,7 +702,8 @@ export function Overview() {
       {/* ── Stock snapshot ── */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         {/* CPM Matrix — green-soft */}
-        <div className="col-span-12 lg:col-span-7 card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
+        <div className="col-span-12 lg:col-span-7 card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'CPM Stock Matrix', what: 'Drums of CP (Chemical Product) on hand at each location, broken down by density grade. Cell shading intensity shows relative volume — darker = more stock. Click "Open Stock" for full inventory view.', source: 'Mock data', note: 'Dummy data from CP_MATRIX constant (mockData.ts). Future: Supabase stock_levels table, updated per batch completion and dispatch.' }} />
           <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
             <div>
               <div className="text-base font-bold">CPM Stock · density × location</div>
@@ -591,7 +754,8 @@ export function Overview() {
         </div>
 
         {/* Tank levels — each card navigates to Stock page */}
-        <div className="col-span-12 lg:col-span-5 card p-6">
+        <div className="col-span-12 lg:col-span-5 card p-6" style={{ position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Tank Levels', what: 'Current fill level of each raw material / output tank at port and factory locations. Red = low alert, orange = 30-70%, green = above 70%. Click any tank to open the full stock view.', source: 'Mock data', note: 'Dummy data from TANKS constant (mockData.ts). Future: real-time sensor feed or manual stock entry in Supabase.' }} />
           <div className="text-base font-bold">Tank levels · port + factory</div>
           <div className="text-xs text-slate-500 mb-4">Click any tank to open full stock view</div>
           <div className="space-y-2.5">

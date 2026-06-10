@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { STORE_REQ } from '../../../data/mockData';
+import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
+import { KpiInfoButton } from '../../../components/KpiInfoButton';
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -27,11 +29,29 @@ function ArrowRight() {
   );
 }
 
+const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
+const UNITS  = ['nos', 'kg', 'L', 'sets', 'MT', 'boxes'];
+
 export function StoreRequisitions() {
+  const [open, setOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
+
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  function handleSave() {
+    if (!form.item.trim() || !form.qty) return;
+    setSaved(true);
+    setTimeout(() => { setOpen(false); setSaved(false); setForm({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' }); }, 1600);
+  }
+
+  function handleClose() { setOpen(false); setSaved(false); }
+
   return (
     <>
       {/* Approval flow */}
-      <div className="card p-6 mb-5">
+      <div className="card p-6 mb-5" style={{ position: 'relative' }}>
+        <KpiInfoButton info={{ title: 'Store Req Approval Flow', what: 'The 4-stage sign-off chain for any store/material requisition. Stage 4 (purchase approval by Vijay Ji) only triggers when the item is not in stock. This is a manual process tracked in this dashboard.', source: 'Form entry', formLabel: 'Raise request form', formPath: '/dashboard/purchase/storereq', note: 'Dummy flow diagram — actual stage tracking is in the STORE_REQ list below.' }} />
         <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">Approval flow</div>
         <div className="flex items-center gap-3 flex-wrap">
           <div className="tile flex-1 min-w-[160px]">
@@ -57,13 +77,16 @@ export function StoreRequisitions() {
       </div>
 
       {/* Table — green-soft */}
-      <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
+      <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
+        <KpiInfoButton info={{ title: 'Open Store Requirements', what: 'All active store requisitions raised by plant/store keepers across SHD, Rehla, Ganjam, and HQ. Each row shows the approval stage, decision, and photo proof status. New requests are submitted via the "+ Raise request" button.', source: 'Mock data', formLabel: 'Raise request form', formPath: '/dashboard/purchase/storereq', note: 'Currently uses STORE_REQ mock data. Future: Supabase store_reqs table.' }} />
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
             <div className="text-base font-bold">Open store requirements</div>
             <div className="text-xs text-slate-500">Pic proof of need attached</div>
           </div>
-          <button className="btn-accent pill px-4 py-2 font-semibold text-sm">+ Raise request</button>
+          <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
+            + Raise request
+          </button>
         </div>
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
@@ -83,9 +106,7 @@ export function StoreRequisitions() {
                     <td>{r.plant}</td>
                     <td className="num">{r.qty}</td>
                     <td>
-                      <span className="badge" style={{ background: s.bg, color: s.color }}>
-                        {s.label}
-                      </span>
+                      <span className="badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>
                     </td>
                     <td className="text-slate-500">{r.wait}</td>
                     <td className="font-semibold">{r.decision}</td>
@@ -97,6 +118,74 @@ export function StoreRequisitions() {
           </table>
         </div>
       </div>
+
+      {/* Slide panel */}
+      <SlidePanel open={open} onClose={handleClose} title="Raise store request" subtitle="Store Req · Purchase">
+        <PanelField label="Item / material *">
+          <PanelInput placeholder="e.g. PP Ball, NC Thinner, O-ring kit" value={form.item} onChange={e => set('item', e.target.value)} />
+        </PanelField>
+
+        <PanelRow>
+          <PanelField label="Plant *">
+            <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
+              {PLANTS.map(p => <option key={p}>{p}</option>)}
+            </PanelSelect>
+          </PanelField>
+          <PanelField label="Priority">
+            <PanelSelect value={form.priority} onChange={e => set('priority', e.target.value)}>
+              <option>Normal</option>
+              <option>Urgent</option>
+            </PanelSelect>
+          </PanelField>
+        </PanelRow>
+
+        <PanelRow>
+          <PanelField label="Quantity *">
+            <PanelInput type="number" placeholder="e.g. 48" value={form.qty} onChange={e => set('qty', e.target.value)} />
+          </PanelField>
+          <PanelField label="Unit">
+            <PanelSelect value={form.unit} onChange={e => set('unit', e.target.value)}>
+              {UNITS.map(u => <option key={u}>{u}</option>)}
+            </PanelSelect>
+          </PanelField>
+        </PanelRow>
+
+        <PanelField label="Reason / notes">
+          <PanelTextarea placeholder="Why is this item needed? Any urgency context…" value={form.notes} onChange={e => set('notes', e.target.value)} />
+        </PanelField>
+
+        <PanelDivider />
+
+        <OcrUpload
+          label="Pic proof of need"
+          hint="Photo of broken part, empty shelf — AI reads item and quantity"
+          fields={[
+            { key: 'item',  label: 'Item identified', value: 'Mechanical seal — pump P-104' },
+            { key: 'qty',   label: 'Est. quantity',   value: '2' },
+            { key: 'notes', label: 'Condition note',  value: 'Worn seal causing leakage at flange joint' },
+          ]}
+          onExtracted={data => {
+            if (data.item)  set('item',  data.item);
+            if (data.qty)   set('qty',   data.qty);
+            if (data.notes) set('notes', data.notes);
+          }}
+        />
+
+        <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 16 }}>
+          Auto-assigned Req # · enters approval queue at Unit Head stage
+        </div>
+
+        <PanelFooter
+          saved={saved}
+          onCancel={handleClose}
+          onSave={handleSave}
+          saveLabel="Submit request"
+          successLabel="Request raised"
+          successSub="Entering Unit Head approval queue"
+          disabled={!form.item.trim() || !form.qty}
+          requiredHint="Fill in Item and Quantity to submit"
+        />
+      </SlidePanel>
     </>
   );
 }

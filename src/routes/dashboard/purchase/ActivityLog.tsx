@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ACTIVITY } from '../../../data/mockData';
+import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
+import { KpiInfoButton } from '../../../components/KpiInfoButton';
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -12,25 +14,46 @@ function PicBadge({ has }: { has: boolean }) {
   );
 }
 
+const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
+
 export function ActivityLog() {
+  const [open, setOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const today = new Date().toISOString().split('T')[0];
+  const [form, setForm] = useState({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' });
+
+  function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  function handleSave() {
+    if (!form.equipment.trim() || !form.doneBy.trim()) return;
+    setSaved(true);
+    setTimeout(() => { setOpen(false); setSaved(false); setForm({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' }); }, 1600);
+  }
+
+  function handleClose() { setOpen(false); setSaved(false); }
+
   return (
     <>
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5">
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Activities This Week', what: 'Count of non-regular maintenance activities logged this week across all plants — repairs, inspections, new installations, etc. Only unscheduled/ad-hoc activities; routine maintenance is separate.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Activities · this week</div>
           <div className="text-[28px] font-extrabold mt-1 num">14</div>
           <div className="text-[11px] text-slate-500 mt-1">non-maintenance</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Activities Verified', what: 'Count of logged activities that have been verified by a supervisor or manager. Verification confirms work was completed correctly and photo proof reviewed.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity', note: 'Verified by field set in ACTIVITY mock data.' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Verified</div>
           <div className="text-[28px] font-extrabold mt-1 num text-green-600">11</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Pending Verification', what: 'Activities logged but not yet verified. These need supervisor sign-off. High pending count = verification backlog.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Pending verification</div>
           <div className="text-[28px] font-extrabold mt-1 num text-amber-600">3</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+          <KpiInfoButton info={{ title: 'Photo Proof Coverage', what: 'Percentage of logged activities that have a photographic proof attached. Photos are saved to OneDrive. 100% is required for audit compliance.', source: 'Form entry', formLabel: '+ Log activity form (OCR upload)', formPath: '/dashboard/purchase/activity', note: 'Photo uploaded at the time of logging; stored in OneDrive, not Supabase.' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">With photo proof</div>
           <div className="text-[28px] font-extrabold mt-1 num">100%</div>
           <div className="text-[11px] text-slate-500 mt-1">all in OneDrive</div>
@@ -38,13 +61,16 @@ export function ActivityLog() {
       </div>
 
       {/* Table — amber-soft */}
-      <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
+      <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a', position: 'relative' }}>
+        <KpiInfoButton info={{ title: 'Activity Log Book', what: 'Record of all non-routine activities (repairs, inspections, installations) across all plants. Each entry requires: equipment name, who did it, date, plant, and photo proof. Photos are stored in OneDrive. New entries via "+ Log activity" form.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity', note: 'Data from ACTIVITY mock (mockData.ts). Future: Supabase activity_log table.' }} />
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
             <div className="text-base font-bold">Activity log book</div>
             <div className="text-xs text-slate-500">Anything outside the regular maintenance schedule · photos saved to OneDrive</div>
           </div>
-          <button className="btn-accent pill px-4 py-2 font-semibold text-sm">+ Log activity</button>
+          <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
+            + Log activity
+          </button>
         </div>
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
@@ -70,6 +96,75 @@ export function ActivityLog() {
           </table>
         </div>
       </div>
+
+      {/* Slide panel */}
+      <SlidePanel open={open} onClose={handleClose} title="Log an activity" subtitle="Activity Log · Purchase">
+        <PanelField label="Equipment / asset *">
+          <PanelInput placeholder="e.g. Cooling tower motor, Air compressor" value={form.equipment} onChange={e => set('equipment', e.target.value)} />
+        </PanelField>
+
+        <PanelRow>
+          <PanelField label="Activity type">
+            <PanelSelect value={form.type} onChange={e => set('type', e.target.value)}>
+              <option>Regular</option>
+              <option>Repair</option>
+              <option>Scrap</option>
+              <option>Inspection</option>
+              <option>Calibration</option>
+            </PanelSelect>
+          </PanelField>
+          <PanelField label="Plant">
+            <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
+              {PLANTS.map(p => <option key={p}>{p}</option>)}
+            </PanelSelect>
+          </PanelField>
+        </PanelRow>
+
+        <PanelRow>
+          <PanelField label="Date *">
+            <PanelInput type="date" value={form.date} onChange={e => set('date', e.target.value)} />
+          </PanelField>
+          <PanelField label="Done by *">
+            <PanelInput placeholder="Name of person" value={form.doneBy} onChange={e => set('doneBy', e.target.value)} />
+          </PanelField>
+        </PanelRow>
+
+        <PanelField label="Verified by">
+          <PanelInput placeholder="Supervisor / unit head (optional)" value={form.verifiedBy} onChange={e => set('verifiedBy', e.target.value)} />
+        </PanelField>
+
+        <PanelField label="Notes">
+          <PanelTextarea placeholder="What was done, parts replaced, observations…" value={form.notes} onChange={e => set('notes', e.target.value)} />
+        </PanelField>
+
+        <PanelDivider />
+
+        <OcrUpload
+          label="Pic proof"
+          hint="Photo of work done — AI reads equipment ID, work type, completion status"
+          fields={[
+            { key: 'equipment', label: 'Equipment ID',  value: 'Atlas Copco GA18 — SHD-AC-04' },
+            { key: 'type',      label: 'Activity type', value: 'Repair' },
+            { key: 'notes',     label: 'Work summary',  value: 'Replaced V-belt drive + tightened coupling bolts' },
+          ]}
+          onExtracted={data => {
+            if (data.equipment) set('equipment', data.equipment);
+            if (data.type)      set('type',      data.type);
+            if (data.notes)     set('notes',     data.notes);
+          }}
+        />
+
+        <PanelFooter
+          saved={saved}
+          onCancel={handleClose}
+          onSave={handleSave}
+          saveLabel="Save log entry"
+          successLabel="Activity logged"
+          successSub="Entry saved · photo uploading to OneDrive"
+          disabled={!form.equipment.trim() || !form.doneBy.trim()}
+          requiredHint="Fill in Equipment and Done by to save"
+        />
+      </SlidePanel>
     </>
   );
 }

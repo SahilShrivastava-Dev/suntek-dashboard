@@ -45,6 +45,22 @@ Open http://localhost:5173 — click **"Enter dashboard directly"** to bypass au
 3. Copy `.env.local` and fill in your project URL and anon key
 4. Run ETL scripts to import Excel data (see `etl/README.md`)
 
+### Edge Functions
+
+The **Purchase tab OCR** (Batch Logger → Purchase → Add Purchase) requires the `extract-purchase-sheet` edge function. It acts as a server-side proxy that sends invoice/challan photos to NVIDIA's Llama 3.2 Vision 90B API and returns structured JSON (invoice number, supplier GSTIN, line items, totals, etc.).
+
+**Deploy the function:**
+```bash
+supabase functions deploy extract-purchase-sheet --no-verify-jwt
+```
+
+**Set the NVIDIA API key secret** (required — function returns 500 without it):
+```bash
+supabase secrets set NVIDIA_API_KEY=nvapi-...
+```
+
+Get an NVIDIA API key at https://build.nvidia.com. Without these two steps the Purchase tab will show "Network error calling Edge Function".
+
 ## Key Business Algorithms (src/lib/algorithms/)
 
 - **geofencing.ts** — Haversine formula for Night Manager location validation

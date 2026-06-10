@@ -350,6 +350,11 @@
     background-size: 32px 32px;
   }
 
+  /* ── Spin (used by OCR loader in SlidePanel) ── */
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
   /* ── Page animation ── */
   @keyframes fadein {
     from { opacity: 0; transform: translateY(6px); }

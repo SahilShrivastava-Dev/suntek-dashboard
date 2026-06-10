@@ -220,24 +220,31 @@ export function CheckIn({ embedded = false }: CheckInProps) {
 
     // 2 ── Save record to Supabase ─────────────────────────────────────────
     setSubmitState('saving');
-    try {
-      const { error } = await (supabase.from('shift_logs') as any).insert({
-        photo_url:    finalPhotoUrl,
-        lat:          gpsData.lat,
-        lng:          gpsData.lng,
-        accuracy_m:   gpsData.accuracy,
-        is_on_site:   gpsData.isOnSite,
-        distance_m:   gpsData.distanceM,
-        plant_name:   PLANT_NAME,
-        note:         note.trim() || null,
-        checked_in_at: gpsData.timestamp.toISOString(),
-      });
-      if (error) throw error;
-    } catch (err: any) {
-      console.error('Supabase insert failed:', err);
-      // Don't block success — photo is safely in Cloudinary
-      // Admin can reconcile later
+    const { error: dbError } = await (supabase.from('shift_logs') as any).insert({
+      photo_url:  finalPhotoUrl,
+      lat:        gpsData.lat,
+      lng:        gpsData.lng,
+      is_on_site: gpsData.isOnSite,
+      distance_m: gpsData.distanceM,
+    });
+    if (dbError) {
+      console.error('Supabase insert failed:', dbError);
+      setSubmitError(`Check-in saved to cloud but database record failed: ${dbError.message}. Please screenshot this and report to admin.`);
+      setSubmitState('error');
+      return;
     }
+
+    // 3 ── Notify admin/unit-head ──────────────────────────────────────────
+    const zoneLabel = gpsData.isOnSite ? 'On-site ✓' : 'Out-of-zone ⚠️';
+    await (supabase.from('notifications') as any).insert({
+      target_roles: ['admin', 'unit_head'],
+      title: `Night Manager check-in: ${PLANT_NAME}`,
+      body: `${zoneLabel} · ${gpsData.lat.toFixed(4)}, ${gpsData.lng.toFixed(4)}`,
+      type: gpsData.isOnSite ? 'info' : 'urgent',
+      route: '/dashboard/night-manager',
+      actor_name: PLANT_NAME,
+      actor_role: 'night_manager',
+    }).then(() => {}).catch(() => {}); // non-blocking
 
     setSubmitState('done');
   }
@@ -273,6 +280,9 @@ export function CheckIn({ embedded = false }: CheckInProps) {
           <p className="text-sm text-slate-500 mb-1">
             {PLANT_NAME} · {gpsData?.timestamp.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
           </p>
+          <div style={{ margin: '10px 0 14px', padding: '10px 14px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, fontSize: 12, color: '#15803D', textAlign: 'left' }}>
+            ✓ Record saved to database · Admin notified
+          </div>
           {cloudinaryUrl && (
             <a
               href={cloudinaryUrl}

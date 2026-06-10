@@ -25,63 +25,28 @@ export function AuditLog() {
 
   async function loadData() {
     setLoading(true);
-    let dbLogs: AuditLogEntry[] = [];
-    
-    // 1. Fetch from Supabase batch_edit_logs
+
     try {
       const { data, error } = await (supabase
         .from('batch_edit_logs') as any)
         .select('*')
         .order('created_at', { ascending: false });
       if (!error && data) {
-        dbLogs = data;
+        setLogs(data);
       }
     } catch (e) {
       console.warn("Failed to fetch audit logs from Supabase", e);
     }
 
-    // 2. Fetch from Local Storage fallback
-    let localLogs: AuditLogEntry[] = [];
-    try {
-      const saved = localStorage.getItem('suntek_batch_edit_logs');
-      if (saved) {
-        localLogs = JSON.parse(saved);
-      }
-    } catch (e) {
-      console.error("Error reading local audit logs", e);
-    }
-
-    // 3. Fetch active sessions count
-    let sessionsCount = 0;
     try {
       const { count } = await (supabase
         .from('operator_sessions') as any)
         .select('*', { count: 'exact', head: true });
-      sessionsCount = count || 0;
+      setActiveSessionsCount(count || 0);
     } catch (e) {
-      // Local fallback count
-      const localSess = localStorage.getItem('suntek_logger_session');
-      sessionsCount = localSess ? 1 : 0;
-    }
-    setActiveSessionsCount(sessionsCount);
-
-    // 4. Combine and deduplicate
-    const combined = [...dbLogs, ...localLogs];
-    const unique: AuditLogEntry[] = [];
-    const seen = new Set<string>();
-
-    for (const log of combined) {
-      // Use id or timestamp+batch as deduplication key
-      const key = log.id || `${log.created_at}-${log.batch_no}-${log.action_type}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(log);
-      }
+      setActiveSessionsCount(0);
     }
 
-    // Sort by created_at descending
-    unique.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    setLogs(unique);
     setLoading(false);
   }
 

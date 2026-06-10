@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CONTRACTS } from '../../data/mockData';
+import { supabase } from '../../lib/supabase';
 import { useSalesMTD, useSalesContracts, useAnalyticsKPIs, fmtINR } from '../../hooks/useBusyData';
 import { DeltaBadge, BulletCompare } from '../../components/charts/AnalyticsViz';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
@@ -17,30 +17,28 @@ const DENSITY_OPTIONS = ['1300', '1400', '1450', '1500'];
 
 export function Sales() {
   const [showModal, setShowModal] = useState(false);
-  const [selectedContract, setSelectedContract] = useState<typeof CONTRACTS[0] | null>(null);
   const { activeProfile } = useRoleContext();
   const { data: salesKPIs } = useSalesMTD();
   const { data: liveContracts } = useSalesContracts();
   const { data: analytics } = useAnalyticsKPIs();
 
   function handleExport() {
+    const rows = (liveContracts || []).map(c => ({
+      customer: c.customer,
+      totalSales: c.totalSales,
+      mtdSales: c.mtdSales,
+      invoiceCount: c.invoiceCount,
+      outstanding: c.outstanding,
+      status: c.status,
+    }));
     exportToXlsx(
-      CONTRACTS.map(c => ({
-        customer: c.cust,
-        density: c.d,
-        lockedPrice: c.lock,
-        booked: c.booked,
-        dispatched: c.dispatched,
-        pending: c.booked - c.dispatched,
-        status: c.status,
-      })),
+      rows,
       [
         { header: 'Customer', key: 'customer' },
-        { header: 'Density', key: 'density' },
-        { header: 'Locked Price (₹)', key: 'lockedPrice' },
-        { header: 'Booked', key: 'booked' },
-        { header: 'Dispatched', key: 'dispatched' },
-        { header: 'Pending', key: 'pending' },
+        { header: 'FY Sales (₹)', key: 'totalSales' },
+        { header: 'MTD Sales (₹)', key: 'mtdSales' },
+        { header: 'Invoices', key: 'invoiceCount' },
+        { header: 'Outstanding (₹)', key: 'outstanding' },
         { header: 'Status', key: 'status' },
       ],
       'sales-contracts',
@@ -61,8 +59,35 @@ export function Sales() {
     setForm(f => ({ ...f, [field]: value }));
   }
 
-  function handleSaveContract() {
+  async function handleSaveContract() {
     if (!form.customer.trim() || !form.lockedPrice || !form.bookedQty) return;
+    // Find or create customer
+    let customerId: string | null = null;
+    const { data: existingCustomers } = await (supabase
+      .from('customers')
+      .select('id')
+      .ilike('name', form.customer.trim())
+      .limit(1) as any);
+    if (existingCustomers && existingCustomers.length > 0) {
+      customerId = existingCustomers[0].id;
+    } else {
+      const { data: newCust } = await (supabase
+        .from('customers')
+        .insert({ name: form.customer.trim(), outstanding: 0, is_active: true })
+        .select('id')
+        .single() as any);
+      if (newCust) customerId = newCust.id;
+    }
+    if (!customerId) { alert('Failed to find or create customer. Please try again.'); return; }
+    const { error } = await (supabase.from('sales_contracts').insert({
+      customer_id: customerId,
+      density: parseInt(form.density) || 1400,
+      locked_price: parseFloat(form.lockedPrice) || 0,
+      booked_qty: parseFloat(form.bookedQty) || 0,
+      dispatched_qty: 0,
+      status: 'open',
+    }) as any);
+    if (error) { alert(`Save failed: ${error.message}`); return; }
     setFormSaved(true);
     setTimeout(() => {
       setShowModal(false);
@@ -295,31 +320,29 @@ export function Sales() {
               </tr>
             </thead>
             <tbody>
-              {(liveContracts && liveContracts.length > 0 ? liveContracts : CONTRACTS.map(c => ({
-                customer: c.cust, totalSales: 0, mtdSales: 0, invoiceCount: 0,
-                outstanding: 0, status: c.status as 'on track' | 'overdue' | 'cleared',
-              }))).map(c => {
+              {(liveContracts || []).map(c => {
                 const sc = c.status === 'on track' ? '#16A34A' : c.status === 'cleared' ? '#475569' : '#DC2626';
                 const sb = c.status === 'on track' ? '#DCFCE7' : c.status === 'cleared' ? '#F1F5F9' : '#FEE2E2';
                 return (
-                  <React.Fragment key={c.customer}>
-                    <tr style={{ cursor: 'pointer' }}>
-                      <td className="font-semibold">{c.customer}</td>
-                      <td className="num">{fmtINR(c.totalSales)}</td>
-                      <td className="num">{fmtINR(c.mtdSales)}</td>
-                      <td className="num">{c.invoiceCount}</td>
-                      <td className="num font-semibold" style={{ color: c.outstanding > 0 ? '#F47651' : '#475569' }}>
-                        {c.outstanding > 0 ? fmtINR(c.outstanding) : '—'}
-                      </td>
-                      <td>
-                        <span className="badge" style={{ background: sb, color: sc }}>
-                          {c.status.toUpperCase()}
-                        </span>
-                      </td>
-                    </tr>
-                  </React.Fragment>
+                  <tr key={c.customer} style={{ cursor: 'pointer' }}>
+                    <td className="font-semibold">{c.customer}</td>
+                    <td className="num">{fmtINR(c.totalSales)}</td>
+                    <td className="num">{fmtINR(c.mtdSales)}</td>
+                    <td className="num">{c.invoiceCount}</td>
+                    <td className="num font-semibold" style={{ color: c.outstanding > 0 ? '#F47651' : '#475569' }}>
+                      {c.outstanding > 0 ? fmtINR(c.outstanding) : '—'}
+                    </td>
+                    <td>
+                      <span className="badge" style={{ background: sb, color: sc }}>
+                        {c.status.toUpperCase()}
+                      </span>
+                    </td>
+                  </tr>
                 );
               })}
+              {(!liveContracts || liveContracts.length === 0) && (
+                <tr><td colSpan={6} className="text-center text-slate-400 py-6 text-sm">No contracts — data loads from BUSY</td></tr>
+              )}
             </tbody>
           </table>
         </div>

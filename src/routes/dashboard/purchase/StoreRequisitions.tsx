@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { STORE_REQ } from '../../../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 
@@ -14,12 +14,6 @@ function PicBadge({ has }: { has: boolean }) {
   );
 }
 
-const STAGE_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  'unit-head':     { bg: '#FEF3C7', color: '#D97706', label: 'UNIT HEAD' },
-  'authorisation': { bg: '#FFEDE5', color: '#C5421F', label: 'AUTH BY VIJAY JI' },
-  'in-stock':      { bg: '#DCFCE7', color: '#16A34A', label: 'IN STOCK' },
-  'purchase':      { bg: '#DBEAFE', color: '#2563EB', label: 'PURCHASE' },
-};
 
 function ArrowRight() {
   return (
@@ -29,18 +23,77 @@ function ArrowRight() {
   );
 }
 
-const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
+const FALLBACK_PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 const UNITS  = ['nos', 'kg', 'L', 'sets', 'MT', 'boxes'];
+
+const URGENCY_MAP: Record<string, 'low' | 'medium' | 'high' | 'plant_stopper'> = {
+  Normal: 'medium',
+  Urgent: 'high',
+};
+
+const STATUS_STAGE: Record<string, { bg: string; color: string; label: string }> = {
+  pending:    { bg: '#FEF3C7', color: '#D97706', label: 'UNIT HEAD' },
+  approved:   { bg: '#DCFCE7', color: '#16A34A', label: 'APPROVED' },
+  dispatched: { bg: '#DBEAFE', color: '#2563EB', label: 'DISPATCHED' },
+  received:   { bg: '#DCFCE7', color: '#16A34A', label: 'RECEIVED' },
+  rejected:   { bg: '#FEE2E2', color: '#DC2626', label: 'REJECTED' },
+};
 
 export function StoreRequisitions() {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [items, setItems] = useState<any[]>([]);
+  const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
   const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
+
+  useEffect(() => {
+    async function load() {
+      const { data: plantsData } = await (supabase.from('plants').select('id, name') as any);
+      if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
+
+      const { data } = await (supabase
+        .from('store_requisitions')
+        .select('*, plants(name)')
+        .order('created_at', { ascending: false }) as any);
+      setItems(data || []);
+    }
+    load();
+  }, []);
+
+  const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : FALLBACK_PLANTS;
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.item.trim() || !form.qty) return;
+    const plant = dbPlants.find(p => p.name === form.plant);
+    const { data, error } = await (supabase.from('store_requisitions').insert({
+      item: form.item,
+      plant_id: plant?.id || null,
+      qty: parseFloat(form.qty) || 0,
+      urgency: URGENCY_MAP[form.priority] || 'medium',
+      status: 'pending',
+      remarks: [form.unit ? `Unit: ${form.unit}` : '', form.notes].filter(Boolean).join(' · ') || null,
+    }).select('*, plants(name)').single() as any);
+
+    if (error) {
+      alert(`Save failed: ${error.message}`);
+      return;
+    }
+    if (data) {
+      setItems(prev => [data, ...prev]);
+      // Notify admin and unit head
+      (supabase.from('notifications') as any).insert({
+        target_roles: ['admin', 'unit_head'],
+        title: `Store req raised: ${form.item}`,
+        body: `${form.plant} · Qty: ${form.qty} ${form.unit} · ${form.priority}`,
+        type: form.priority === 'Urgent' ? 'urgent' : 'info',
+        route: '/dashboard/purchase/storereq',
+        actor_name: form.plant,
+        actor_role: 'warehouse_manager',
+        read_by: [],
+      }).then(() => {}).catch(() => {});
+    }
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' }); }, 1600);
   }
@@ -97,23 +150,26 @@ export function StoreRequisitions() {
               </tr>
             </thead>
             <tbody>
-              {STORE_REQ.map(r => {
-                const s = STAGE_STYLE[r.stage] || STAGE_STYLE['unit-head'];
+              {items.map(r => {
+                const s = STATUS_STAGE[r.status] || STATUS_STAGE.pending;
                 return (
                   <tr key={r.id} style={{ cursor: 'pointer' }}>
-                    <td className="font-bold">{r.id}</td>
+                    <td className="font-bold text-xs text-slate-400">{r.id.slice(0, 8)}</td>
                     <td>{r.item}</td>
-                    <td>{r.plant}</td>
+                    <td>{r.plants?.name || '—'}</td>
                     <td className="num">{r.qty}</td>
                     <td>
                       <span className="badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>
                     </td>
-                    <td className="text-slate-500">{r.wait}</td>
-                    <td className="font-semibold">{r.decision}</td>
-                    <td><PicBadge has={r.pic} /></td>
+                    <td className="text-slate-500">{r.status === 'pending' ? 'Unit Head' : '—'}</td>
+                    <td className="font-semibold">{r.status}</td>
+                    <td><PicBadge has={!!r.photo_url} /></td>
                   </tr>
                 );
               })}
+              {items.length === 0 && (
+                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">No requisitions yet — raise the first one</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -128,7 +184,7 @@ export function StoreRequisitions() {
         <PanelRow>
           <PanelField label="Plant *">
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
-              {PLANTS.map(p => <option key={p}>{p}</option>)}
+              {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
           </PanelField>
           <PanelField label="Priority">

@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { ACTIVE_BATCHES } from '../../data/mockData';
 import { supabase } from '../../lib/supabase';
 import { Link } from 'react-router-dom';
 
@@ -34,31 +33,6 @@ export function BatchSheet() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [liveBatches, setLiveBatches] = useState<any[]>([]);
   const [updateFlash, setUpdateFlash] = useState<string | null>(null);
-
-  const [localMockBatches, setLocalMockBatches] = useState<any[]>([]);
-  const [mockReadings, setMockReadings] = useState<Record<string, any>>({});
-
-  useEffect(() => {
-    // Load local mock batches
-    const savedBatches = localStorage.getItem('suntek_mock_batches');
-    if (savedBatches) {
-      try {
-        setLocalMockBatches(JSON.parse(savedBatches));
-      } catch (e) {
-        console.error("Error loading local mock batches", e);
-      }
-    }
-
-    // Load mock readings
-    const savedReadings = localStorage.getItem('suntek_mock_readings');
-    if (savedReadings) {
-      try {
-        setMockReadings(JSON.parse(savedReadings));
-      } catch (e) {
-        console.error("Error loading mock readings", e);
-      }
-    }
-  }, []);
 
   useEffect(() => {
     async function load() {
@@ -127,52 +101,6 @@ export function BatchSheet() {
     };
   }, []);
 
-  const formattedLocalMockBatches = localMockBatches.map(b => ({
-    id: b.id,
-    num: Number(b.batch_no) || b.batch_no,
-    plant: 'Live Plant',
-    recipe: b.recipe || 'N/A',
-    target: b.target_qty || 1000,
-    current: 0,
-    drums: 0,
-    elapsed: 'Live',
-    op: 'Operator',
-    qc: 'pending',
-    editCount: 0
-  }));
-
-  // Merge and deduplicate by unique batch number (num), prioritizing live database entries
-  const combined = [...liveBatches, ...formattedLocalMockBatches, ...ACTIVE_BATCHES];
-  const uniqueBatches: any[] = [];
-  const seenNumbers = new Set<string>();
-
-  for (const b of combined) {
-    const key = String(b.num);
-    if (!seenNumbers.has(key)) {
-      seenNumbers.add(key);
-
-      // Check if it's a mock batch (meaning it's from ACTIVE_BATCHES or formattedLocalMockBatches, i.e., id starts with mock- or is not from liveBatches)
-      const isMock = !liveBatches.some(live => String(live.num) === key);
-      let updatedBatch = { ...b, editCount: b.editCount || 0 };
-
-      if (isMock) {
-        const mockKey = `mock-batch-${key}`;
-        const readingsList = mockReadings[mockKey] || [];
-        const initialSeedCount = String(key) === '1228' ? 5 : 0;
-        const newEdits = Math.max(0, readingsList.length - initialSeedCount);
-
-        if (newEdits > 0) {
-          updatedBatch.current = (b.current || 0) + newEdits * 10;
-          updatedBatch.drums = (b.drums || 0) + newEdits;
-          updatedBatch.editCount = 1 + newEdits;
-        }
-      }
-
-      uniqueBatches.push(updatedBatch);
-    }
-  }
-
-  const combinedBatches = uniqueBatches;
 
   return (
     <>
@@ -180,7 +108,7 @@ export function BatchSheet() {
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Active batches</div>
-          <div className="text-[28px] font-extrabold mt-1 num">7</div>
+          <div className="text-[28px] font-extrabold mt-1 num">{liveBatches.length}</div>
           <div className="text-[11px] text-slate-500 mt-1">across 4 factories</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
@@ -224,7 +152,7 @@ export function BatchSheet() {
               </tr>
             </thead>
             <tbody>
-              {combinedBatches.map(b => {
+              {liveBatches.map(b => {
                 const qc = QC_BADGE[b.qc] || QC_BADGE.awaiting;
                 const isFlashing = updateFlash === b.id;
                 return (

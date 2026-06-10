@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { MARINE_LEDGER } from '../../../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 
@@ -9,23 +9,52 @@ export function MarineInsurance() {
   const [panel, setPanel] = useState<Panel>(null);
   const [saved, setSaved] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState<'all' | 'top-up' | 'deduct'>('all');
+  const [ledger, setLedger] = useState<any[]>([]);
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({ amount: '', reference: '', date: today, mode: 'NEFT', notes: '' });
 
+  useEffect(() => {
+    async function load() {
+      const { data } = await (supabase
+        .from('marine_insurance')
+        .select('*')
+        .order('date', { ascending: false }) as any);
+      setLedger(data || []);
+    }
+    load();
+  }, []);
+
+  const currentBalance = ledger.length > 0 ? ledger[0].balance : 0;
+
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.amount.trim()) return;
+    const topUpAmt = parseFloat(form.amount) || 0;
+    const newBal = currentBalance + topUpAmt;
+    const { data, error } = await (supabase.from('marine_insurance').insert({
+      date: form.date,
+      type: 'top_up',
+      reference: form.reference || null,
+      amount: topUpAmt,
+      balance: newBal,
+    }).select('*').single() as any);
+
+    if (error) {
+      alert(`Save failed: ${error.message}`);
+      return;
+    }
+    if (data) setLedger(prev => [data, ...prev]);
     setSaved(true);
     setTimeout(() => { setPanel(null); setSaved(false); setForm({ amount: '', reference: '', date: today, mode: 'NEFT', notes: '' }); }, 1600);
   }
 
   function handleClose() { setPanel(null); setSaved(false); }
 
-  const newBalance = form.amount ? (9.50 + parseFloat(form.amount || '0')).toFixed(2) : null;
+  const newBalance = form.amount ? (currentBalance + parseFloat(form.amount || '0')).toFixed(2) : null;
 
-  const ledgerList = MARINE_LEDGER.filter(l =>
-    ledgerFilter === 'all' ? true : ledgerFilter === 'top-up' ? l.t === 'top-up' : l.t !== 'top-up'
+  const ledgerList = ledger.filter(l =>
+    ledgerFilter === 'all' ? true : ledgerFilter === 'top-up' ? l.type === 'top_up' : l.type === 'deduction'
   );
 
   return (
@@ -38,7 +67,7 @@ export function MarineInsurance() {
             <div>
               <div className="text-xs text-slate-500 mb-1">Marine insurance balance</div>
               <div className="text-3xl font-extrabold num">
-                ₹ 9.50 Cr{' '}
+                ₹ {currentBalance.toFixed(2)} Cr{' '}
                 <span className="text-base font-medium text-slate-400">/ ₹10 Cr</span>
               </div>
             </div>
@@ -93,22 +122,25 @@ export function MarineInsurance() {
               </tr>
             </thead>
             <tbody>
-              {MARINE_LEDGER.map((l, i) => (
-                <tr key={i}>
+              {ledger.map((l, i) => (
+                <tr key={l.id || i}>
                   <td className="text-slate-500">{l.date}</td>
                   <td>
-                    {l.t === 'top-up'
+                    {l.type === 'top_up'
                       ? <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A' }}>TOP-UP</span>
                       : <span className="badge" style={{ background: '#FEE2E2', color: '#DC2626' }}>DEDUCT</span>
                     }
                   </td>
-                  <td>{l.ref}</td>
-                  <td className="num font-semibold" style={{ color: l.amt > 0 ? '#16A34A' : '#DC2626' }}>
-                    {l.amt > 0 ? '+' : ''}₹ {Math.abs(l.amt)} L
+                  <td>{l.reference || '—'}</td>
+                  <td className="num font-semibold" style={{ color: l.amount > 0 ? '#16A34A' : '#DC2626' }}>
+                    {l.amount > 0 ? '+' : ''}₹ {Math.abs(l.amount)} Cr
                   </td>
-                  <td className="num">₹ {l.bal} Cr</td>
+                  <td className="num">₹ {l.balance} Cr</td>
                 </tr>
               ))}
+              {ledger.length === 0 && (
+                <tr><td colSpan={5} className="text-center text-slate-400 py-6 text-sm">No ledger entries yet</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -204,23 +236,26 @@ export function MarineInsurance() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {ledgerList.map((l, i) => (
-            <div key={i} style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid #F1F5F9', background: '#FAFAFA', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div key={l.id || i} style={{ padding: '12px 14px', borderRadius: 12, border: '1px solid #F1F5F9', background: '#FAFAFA', display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{
                 width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                background: l.t === 'top-up' ? '#16A34A' : '#DC2626',
+                background: l.type === 'top_up' ? '#16A34A' : '#DC2626',
               }} />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{l.ref}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{l.reference || '—'}</div>
                 <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{l.date}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: l.amt > 0 ? '#16A34A' : '#DC2626' }}>
-                  {l.amt > 0 ? '+' : ''}₹ {Math.abs(l.amt)} L
+                <div style={{ fontSize: 13, fontWeight: 700, color: l.amount > 0 ? '#16A34A' : '#DC2626' }}>
+                  {l.amount > 0 ? '+' : ''}₹ {Math.abs(l.amount)} Cr
                 </div>
-                <div style={{ fontSize: 11, color: '#94A3B8' }}>Bal ₹ {l.bal} Cr</div>
+                <div style={{ fontSize: 11, color: '#94A3B8' }}>Bal ₹ {l.balance} Cr</div>
               </div>
             </div>
           ))}
+          {ledgerList.length === 0 && (
+            <div style={{ textAlign: 'center', color: '#94A3B8', padding: '24px 0', fontSize: 13 }}>No entries</div>
+          )}
         </div>
       </SlidePanel>
     </>

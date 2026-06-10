@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { ACTIVE_BATCHES } from '../../data/mockData';
 import { BatchSheetUpload } from '../../components/BatchSheetUpload';
 import { BatchSheetReview } from '../../components/BatchSheetReview';
 import type { ExtractedBatchSheet } from '../../lib/nvidiaOcr';
@@ -16,13 +15,6 @@ interface ReadingRow {
   operator: string;
 }
 
-const SEED_READINGS: ReadingRow[] = [
-  { id: 1, time: '23/02 2:00 PM',   temp: '106 °C', cpGravity: '1140', cl2Press: '1.1 kg',  operator: 'Shyam'    },
-  { id: 2, time: '23/02 10:00 AM',  temp: '105 °C', cpGravity: '1070', cl2Press: '1.1 kg',  operator: 'Shyam'    },
-  { id: 3, time: '23/02 6:00 AM',   temp: '104 °C', cpGravity: '1010', cl2Press: '1.0 kg',  operator: 'Dev/Kul'  },
-  { id: 4, time: '23/02 2:00 AM',   temp: '102 °C', cpGravity: '960',  cl2Press: '900 g',   operator: 'Dev/Kul'  },
-  { id: 5, time: '22/02 10:00 PM',  temp: '101 °C', cpGravity: '910',  cl2Press: '800 g',   operator: 'Shyam'    },
-];
 
 interface BatchLoggerProps {
   /** When true, hides the standalone header so it can be embedded in the dashboard. */
@@ -58,30 +50,6 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
     fetchIp();
   }, []);
   
-  // Mock readings record, loaded from localStorage if exists
-  const [mockReadings, setMockReadings] = useState<Record<string, ReadingRow[]>>(() => {
-    const saved = localStorage.getItem('suntek_mock_readings');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Error loading mock readings from localStorage", e);
-      }
-    }
-    return {
-      'mock-batch-1228': SEED_READINGS,
-    };
-  });
-
-  // Local mock batches created during mock fallback
-  const [localMockBatches, setLocalMockBatches] = useState<any[]>(() => {
-    const saved = localStorage.getItem('suntek_mock_batches');
-    try {
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
-  });
 
   // Clear Operator Form Session State Cache
   async function clearSession() {
@@ -105,20 +73,6 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
       created_at: new Date().toISOString()
     };
 
-    // 1. Save to local storage list (as fallback and for local timeline view)
-    try {
-      const savedLogs = localStorage.getItem('suntek_batch_edit_logs');
-      const list = savedLogs ? JSON.parse(savedLogs) : [];
-      list.unshift({
-        id: `mock-log-${Date.now()}`,
-        ...logEntry
-      });
-      localStorage.setItem('suntek_batch_edit_logs', JSON.stringify(list));
-    } catch (e) {
-      console.error("Failed to write local audit log", e);
-    }
-
-    // 2. Save to Supabase
     try {
       await (supabase.from('batch_edit_logs') as any).insert(logEntry);
     } catch (e) {
@@ -208,15 +162,6 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
   const [newTargetQty, setNewTargetQty] = useState('1400');
   const [creating, setCreating] = useState(false);
 
-  // Save mock readings and batches to localStorage on any state changes
-  useEffect(() => {
-    localStorage.setItem('suntek_mock_readings', JSON.stringify(mockReadings));
-  }, [mockReadings]);
-
-  useEffect(() => {
-    localStorage.setItem('suntek_mock_batches', JSON.stringify(localMockBatches));
-  }, [localMockBatches]);
-
   // Auto-save form inputs to localStorage and Supabase on change
   useEffect(() => {
     // Avoid auto-saving when everything is completely empty (e.g. initial loads or after form resets)
@@ -265,33 +210,11 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
 
   async function loadBatches() {
     try {
-      let { data } = await (supabase.from('active_batches') as any).select('*').eq('status', 'active');
+      const { data } = await (supabase.from('active_batches') as any).select('*').eq('status', 'active');
       const dbBatches = data || [];
-      
-      const mockBatches = ACTIVE_BATCHES.map(b => ({
-        id: `mock-batch-${b.num}`,
-        batch_no: String(b.num),
-        recipe: String(b.recipe),
-        target_qty: b.target,
-        status: 'active'
-      }));
-
-      // Combine real database batches, custom created local mock batches, and static mock batches
-      const combined = [...dbBatches, ...localMockBatches, ...mockBatches];
-      const uniqueBatches: any[] = [];
-      const seen = new Set<string>();
-
-      for (const b of combined) {
-        const key = String(b.batch_no);
-        if (!seen.has(key)) {
-          seen.add(key);
-          uniqueBatches.push(b);
-        }
-      }
-
-      setBatches(uniqueBatches);
-      if (uniqueBatches.length > 0) {
-        setBatchId(uniqueBatches[0].id);
+      setBatches(dbBatches);
+      if (dbBatches.length > 0) {
+        setBatchId(dbBatches[0].id);
       }
     } catch (err) {
       console.error("Failed to load active batches:", err);
@@ -300,11 +223,12 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
 
   useEffect(() => {
     loadBatches();
-  }, [localMockBatches]);
+  }, []);
 
-  // Fetch unique database readings whenever the active batchId changes
+  // Fetch readings whenever the active batchId changes
   useEffect(() => {
-    if (!batchId || batchId.startsWith('mock-')) {
+    if (!batchId) {
+      setReadings([]);
       return;
     }
 
@@ -349,39 +273,6 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
       return;
     }
 
-    const isMock = batchId.startsWith('mock-');
-
-    if (isMock) {
-      // Simulate successful local save in-memory with secure local ISO timestamps
-      const now = new Date();
-      const timeStr = `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')} ${now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
-      const newRow: ReadingRow = {
-        id: `mock-reading-${Date.now()}`,
-        time: timeStr,
-        temp: temp ? `${temp} °C` : '—',
-        cpGravity: cpGravity ? String(cpGravity) : '—',
-        cl2Press: cl2Press ? `${cl2Press} kg` : '—',
-        operator: 'Local Shyam (Mock)',
-      };
-      
-      // Update readings and sync directly to localStorage via state hook
-      setMockReadings(prev => ({
-        ...prev,
-        [batchId]: [newRow, ...(prev[batchId] || [])]
-      }));
-
-      // Log the mock reading edit
-      writeAuditLog(batchLabel, 'log_reading', { temp, cp_gravity: cpGravity, cl2_pressure: cl2Press });
-
-      // Clear operator session draft cache
-      clearSession();
-
-      setTemp(''); setCpGravity(''); setCl2Press('');
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-      return;
-    }
-
     try {
       const { data, error } = await (supabase.from('batch_readings') as any).insert({
         batch_id: batchId,
@@ -407,6 +298,18 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
 
         // Log the real reading edit
         writeAuditLog(batchLabel, 'log_reading', { temp, cp_gravity: cpGravity, cl2_pressure: cl2Press });
+
+        // Notify admin that a reading was logged
+        (supabase.from('notifications') as any).insert({
+          target_roles: ['admin', 'unit_head'],
+          title: `Batch reading logged: ${batchLabel}`,
+          body: [temp ? `Temp: ${temp}°C` : null, cpGravity ? `CP: ${cpGravity}` : null, cl2Press ? `Cl₂: ${cl2Press} kg` : null].filter(Boolean).join(' · '),
+          type: 'info',
+          route: '/dashboard/batches',
+          actor_name: 'Factory Operator',
+          actor_role: 'factory_operator',
+          read_by: [],
+        }).then(() => {}).catch(() => {});
 
         // Clear operator session draft cache
         clearSession();
@@ -434,23 +337,26 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
         status: 'active'
       }).select().single();
 
-      let createdBatch = newBatch;
-
       if (error) {
-        console.warn("Could not insert active active batch on remote Supabase. Creating locally.", error);
-        createdBatch = {
-          id: `mock-batch-${Date.now()}`,
-          batch_no: newBatchNo,
-          recipe: newRecipe,
-          target_qty: parseFloat(newTargetQty) || 1400,
-          status: 'active'
-        };
-        setLocalMockBatches(prev => [createdBatch, ...prev]);
+        alert(`Batch creation failed: ${error.message}\nPlease check your connection and try again.`);
+        return;
       }
 
-      if (createdBatch) {
+      if (newBatch) {
         // Log the batch creation edit
         writeAuditLog(newBatchNo, 'create_batch', { recipe: newRecipe, target_qty: parseFloat(newTargetQty) || 1400 });
+
+        // Notify admin of new batch
+        (supabase.from('notifications') as any).insert({
+          target_roles: ['admin', 'unit_head'],
+          title: `New batch started: #${newBatch.batch_no}`,
+          body: `Recipe: ${newRecipe} · Target: ${newTargetQty}`,
+          type: 'info',
+          route: '/dashboard/batches',
+          actor_name: 'Factory Operator',
+          actor_role: 'factory_operator',
+          read_by: [],
+        }).then(() => {}).catch(() => {});
 
         // Clear operator session draft cache
         clearSession();
@@ -459,8 +365,8 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
         setNewRecipe('1400');
         setNewTargetQty('1400');
         setActiveTab('reading');
-        
-        alert(`✓ Batch #${createdBatch.batch_no} Started Successfully!`);
+
+        alert(`✓ Batch #${newBatch.batch_no} Started Successfully!`);
       }
     } catch (err) {
       console.error(err);
@@ -469,10 +375,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
     }
   }
 
-  // Determine what unique readings are visible for the currently active batch
-  const visibleReadings = batchId.startsWith('mock-')
-    ? (mockReadings[batchId] || [])
-    : readings;
+  const visibleReadings = readings;
 
   // Elapsed time from a hardcoded start (just display)
   const elapsed = '16h 45m';
@@ -848,7 +751,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                     key={r.id}
                     className="border-b transition-colors"
                     style={{
-                      background: i === 0 && !String(r.id).startsWith('mock-reading-') && typeof r.id === 'string' ? '#F0FDF4' : undefined,
+                      background: i === 0 ? '#F0FDF4' : undefined,
                     }}
                   >
                     <td className="p-4 font-mono text-xs text-slate-500">{r.time}</td>

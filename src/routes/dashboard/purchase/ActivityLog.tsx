@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ACTIVITY } from '../../../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 
@@ -19,13 +19,46 @@ const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 export function ActivityLog() {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' });
 
+  useEffect(() => {
+    async function load() {
+      const { data: plantsData } = await (supabase.from('plants').select('id, name') as any);
+      if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
+
+      const { data } = await (supabase
+        .from('activity_logs')
+        .select('*, plants(name)')
+        .order('date', { ascending: false }) as any);
+      setLogs(data || []);
+    }
+    load();
+  }, []);
+
+  const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
+
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.equipment.trim() || !form.doneBy.trim()) return;
+    const plant = dbPlants.find(p => p.name === form.plant);
+    const { data, error } = await (supabase.from('activity_logs').insert({
+      equipment: form.equipment,
+      type: form.type.toLowerCase(),
+      date: form.date,
+      done_by: form.doneBy,
+      verified_by: form.verifiedBy || null,
+      plant_id: plant?.id || null,
+    }).select('*, plants(name)').single() as any);
+
+    if (error) {
+      alert(`Save failed: ${error.message}`);
+      return;
+    }
+    if (data) setLogs(prev => [data, ...prev]);
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' }); }, 1600);
   }
@@ -38,25 +71,26 @@ export function ActivityLog() {
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Activities This Week', what: 'Count of non-regular maintenance activities logged this week across all plants — repairs, inspections, new installations, etc. Only unscheduled/ad-hoc activities; routine maintenance is separate.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Activities · this week</div>
-          <div className="text-[28px] font-extrabold mt-1 num">14</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Activities · total</div>
+          <div className="text-[28px] font-extrabold mt-1 num">{logs.length}</div>
           <div className="text-[11px] text-slate-500 mt-1">non-maintenance</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Activities Verified', what: 'Count of logged activities that have been verified by a supervisor or manager. Verification confirms work was completed correctly and photo proof reviewed.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity', note: 'Verified by field set in ACTIVITY mock data.' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Verified</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-green-600">11</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-green-600">{logs.filter(l => l.verified_by).length}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Pending Verification', what: 'Activities logged but not yet verified. These need supervisor sign-off. High pending count = verification backlog.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Pending verification</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">3</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{logs.filter(l => !l.verified_by).length}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Photo Proof Coverage', what: 'Percentage of logged activities that have a photographic proof attached. Photos are saved to OneDrive. 100% is required for audit compliance.', source: 'Form entry', formLabel: '+ Log activity form (OCR upload)', formPath: '/dashboard/purchase/activity', note: 'Photo uploaded at the time of logging; stored in OneDrive, not Supabase.' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">With photo proof</div>
-          <div className="text-[28px] font-extrabold mt-1 num">100%</div>
-          <div className="text-[11px] text-slate-500 mt-1">all in OneDrive</div>
+          <div className="text-[28px] font-extrabold mt-1 num">
+            {logs.length > 0 ? Math.round((logs.filter(l => l.photo_url).length / logs.length) * 100) : 0}%
+          </div>
         </div>
       </div>
 
@@ -81,17 +115,20 @@ export function ActivityLog() {
               </tr>
             </thead>
             <tbody>
-              {ACTIVITY.map((a, i) => (
-                <tr key={i} style={{ cursor: 'pointer' }}>
-                  <td className="font-semibold">{a.eq}</td>
+              {logs.map((a, i) => (
+                <tr key={a.id || i} style={{ cursor: 'pointer' }}>
+                  <td className="font-semibold">{a.equipment || '—'}</td>
                   <td className="text-slate-500">{a.type}</td>
                   <td className="text-slate-500 text-xs">{a.date}</td>
-                  <td>{a.by}</td>
-                  <td className="text-slate-500">{a.ver}</td>
-                  <td>{a.plant}</td>
-                  <td><PicBadge has={a.pic} /></td>
+                  <td>{a.done_by || '—'}</td>
+                  <td className="text-slate-500">{a.verified_by || '—'}</td>
+                  <td>{a.plants?.name || '—'}</td>
+                  <td><PicBadge has={!!a.photo_url} /></td>
                 </tr>
               ))}
+              {logs.length === 0 && (
+                <tr><td colSpan={7} className="text-center text-slate-400 py-6 text-sm">No activity logs yet — add the first one</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -115,7 +152,7 @@ export function ActivityLog() {
           </PanelField>
           <PanelField label="Plant">
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
-              {PLANTS.map(p => <option key={p}>{p}</option>)}
+              {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
           </PanelField>
         </PanelRow>

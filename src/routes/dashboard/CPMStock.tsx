@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { TANKS, CP_LOCATIONS, CP_DENSITIES, CP_MATRIX, STORE_ITEMS } from '../../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
+import { TANKS, CP_LOCATIONS, CP_DENSITIES, CP_MATRIX } from '../../data/mockData';
 
 interface BulkRow {
   item: string;
@@ -15,9 +16,27 @@ export function CPMStock() {
     { item: '', adjustment: '', direction: 'in', note: '' },
   ]);
   const [bulkSaved, setBulkSaved] = useState(false);
+  const [stockItems, setStockItems] = useState<any[]>([]);
+  const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
+  const [bulkPlant, setBulkPlant] = useState('');
 
-  const filteredItems = STORE_ITEMS.filter(i =>
-    !storeSearch || i.item.toLowerCase().includes(storeSearch.toLowerCase())
+  useEffect(() => {
+    async function load() {
+      const [{ data: plantsData }, { data: stockData }] = await Promise.all([
+        (supabase.from('plants').select('id, name') as any),
+        (supabase.from('stock_levels').select('*, plants(name)').order('updated_at', { ascending: false }) as any),
+      ]);
+      if (plantsData && plantsData.length > 0) {
+        setDbPlants(plantsData);
+        setBulkPlant(plantsData[0].id);
+      }
+      setStockItems(stockData || []);
+    }
+    load();
+  }, []);
+
+  const filteredItems = stockItems.filter(i =>
+    !storeSearch || (i.product || '').toLowerCase().includes(storeSearch.toLowerCase())
   );
 
   function addBulkRow() {
@@ -32,9 +51,23 @@ export function CPMStock() {
     setBulkRows(r => r.map((row, i) => i === idx ? { ...row, [field]: value } : row));
   }
 
-  function handleBulkSave() {
+  async function handleBulkSave() {
     const filled = bulkRows.filter(r => r.item.trim() && r.adjustment);
     if (filled.length === 0) return;
+    const today = new Date().toISOString().split('T')[0];
+    const plantId = bulkPlant || dbPlants[0]?.id;
+    if (!plantId) { alert('No plant selected. Please select a plant.'); return; }
+    const inserts = filled.map(r => ({
+      product: r.item,
+      quantity: parseFloat(r.adjustment) * (r.direction === 'out' ? -1 : 1),
+      density: 0,
+      plant_id: plantId,
+      date: today,
+    }));
+    const { error } = await (supabase.from('stock_levels').insert(inserts) as any);
+    if (error) { alert(`Save failed: ${error.message}`); return; }
+    const { data } = await (supabase.from('stock_levels').select('*, plants(name)').order('updated_at', { ascending: false }) as any);
+    setStockItems(data || []);
     setBulkSaved(true);
     setTimeout(() => {
       setShowBulkModal(false);
@@ -54,18 +87,23 @@ export function CPMStock() {
       {/* KPIs */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">CP drums total</div>
-          <div className="text-[28px] font-extrabold mt-1 num">1 450</div>
-          <div className="text-[11px] text-slate-500 mt-1">across godowns</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total stock records</div>
+          <div className="text-[28px] font-extrabold mt-1 num">{stockItems.length}</div>
+          <div className="text-[11px] text-slate-500 mt-1">across all plants</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">HCL stock</div>
-          <div className="text-[28px] font-extrabold mt-1 num">480 MT</div>
-          <div className="text-[11px] text-slate-500 mt-1">at gravities 1.05-2.4</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total quantity</div>
+          <div className="text-[28px] font-extrabold mt-1 num">
+            {stockItems.reduce((s, i) => s + (i.quantity || 0), 0).toFixed(0)}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">units on record</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Below threshold</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-red-600">12 SKUs</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Products tracked</div>
+          <div className="text-[28px] font-extrabold mt-1 num">
+            {new Set(stockItems.map(i => i.product)).size}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">unique products</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Tank capacity</div>
@@ -177,34 +215,23 @@ export function CPMStock() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Item</th><th>Location</th><th className="num">Opening</th>
-                <th className="num">In</th><th className="num">Out</th>
-                <th className="num">Closing</th><th className="num">Threshold</th><th>Status</th>
+                <th>Product</th><th>Plant</th><th className="num">Density</th>
+                <th className="num">Qty</th><th>Date</th>
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map(i => {
-                const breach = i.cl < i.th;
-                return (
-                  <tr key={i.item} style={{ cursor: 'pointer' }}>
-                    <td className="font-semibold">{i.item}</td>
-                    <td>{i.loc}</td>
-                    <td className="num text-slate-500">{i.op}</td>
-                    <td className="num text-green-600">+{i.inn}</td>
-                    <td className="num text-red-600">-{i.out}</td>
-                    <td className="num font-bold">
-                      {i.cl} <span className="text-[10px] text-slate-400">{i.unit}</span>
-                    </td>
-                    <td className="num text-slate-500">{i.th}</td>
-                    <td>
-                      {breach
-                        ? <span className="badge" style={{ background: '#FEE2E2', color: '#DC2626' }}>BELOW</span>
-                        : <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A' }}>OK</span>
-                      }
-                    </td>
-                  </tr>
-                );
-              })}
+              {filteredItems.map(i => (
+                <tr key={i.id} style={{ cursor: 'pointer' }}>
+                  <td className="font-semibold">{i.product}</td>
+                  <td>{i.plants?.name || '—'}</td>
+                  <td className="num">{i.density || '—'}</td>
+                  <td className="num font-bold">{i.quantity}</td>
+                  <td className="text-slate-500 text-xs">{i.date}</td>
+                </tr>
+              ))}
+              {filteredItems.length === 0 && (
+                <tr><td colSpan={5} className="text-center text-slate-400 py-6 text-sm">No stock records yet — add via bulk update</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -234,6 +261,19 @@ export function CPMStock() {
                 </svg>
               </button>
             </div>
+
+            {dbPlants.length > 0 && (
+              <div className="mb-4">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Plant</label>
+                <select
+                  value={bulkPlant}
+                  onChange={e => setBulkPlant(e.target.value)}
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 transition w-full"
+                >
+                  {dbPlants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            )}
 
             {bulkSaved ? (
               <div className="text-center py-8">

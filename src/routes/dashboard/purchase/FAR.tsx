@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FAR as FAR_DATA } from '../../../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 
@@ -23,6 +23,8 @@ const ACCOUNT_HEADS = ['Plant & Machinery', 'Electrical Equipment', 'Vehicles', 
 export function FAR() {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [assets, setAssets] = useState<any[]>([]);
+  const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({
     mark: '', model: '', capacity: '', origin: 'India',
@@ -30,6 +32,22 @@ export function FAR() {
     value: '', invoice: '', purchaseDate: today,
     account: 'Plant & Machinery', plant: 'SHD',
   });
+
+  useEffect(() => {
+    async function load() {
+      const { data: plantsData } = await (supabase.from('plants').select('id, name') as any);
+      if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
+
+      const { data } = await (supabase
+        .from('fixed_assets')
+        .select('*, plants(name)')
+        .order('created_at', { ascending: false }) as any);
+      setAssets(data || []);
+    }
+    load();
+  }, []);
+
+  const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -44,8 +62,28 @@ export function FAR() {
     }));
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.mark.trim() || !form.model.trim()) return;
+    const plant = dbPlants.find(p => p.name === form.plant);
+    const { data, error } = await (supabase.from('fixed_assets').insert({
+      plant_id: plant?.id || dbPlants[0]?.id || '',
+      name: form.mark,
+      identification_mark: form.mark,
+      model: form.model || null,
+      capacity: form.capacity || null,
+      origin: form.origin || null,
+      year: parseInt(form.year) || null,
+      value: form.value ? parseFloat(form.value.replace(/[^0-9.]/g, '')) : null,
+      invoice_no: form.invoice || null,
+      purchase_date: form.purchaseDate || null,
+      account_head: form.account || null,
+    }).select('*, plants(name)').single() as any);
+
+    if (error) {
+      alert(`Save failed: ${error.message}`);
+      return;
+    }
+    if (data) setAssets(prev => [data, ...prev]);
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ mark: '', model: '', capacity: '', origin: 'India', year: new Date().getFullYear().toString(), value: '', invoice: '', purchaseDate: today, account: 'Plant & Machinery', plant: 'SHD' }); }, 1600);
   }
@@ -59,7 +97,7 @@ export function FAR() {
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Total Fixed Assets', what: 'Count of all capitalised fixed assets registered across all 4 factory plants (SHD, Rehla, Ganjam, HQ). Each asset is named and tracked in the FAR.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Stored in FAR_DATA mock; future target: Supabase fixed_assets table.' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total fixed assets</div>
-          <div className="text-[28px] font-extrabold mt-1 num">42</div>
+          <div className="text-[28px] font-extrabold mt-1 num">{assets.length}</div>
           <div className="text-[11px] text-slate-500 mt-1">across 4 factories</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
@@ -112,21 +150,24 @@ export function FAR() {
               </tr>
             </thead>
             <tbody>
-              {FAR_DATA.map(f => (
+              {assets.map((f, i) => (
                 <tr key={f.id} style={{ cursor: 'pointer' }}>
-                  <td className="num">{f.sl}</td>
-                  <td className="font-semibold text-slate-700">{f.id}</td>
-                  <td>{f.model}</td>
-                  <td className="num">{f.cap}</td>
-                  <td>{f.origin}</td>
-                  <td className="num">{f.year}</td>
-                  <td className="num font-semibold">{f.val}</td>
-                  <td className="text-slate-500">{f.inv}</td>
-                  <td className="text-slate-500">{f.dt}</td>
-                  <td className="text-slate-500">{f.acc}</td>
-                  <td><PicBadge has={f.pic} /></td>
+                  <td className="num">{i + 1}</td>
+                  <td className="font-semibold text-slate-700">{f.identification_mark || f.name}</td>
+                  <td>{f.model || '—'}</td>
+                  <td className="num">{f.capacity || '—'}</td>
+                  <td>{f.origin || '—'}</td>
+                  <td className="num">{f.year || '—'}</td>
+                  <td className="num font-semibold">{f.value ? `₹ ${Number(f.value).toLocaleString('en-IN')}` : '—'}</td>
+                  <td className="text-slate-500">{f.invoice_no || '—'}</td>
+                  <td className="text-slate-500">{f.purchase_date || '—'}</td>
+                  <td className="text-slate-500">{f.account_head || '—'}</td>
+                  <td><PicBadge has={!!f.photo_url} /></td>
                 </tr>
               ))}
+              {assets.length === 0 && (
+                <tr><td colSpan={11} className="text-center text-slate-400 py-6 text-sm">No assets registered yet — add the first one</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -174,7 +215,7 @@ export function FAR() {
           </PanelField>
           <PanelField label="Plant">
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
-              {PLANTS.map(p => <option key={p}>{p}</option>)}
+              {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
           </PanelField>
         </PanelRow>

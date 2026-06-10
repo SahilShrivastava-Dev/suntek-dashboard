@@ -1,11 +1,23 @@
-import React, { useState } from 'react';
-import { LABOUR_PLANTS } from '../../../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelTextarea, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
 
 export function Labour() {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [costs, setCosts] = useState<any[]>([]);
   const [form, setForm] = useState({ baseRate: '1487', targetRate: '1450', overhead: '12', transport: '85', reason: '' });
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await (supabase
+        .from('labour_costs')
+        .select('*, plants(name)')
+        .order('date', { ascending: false }) as any);
+      setCosts(data || []);
+    }
+    load();
+  }, []);
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -16,27 +28,37 @@ export function Labour() {
 
   function handleClose() { setOpen(false); setSaved(false); }
 
+  const totalCost = costs.reduce((s, c) => s + (c.computed_cost || 0), 0);
+  const flaggedCount = costs.filter(c => c.is_flagged).length;
+
   return (
     <>
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Today's labour cost</div>
-          <div className="text-[28px] font-extrabold mt-1 num">₹ 2,84,500</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total labour cost</div>
+          <div className="text-[28px] font-extrabold mt-1 num">
+            {totalCost > 0 ? `₹ ${totalCost.toLocaleString('en-IN')}` : '—'}
+          </div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">MTD</div>
-          <div className="text-[28px] font-extrabold mt-1 num">₹ 71,12,400</div>
-          <div className="text-[11px] text-amber-600 mt-1">↑ 3.2% vs Mar</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Records</div>
+          <div className="text-[28px] font-extrabold mt-1 num">{costs.length}</div>
+          <div className="text-[11px] text-slate-500 mt-1">log entries</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Per-MT cost</div>
-          <div className="text-[28px] font-extrabold mt-1 num">₹ 1 487</div>
-          <div className="text-[11px] text-slate-500 mt-1">target ₹ 1 450</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Avg per-MT cost</div>
+          <div className="text-[28px] font-extrabold mt-1 num">
+            {costs.length > 0
+              ? `₹ ${Math.round(costs.reduce((s, c) => s + (c.per_mt_cost || 0), 0) / costs.length).toLocaleString('en-IN')}`
+              : '—'}
+          </div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Variance flagged</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">2 plants</div>
+          <div className={`text-[28px] font-extrabold mt-1 num ${flaggedCount > 0 ? 'text-amber-600' : ''}`}>
+            {flaggedCount} plant{flaggedCount !== 1 ? 's' : ''}
+          </div>
         </div>
       </div>
 
@@ -44,7 +66,7 @@ export function Labour() {
       <div className="card p-6 mb-5" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="text-base font-bold">Per-plant labour · today</div>
+            <div className="text-base font-bold">Labour cost log</div>
             <div className="text-xs text-slate-500">
               Auto-derived from purchase qty × sales qty (sales feeds it automatically)
             </div>
@@ -58,33 +80,41 @@ export function Labour() {
             <thead>
               <tr>
                 <th>Plant</th>
+                <th>Date</th>
                 <th className="num">Purchase qty</th>
                 <th className="num">Sales qty</th>
-                <th className="num">Batches</th>
                 <th className="num">Computed cost</th>
+                <th className="num">Target cost</th>
                 <th className="num">Per MT</th>
-                <th>Vs target</th>
+                <th>Variance</th>
+                <th>Flag</th>
               </tr>
             </thead>
             <tbody>
-              {LABOUR_PLANTS.map(p => {
-                const tColor = p.target > 0 ? '#D97706' : p.target < 0 ? '#16A34A' : '#475569';
-                const tBg    = p.target > 0 ? '#FEF3C7' : p.target < 0 ? '#DCFCE7' : '#F1F5F9';
-                const tLbl   = p.target > 0 ? `+${p.target}% over` : p.target < 0 ? `${Math.abs(p.target)}% under` : 'on target';
+              {costs.map(c => {
+                const vPct = c.variance_pct || 0;
+                const tColor = vPct > 0 ? '#D97706' : vPct < 0 ? '#16A34A' : '#475569';
+                const tBg    = vPct > 0 ? '#FEF3C7' : vPct < 0 ? '#DCFCE7' : '#F1F5F9';
+                const tLbl   = vPct > 0 ? `+${vPct.toFixed(1)}% over` : vPct < 0 ? `${Math.abs(vPct).toFixed(1)}% under` : 'on target';
                 return (
-                  <tr key={p.plant} style={{ cursor: 'pointer' }}>
-                    <td className="font-semibold">{p.plant}</td>
-                    <td className="num text-slate-500">{p.pq}</td>
-                    <td className="num text-slate-500">{p.sq}</td>
-                    <td className="num">{p.batches}</td>
-                    <td className="num font-bold">{p.cost}</td>
-                    <td className="num">{p.perMT}</td>
+                  <tr key={c.id} style={{ cursor: 'pointer' }}>
+                    <td className="font-semibold">{c.plants?.name || '—'}</td>
+                    <td className="text-slate-500 text-xs">{c.date}</td>
+                    <td className="num text-slate-500">{c.purchased_qty ?? '—'}</td>
+                    <td className="num text-slate-500">{c.sales_qty ?? '—'}</td>
+                    <td className="num font-bold">₹ {(c.computed_cost || 0).toLocaleString('en-IN')}</td>
+                    <td className="num text-slate-500">₹ {(c.target_cost || 0).toLocaleString('en-IN')}</td>
+                    <td className="num">₹ {(c.per_mt_cost || 0).toLocaleString('en-IN')}</td>
                     <td>
                       <span className="badge" style={{ background: tBg, color: tColor }}>{tLbl}</span>
                     </td>
+                    <td>{c.is_flagged ? <span className="badge" style={{ background: '#FEE2E2', color: '#DC2626' }}>FLAG</span> : '—'}</td>
                   </tr>
                 );
               })}
+              {costs.length === 0 && (
+                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">No labour cost records yet</td></tr>
+              )}
             </tbody>
           </table>
         </div>

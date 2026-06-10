@@ -2,80 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { useRoleContext } from '../../contexts/RoleContext';
-
-// ── Notification definitions ──────────────────────────────────────────────────
+import { useNotifications, AppNotification } from '../../contexts/NotificationsContext';
 
 type NType = 'urgent' | 'warning' | 'info';
-
-interface Notif {
-  id: string;
-  title: string;
-  sub: string;
-  type: NType;
-  time: string;
-  route?: string;
-}
-
-const NOTIFS_BY_PROFILE: Record<string, Notif[]> = {
-  admin: [
-    { id: 'a1', title: '7 store requisitions pending',       sub: 'Awaiting Vijay Ji authorisation',            type: 'urgent',  time: '2h ago',  route: '/dashboard/purchase/storereq' },
-    { id: 'a2', title: 'Marine insurance: ₹50 L to threshold', sub: 'Balance ₹9.50 Cr of ₹10 Cr limit',        type: 'urgent',  time: '4h ago',  route: '/dashboard/purchase/marine' },
-    { id: 'a3', title: '3 FAR assets flagged for repair',    sub: 'Awaiting closure on maintenance side',       type: 'warning', time: '1d ago',  route: '/dashboard/purchase/far' },
-    { id: 'a4', title: 'GST output MTD not reconciled',      sub: 'Sales GST pending Busy sync',                type: 'warning', time: '1d ago',  route: '/dashboard/sales' },
-    { id: 'a5', title: '2 customers overdue payment',        sub: '₹2.1 Cr outstanding beyond 60 days',        type: 'warning', time: '2d ago',  route: '/dashboard/customers' },
-    { id: 'a6', title: 'Night Manager: Ganjam unchecked',    sub: 'No check-in logged last night',             type: 'info',    time: '8h ago',  route: '/dashboard/night-manager' },
-    { id: 'a7', title: 'Batch B-441 running 8 h over estimate', sub: 'SHD plant · operator logged 6 h gap',   type: 'info',    time: '3h ago',  route: '/dashboard/batches' },
-  ],
-
-  unit_head: [
-    { id: 'u1', title: '7 store requisitions need your approval', sub: 'SR-441 to SR-435 awaiting Unit Head',   type: 'urgent',  time: '2h ago',  route: '/dashboard/purchase/storereq' },
-    { id: 'u2', title: 'Jharsuguda tank B-4 below 30%',      sub: 'CPM stock alert — consider replenishment',  type: 'urgent',  time: '5h ago',  route: '/dashboard/stock' },
-    { id: 'u3', title: '3 FAR assets pending repair closure', sub: 'Flag open since last maintenance cycle',   type: 'warning', time: '1d ago',  route: '/dashboard/purchase/far' },
-    { id: 'u4', title: 'Batch B-441 delayed',                 sub: '8 h over estimate at SHD plant',           type: 'warning', time: '3h ago',  route: '/dashboard/batches' },
-    { id: 'u5', title: '2 activity logs pending verification', sub: 'Cooling tower + air compressor entries',  type: 'info',    time: '6h ago',  route: '/dashboard/purchase/activity' },
-  ],
-
-  warehouse_manager: [
-    { id: 'w1', title: 'SR-441 approved — ready to dispatch', sub: 'PP Ball · 48 nos · from SHD store',        type: 'urgent',  time: '1h ago',  route: '/dashboard/purchase/storereq' },
-    { id: 'w2', title: 'Rehla tank B-4 below 30%',           sub: 'Current: 22% — schedule top-up',           type: 'urgent',  time: '4h ago',  route: '/dashboard/stock' },
-    { id: 'w3', title: '3 requisitions to acknowledge',       sub: 'SR-440, SR-438, SR-435 in your queue',     type: 'warning', time: '3h ago',  route: '/dashboard/purchase/storereq' },
-    { id: 'w4', title: 'Daily stock entry pending',           sub: 'Today\'s register not yet submitted',      type: 'info',    time: '2h ago',  route: '/dashboard/warehouse-entry' },
-  ],
-
-  labour_manager: [
-    { id: 'l1', title: 'SHD plant 3.2% over labour target',  sub: '₹1,487 / MT vs target ₹1,450',             type: 'urgent',  time: '2h ago',  route: '/dashboard/purchase/labour' },
-    { id: 'l2', title: 'Ganjam plant variance flagged',       sub: 'Labour cost trending above monthly budget', type: 'warning', time: '5h ago',  route: '/dashboard/purchase/labour' },
-    { id: 'l3', title: '2 activity logs need verification',   sub: 'Cooling tower motor + compressor repair',  type: 'warning', time: '6h ago',  route: '/dashboard/purchase/activity' },
-    { id: 'l4', title: 'MTD labour ↑ 3.2% vs last month',    sub: '₹71.1 L so far — review formula',          type: 'info',    time: '1d ago',  route: '/dashboard/purchase/labour' },
-  ],
-
-  night_manager: [
-    { id: 'n1', title: 'Check-in due tonight at 10 PM',      sub: 'Rehla plant · GPS + photo required',        type: 'urgent',  time: 'Now',     route: '/dashboard/night-entry' },
-    { id: 'n2', title: 'Ganjam check-in missing last night', sub: 'System flagged absence — log reason',       type: 'warning', time: '8h ago',  route: '/dashboard/night-entry' },
-    { id: 'n3', title: 'Photo proof upload pending',         sub: 'Last night\'s shift photo not uploaded',    type: 'info',    time: '10h ago', route: '/dashboard/night-entry' },
-  ],
-
-  factory_operator: [
-    { id: 'f1', title: 'Batch B-441: 6 h log gap detected',  sub: 'SHD plant — add a mid-shift reading',       type: 'urgent',  time: '3h ago',  route: '/dashboard/batch-entry' },
-    { id: 'f2', title: 'Daily unit log not uploaded today',   sub: 'OCR upload pending for today\'s sheet',     type: 'urgent',  time: '2h ago',  route: '/dashboard/batch-entry' },
-    { id: 'f3', title: 'Sales sheet for May not digitised',   sub: 'Upload photo for OCR extraction',           type: 'warning', time: '1d ago',  route: '/dashboard/batch-entry' },
-  ],
-
-  accountant_delhi: [
-    { id: 'd1', title: 'GST filing deadline: 5 days',        sub: 'GSTR-1 due for Apr 2026 · Delhi factory',   type: 'urgent',  time: '1d ago',  route: '/dashboard/sales' },
-    { id: 'd2', title: '2 customers overdue payment',        sub: '₹2.1 Cr outstanding beyond 60 days',        type: 'urgent',  time: '2d ago',  route: '/dashboard/customers' },
-    { id: 'd3', title: 'Marine insurance near threshold',    sub: 'Balance ₹9.50 Cr — top-up soon',             type: 'warning', time: '4h ago',  route: '/dashboard/purchase/marine' },
-    { id: 'd4', title: 'Sales reconciliation for Apr pending', sub: 'BUSY vs dashboard figures to match',      type: 'warning', time: '1d ago',  route: '/dashboard/sales' },
-    { id: 'd5', title: 'Labour cost MTD up 3.2%',            sub: 'Variance note required for audit',          type: 'info',    time: '2d ago',  route: '/dashboard/purchase/labour' },
-  ],
-
-  accountant_other: [
-    { id: 'o1', title: 'GST filing deadline: 5 days',        sub: 'GSTR-1 due for Apr 2026 · Rehla & Jharsuguda', type: 'urgent', time: '1d ago', route: '/dashboard/sales' },
-    { id: 'o2', title: '3 sales invoices un-reconciled',     sub: 'Apr invoices not matched to bank receipts', type: 'urgent',  time: '2d ago',  route: '/dashboard/sales' },
-    { id: 'o3', title: 'Labour cost variance at SHD',        sub: '₹1,487 / MT — 2.5% over budget',            type: 'warning', time: '1d ago',  route: '/dashboard/purchase/labour' },
-    { id: 'o4', title: 'Purchase reconciliation pending',    sub: 'Apr purchase entries vs BUSY ledger',        type: 'warning', time: '2d ago',  route: '/dashboard/purchase/purchase' },
-  ],
-};
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
 
@@ -111,13 +40,10 @@ interface TopBarProps {
 export function TopBar({ title, breadcrumb }: TopBarProps) {
   const navigate = useNavigate();
   const { activeProfile } = useRoleContext();
+  const { notifications, unreadCount, markRead, markAllRead, tableReady } = useNotifications();
   const [open, setOpen] = useState(false);
-  const [read, setRead] = useState<Set<string>>(new Set());
   const panelRef = useRef<HTMLDivElement>(null);
   const btnRef   = useRef<HTMLButtonElement>(null);
-
-  const notifs: Notif[] = NOTIFS_BY_PROFILE[activeProfile.id] ?? [];
-  const unread = notifs.filter(n => !read.has(n.id)).length;
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -131,16 +57,26 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Reset read state when profile changes
-  useEffect(() => { setRead(new Set()); setOpen(false); }, [activeProfile.id]);
+  // Close on profile change
+  useEffect(() => { setOpen(false); }, [activeProfile.id]);
 
-  function markRead(id: string) { setRead(prev => new Set([...prev, id])); }
-  function markAllRead() { setRead(new Set(notifs.map(n => n.id))); }
-
-  function handleNotifClick(n: Notif) {
+  function handleNotifClick(n: AppNotification) {
     markRead(n.id);
     if (n.route) { navigate(n.route); setOpen(false); }
   }
+
+  function formatAge(ts: string) {
+    const diff = Date.now() - new Date(ts).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  }
+
+  const roleId = activeProfile?.id ?? 'admin';
+  const unread = unreadCount;
 
   return (
     <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
@@ -224,13 +160,19 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
 
             {/* Notification list */}
             <div style={{ flex: 1, overflowY: 'auto' }}>
-              {notifs.length === 0 ? (
+              {!tableReady ? (
+                <div style={{ padding: '32px 18px', textAlign: 'center', color: '#94A3B8', fontSize: 12 }}>
+                  <div style={{ marginBottom: 6 }}>Notification table not set up yet.</div>
+                  <div style={{ fontSize: 11, color: '#CBD5E1' }}>Run the SQL migration in Supabase to enable live notifications.</div>
+                </div>
+              ) : notifications.length === 0 ? (
                 <div style={{ padding: '40px 18px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
-                  No notifications for this role
+                  No notifications yet
                 </div>
               ) : (
-                notifs.map(n => {
-                  const isRead = read.has(n.id);
+                notifications.map(n => {
+                  const isRead = n.read_by?.includes(roleId);
+                  const nType = (n.type as NType) || 'info';
                   return (
                     <div
                       key={n.id}
@@ -245,34 +187,28 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
                       onMouseEnter={e => { if (n.route) (e.currentTarget as HTMLDivElement).style.background = '#F8FAFC'; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = isRead ? '#fff' : '#FAFBFF'; }}
                     >
-                      {/* Type icon */}
                       <div style={{
                         width: 32, height: 32, borderRadius: 10, flexShrink: 0,
-                        background: ICON_BG[n.type], color: ICON_COLOR[n.type],
+                        background: ICON_BG[nType], color: ICON_COLOR[nType],
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         marginTop: 1,
                       }}>
-                        <TypeIcon type={n.type} />
+                        <TypeIcon type={nType} />
                       </div>
-
-                      {/* Text */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          fontSize: 13, fontWeight: isRead ? 500 : 700,
-                          color: isRead ? '#475569' : '#0F172A',
-                          lineHeight: 1.35,
-                        }}>
+                        <div style={{ fontSize: 13, fontWeight: isRead ? 500 : 700, color: isRead ? '#475569' : '#0F172A', lineHeight: 1.35 }}>
                           {n.title}
                         </div>
-                        <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3, lineHeight: 1.4 }}>
-                          {n.sub}
-                        </div>
-                        <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 4 }}>{n.time}</div>
+                        {n.body && (
+                          <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3, lineHeight: 1.4 }}>{n.body}</div>
+                        )}
+                        {n.actor_name && (
+                          <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>by {n.actor_name}</div>
+                        )}
+                        <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>{formatAge(n.created_at)}</div>
                       </div>
-
-                      {/* Unread dot */}
                       {!isRead && (
-                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: DOT[n.type], flexShrink: 0, marginTop: 6 }} />
+                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: DOT[nType], flexShrink: 0, marginTop: 6 }} />
                       )}
                     </div>
                   );
@@ -283,7 +219,7 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
             {/* Footer */}
             <div style={{ padding: '10px 18px', borderTop: '1px solid #F1F5F9', flexShrink: 0 }}>
               <div style={{ fontSize: 11, color: '#94A3B8', textAlign: 'center' }}>
-                Showing notifications for <strong>{activeProfile.roleLabel}</strong>
+                Live · <strong>{activeProfile.roleLabel}</strong>
                 {activeProfile.plant ? ` · ${activeProfile.plant}` : ''}
               </div>
             </div>

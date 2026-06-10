@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { RoleProvider } from './contexts/RoleContext';
+import { NotificationsProvider } from './contexts/NotificationsContext';
 
 // Layout
 import { DashboardLayout } from './components/layout/DashboardLayout';
@@ -42,6 +43,7 @@ function App() {
     // RoleProvider wraps BrowserRouter so the role context is available
     // everywhere in the app, including inside router-dependent hooks.
     <RoleProvider>
+      <NotificationsProvider>
       <BrowserRouter>
         <Routes>
           {/* Auth */}
@@ -90,6 +92,7 @@ function App() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
+      </NotificationsProvider>
     </RoleProvider>
   );
 }

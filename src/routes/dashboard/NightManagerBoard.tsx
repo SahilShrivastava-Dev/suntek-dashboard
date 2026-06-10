@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { NIGHT_DUTY } from '../../data/mockData';
 import { supabase } from '../../lib/supabase';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -67,19 +66,6 @@ function formatRelativeTime(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('en-IN');
 }
 
-function parseRelativeTimeToDate(lastStr: string): string {
-  const match = lastStr.match(/(\d+)\s+min/);
-  if (match) {
-    const mins = parseInt(match[1], 10);
-    return new Date(Date.now() - mins * 60 * 1000).toISOString();
-  }
-  const hrMatch = lastStr.match(/(\d+)\s+hr/);
-  if (hrMatch) {
-    const hrs = parseInt(hrMatch[1], 10);
-    return new Date(Date.now() - hrs * 60 * 60 * 1000).toISOString();
-  }
-  return new Date(Date.now() - 60 * 60 * 1000).toISOString();
-}
 
 function MapController({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useMap();
@@ -238,29 +224,7 @@ export function NightManagerBoard() {
     };
   }, []);
 
-  // Format and assign simulated dates to mock data for consistent chronology sorting
-  const formattedMock: CheckInLog[] = NIGHT_DUTY.map((d, index) => {
-    const submittedAt = parseRelativeTimeToDate(d.last);
-    const coords = getCoords(d.plant, null, null, index + liveDuty.length + 1);
-    return {
-      name: d.name,
-      role: d.role,
-      plant: d.plant,
-      coords,
-      status: d.status,
-      shift: d.shift,
-      last: d.last,
-      submitted_at: submittedAt,
-      initial: d.initial,
-      ip_address: null,
-      isMapped: false,
-      phone: null,
-      photo_url: null,
-    };
-  });
-
-  // Combine and sort from latest to oldest from top to bottom
-  const combinedDuty = [...liveDuty, ...formattedMock].sort(
+  const sortedDuty = [...liveDuty].sort(
     (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime()
   );
 
@@ -310,22 +274,24 @@ export function NightManagerBoard() {
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
           <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">On duty now</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">12</div>
-          <div className="text-[11px] text-slate-500 mt-1">across 4 factories</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.filter(d => d.status === 'green').length}</div>
+          <div className="text-[11px] text-slate-500 mt-1">across {new Set(liveDuty.map(d => d.plant)).size || 0} factories</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
           <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Geo-tagged check-ins</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.length + 38}</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.length}</div>
           <div className="text-[11px] text-slate-500 mt-1">today</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
           <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Out-of-zone</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">1</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{liveDuty.filter(d => d.status === 'red').length}</div>
           <div className="text-[11px] text-amber-600 mt-1">flagged</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
           <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Photo proof %</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">98%</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">
+            {liveDuty.length > 0 ? Math.round((liveDuty.filter(d => d.photo_url).length / liveDuty.length) * 100) : 0}%
+          </div>
         </div>
       </div>
 
@@ -365,7 +331,7 @@ export function NightManagerBoard() {
               />
               <MapController center={mapCenter} zoom={mapZoom} />
               
-              {combinedDuty.map((d, i) => (
+              {sortedDuty.map((d, i) => (
                 <Marker
                   key={i}
                   position={d.coords}
@@ -450,7 +416,7 @@ export function NightManagerBoard() {
           <div className="text-[11px] text-slate-500 mb-4">Latest check-ins automatically appear at the top. Click any to locate them.</div>
           
           <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
-            {combinedDuty.map((d, i) => {
+            {sortedDuty.map((d, i) => {
               const dotColor = PIN_COLOR[d.status];
               const isSelected = selectedCheckIn?.name === d.name;
               

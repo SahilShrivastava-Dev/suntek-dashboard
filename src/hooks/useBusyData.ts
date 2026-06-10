@@ -81,7 +81,9 @@ const REFETCH = 10 * 60 * 1000;  // 10 min
 const BUSY_BASE = import.meta.env.VITE_BUSY_API_URL ?? '';
 
 async function fetchBusy<T>(path: string): Promise<T> {
-  const res = await fetch(`${BUSY_BASE}${path}`);
+  const res = await fetch(`${BUSY_BASE}${path}`, {
+    headers: { 'ngrok-skip-browser-warning': '1' },
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   const data = await res.json();
   if (data.error) throw new Error(data.error);

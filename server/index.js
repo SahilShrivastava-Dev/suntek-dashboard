@@ -17,11 +17,7 @@ import analyticsRouter from './routes/analytics.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const ALLOWED_ORIGINS = [
-  'http://localhost:5173',
-  process.env.FIREBASE_URL,
-].filter(Boolean);
-app.use(cors({ origin: ALLOWED_ORIGINS }));
+app.use(cors());
 app.use(express.json());
 
 // Health check

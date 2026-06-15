@@ -1,0 +1,4 @@
+period,label,value,baseline,ewma,upper,lower,iqrUpper,iqrLower,z,robustZ,score,severity,isAnomaly,warming
+2026-04,Apr 26,-272795742.2200,,-272795742.2200,,,,,0,0,0,normal,false,true
+2026-05,May 26,-272576210.6800,,-272685976.4500,,,,,0,0,0,normal,false,true
+2026-06,Jun 26,-33772471.3600,-272685976.4500,-153229223.9050,-272466444.9100,-272905507.9900,-272466444.9100,-272905507.9900,2176.5800,1468.0800,2176.5800,extreme,true,false

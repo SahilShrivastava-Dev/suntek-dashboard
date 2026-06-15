@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { AuthUser } from '../../hooks/useAuth';
 import { useRoleContext } from '../../contexts/RoleContext';
+import { useAnomalies } from '../../contexts/AnomalyContext';
 import { profileCanAccess } from '../../lib/profiles';
 
 interface SidebarProps {
@@ -97,6 +98,23 @@ function IconAudit() {
     </svg>
   );
 }
+function IconUserPlus() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+      <circle cx="9" cy="7" r="4"/>
+      <line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/>
+    </svg>
+  );
+}
+function IconBan() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+    </svg>
+  );
+}
 function IconSearch() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
@@ -117,6 +135,14 @@ function IconBatch() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="3"/>
       <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+    </svg>
+  );
+}
+function IconAlert() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
     </svg>
   );
 }
@@ -147,6 +173,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { activeProfile } = useRoleContext();
+  const { criticalCount } = useAnomalies();
 
   const [purchaseOpen, setPurchaseOpen] = useState(
     location.pathname.startsWith('/dashboard/purchase')
@@ -202,6 +229,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
   const showOilRatio = canSee('/dashboard/oil-ratio');
   const showAudit    = canSee('/dashboard/audit');
   const showReference = showOilRatio || showAudit;
+
+  // Monitoring items
+  const showAnomalies = canSee('/dashboard/anomalies');
+
+  // Admin section — user management + blacklist
+  const showAdmin = activeProfile.id === 'admin';
+  const showBlacklist = activeProfile.id === 'admin' || activeProfile.id === 'unit_head';
 
   const isActive = (path: string) => {
     if (path === '/dashboard') return location.pathname === '/dashboard';
@@ -431,6 +465,50 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
           >
             <IconAudit />
             <span>Audit log</span>
+          </a>
+        )}
+      </nav>
+
+      {/* ── MONITORING ────────────────────────────────────────────────────── */}
+      {showAnomalies && <SectionHeader label="Monitoring" />}
+      {showAnomalies && (
+        <nav className="flex flex-col gap-1">
+          <a
+            className={`nav-link${isActive('/dashboard/anomalies') ? ' active' : ''}`}
+            onClick={() => navTo('/dashboard/anomalies')}
+          >
+            <IconAlert />
+            <span>Anomaly Detection</span>
+            {criticalCount > 0 && (
+              <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>
+                {criticalCount > 9 ? '9+' : criticalCount}
+              </span>
+            )}
+          </a>
+        </nav>
+      )}
+
+      {/* ── ADMIN ─────────────────────────────────────────────────────────── */}
+      {(showAdmin || showBlacklist) && <SectionHeader label="Admin" />}
+      <nav className="flex flex-col gap-1">
+        {showAdmin && (
+          <a
+            className={`nav-link${isActive('/dashboard/users') ? ' active' : ''}`}
+            onClick={() => navTo('/dashboard/users')}
+          >
+            <IconUserPlus />
+            <span>User Management</span>
+            <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>admin</span>
+          </a>
+        )}
+        {showBlacklist && (
+          <a
+            className={`nav-link${isActive('/dashboard/blacklist') ? ' active' : ''}`}
+            onClick={() => navTo('/dashboard/blacklist')}
+          >
+            <IconBan />
+            <span>Blacklist</span>
+            <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>restrict</span>
           </a>
         )}
       </nav>

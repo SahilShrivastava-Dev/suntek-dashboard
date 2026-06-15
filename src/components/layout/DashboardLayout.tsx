@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -6,6 +6,58 @@ import { RestrictedAccess } from './RestrictedAccess';
 import { useAuth } from '../../hooks/useAuth';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { profileCanAccess } from '../../lib/profiles';
+import { useBlacklist } from '../../contexts/BlacklistContext';
+import type { BlacklistEntry } from '../../contexts/BlacklistContext';
+
+// ── Blacklisted overlay ───────────────────────────────────────────────────────
+
+const SEV_COLORS: Record<string, string> = {
+  critical: '#DC2626',
+  high:     '#EA580C',
+  medium:   '#D97706',
+  low:      '#2563EB',
+};
+
+function BlacklistedOverlay({ entry, onBack }: { entry: BlacklistEntry; onBack: () => void }) {
+  const sevColor = SEV_COLORS[entry.severity] || '#DC2626';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', textAlign: 'center', padding: '40px 20px' }}>
+      <div style={{ width: 72, height: 72, borderRadius: '50%', background: '#FEF2F2', border: `2px solid ${sevColor}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24, fontSize: 32 }}>
+        🚫
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: '#0F172A', marginBottom: 8 }}>
+        Account Restricted
+      </div>
+      <div style={{ fontSize: 13, color: '#475569', maxWidth: 420, lineHeight: 1.6, marginBottom: 20 }}>
+        This account has been restricted by the administrator. All dashboard data is hidden until the restriction is lifted.
+      </div>
+
+      <div style={{ background: '#FEF2F2', border: `1px solid ${sevColor}30`, borderRadius: 14, padding: '16px 24px', maxWidth: 440, width: '100%', marginBottom: 20, textAlign: 'left' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Reason</div>
+        <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.6 }}>{entry.reason}</div>
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 20, background: '#FEF2F2', color: sevColor, border: `1px solid ${sevColor}40` }}>
+            {entry.severity.toUpperCase()}
+          </span>
+          <span style={{ fontSize: 11, color: '#94A3B8' }}>Added by {entry.added_by}</span>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 24 }}>
+        Contact admin to resolve this restriction · <strong style={{ color: '#475569' }}>Sagar Nenwani</strong>
+      </div>
+
+      <button
+        onClick={onBack}
+        style={{ padding: '10px 24px', borderRadius: 20, background: '#F1F5F9', border: '1px solid #E2E8F0', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', fontFamily: 'inherit' }}
+      >
+        ← Back to Admin view
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Operations dashboard',
@@ -15,9 +67,12 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard/customers': 'Customer History',
   '/dashboard/night-manager': 'Night Manager · GPS + photos',
   '/dashboard/oil-ratio': 'Oil Ratio Table · the brain',
+  '/dashboard/audit': 'Audit log · security logs',
+  '/dashboard/anomalies': 'Anomaly Detection · live risk radar',
   '/dashboard/night-entry':     'Night Check-in',
   '/dashboard/batch-entry':     'Batch Logger',
   '/dashboard/warehouse-entry': 'Warehouse Console',
+  '/dashboard/blacklist':       'Blacklist · restricted entities',
 };
 
 const BREADCRUMBS: Record<string, string> = {
@@ -27,7 +82,9 @@ const BREADCRUMBS: Record<string, string> = {
   '/dashboard/batches': 'Workspace · Batch Sheet',
   '/dashboard/customers': 'Workspace · Customer History',
   '/dashboard/night-manager': 'Workspace · Night Manager',
-  '/dashboard/oil-ratio': 'Workspace · Oil Ratio Table',
+  '/dashboard/oil-ratio': 'Reference · Oil Ratio',
+  '/dashboard/audit': 'Security · Operations',
+  '/dashboard/anomalies': 'Monitoring · Anomaly Detection',
   '/dashboard/night-entry':     'Operations · Night Check-in',
   '/dashboard/batch-entry':     'Operations · Batch Logger',
   '/dashboard/warehouse-entry': 'Operations · Warehouse Console',
@@ -47,8 +104,21 @@ const PURCHASE_TAB_PATHS = [
 export function DashboardLayout() {
   const { user, signOut } = useAuth();
   const { isViewingAs, activeProfile, switchProfile } = useRoleContext();
+  const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Detect if the currently previewed profile is blacklisted
+  const blacklistEntry = blacklistReady ? isPersonBlacklisted(activeProfile.name) : null;
+
+  // Fire a one-time notification when admin switches to a blacklisted profile
+  const notifiedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (blacklistEntry && notifiedRef.current !== blacklistEntry.id) {
+      notifiedRef.current = blacklistEntry.id;
+      notifyActivity(blacklistEntry, `Dashboard accessed via role preview as ${activeProfile.roleLabel}`);
+    }
+  }, [blacklistEntry?.id]);
 
   const path = location.pathname;
 
@@ -128,8 +198,13 @@ export function DashboardLayout() {
             </div>
           )}
 
-          {/* Route guard: show content OR restricted page */}
-          {canAccessRoute ? <Outlet /> : <RestrictedAccess />}
+          {/* Route guard: blacklist check → access check → content */}
+          {canAccessRoute
+            ? blacklistEntry
+              ? <BlacklistedOverlay entry={blacklistEntry} onBack={() => { switchProfile('admin'); navigate('/dashboard'); }} />
+              : <Outlet />
+            : <RestrictedAccess />
+          }
         </div>
       </main>
     </div>

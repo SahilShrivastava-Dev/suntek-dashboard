@@ -74,6 +74,8 @@ export const MOCK_PROFILES: MockProfile[] = [
       // NOT /dashboard/purchase/labour  — HR dept handles
       '/dashboard/oil-ratio',             // Reference table
       '/dashboard/audit',                 // Audit trail
+      '/dashboard/anomalies',             // Anomaly detection (ops/vendor/equipment scope)
+      '/dashboard/blacklist',             // Blacklist registry (admin + unit head)
       // NOT /dashboard/sales            — sales team only
       // NOT /dashboard/customers        — accounts team only
     ],
@@ -168,6 +170,49 @@ export const MOCK_PROFILES: MockProfile[] = [
     accessNote: 'Batch logger only · no other dashboard access',
   },
 
+  // ── L2: Store Manager (Maintenance) — spare parts store for maintenance ─────
+  // Reviews store requests from technicians, checks availability, uploads docs.
+  // Also handles handover of procured parts (invoice + photo) to technicians.
+  {
+    id: 'store_manager_maint',
+    name: 'Suresh Kumar',
+    role: 'L2',
+    roleLabel: 'Store Manager · Maint',
+    roleDescription: 'Spare parts store · availability check · handover docs',
+    initials: 'SK',
+    avatarFrom: 'from-lime-400',
+    avatarTo: 'to-lime-600',
+    plant: 'SHD',
+    homeRoute: '/dashboard/purchase/maint',
+    allowedDashboardRoutes: [
+      '/dashboard/purchase/maint',
+      '/dashboard/purchase/storereq',
+    ],
+    standaloneOnly: false,
+    accessNote: 'Maintenance store actions only · no financial or production access',
+  },
+
+  // ── L1: Technician — maintenance ticket management ────────────────────────
+  // Sees own maintenance tickets only. Closes tickets with photo proof.
+  // Cannot access financial, sales, or production data.
+  {
+    id: 'technician_shd',
+    name: 'Anooj Kumar',
+    role: 'L1',
+    roleLabel: 'Technician · SHD',
+    roleDescription: 'Maintenance tickets · repairs · photo proof upload',
+    initials: 'AK',
+    avatarFrom: 'from-cyan-400',
+    avatarTo: 'to-cyan-600',
+    plant: 'SHD',
+    homeRoute: '/dashboard/purchase/maint',
+    allowedDashboardRoutes: [
+      '/dashboard/purchase/maint',
+    ],
+    standaloneOnly: false,
+    accessNote: 'Maintenance tickets only · no financial or production access',
+  },
+
   // ── L2: Accountant (Delhi) — Delhi factory financial/operational data ─────
   // Can view and process financial/operational data for the Delhi factory only.
   // Purchase sheets are read-only for all accountants (anti-tampering rule).
@@ -186,6 +231,7 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard',                       // Overview (financial KPIs)
       '/dashboard/sales',                 // Sales contracts & dispatch
       '/dashboard/customers',             // Customer history
+      '/dashboard/anomalies',             // Anomaly detection (financial/customer scope)
       '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
       '/dashboard/purchase/marine',       // Marine insurance fund
       '/dashboard/purchase/labour',       // Labour cost tracking
@@ -212,6 +258,7 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard',                       // Overview (financial KPIs)
       '/dashboard/sales',                 // Sales contracts & dispatch
       '/dashboard/customers',             // Customer history
+      '/dashboard/anomalies',             // Anomaly detection (financial/customer scope)
       '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
       '/dashboard/purchase/marine',       // Marine insurance fund
       '/dashboard/purchase/labour',       // Labour cost tracking

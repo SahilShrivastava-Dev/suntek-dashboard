@@ -18,14 +18,6 @@ export function OilRatioTable() {
 
   return (
     <div>
-      {/* Page header */}
-      <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
-        <div>
-          <div className="text-[12px] text-slate-500">Reference · Oil Ratio</div>
-          <h1 className="serif text-[34px] leading-[1] mt-0.5">Oil Ratio Table · the brain</h1>
-        </div>
-      </div>
-
       <div className="grid grid-cols-12 gap-5">
         {/* Main table card */}
         <div

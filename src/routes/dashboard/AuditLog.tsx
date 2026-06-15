@@ -98,12 +98,8 @@ export function AuditLog() {
 
   return (
     <div style={{ fontFamily: 'Inter, sans-serif' }}>
-      {/* Page Header */}
-      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
-        <div>
-          <div className="text-[12px] text-slate-500">Security · Operations</div>
-          <h1 className="serif text-[34px] leading-[1] mt-0.5">Audit log · security logs</h1>
-        </div>
+      {/* Action bar (title is shown by the TopBar) */}
+      <div className="flex items-center justify-end gap-4 mb-6 flex-wrap">
         <button
           onClick={loadData}
           className="subtab flex items-center gap-1.5 font-semibold text-xs py-2 px-3 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl"

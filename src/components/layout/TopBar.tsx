@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ProfileSwitcher } from './ProfileSwitcher';
+import { CautionButton } from '../anomaly/CautionButton';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import type { AppNotification } from '../../contexts/NotificationsContext';
@@ -97,6 +98,9 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
           <span className="font-medium">Live</span>
           <span className="text-slate-400">· last sync 12s</span>
         </div>
+
+        {/* Anomaly caution button (renders only for roles with anomaly access) */}
+        <CautionButton />
 
         {/* Bell button */}
         <button

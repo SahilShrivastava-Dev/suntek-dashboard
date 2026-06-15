@@ -2,6 +2,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { RoleProvider } from './contexts/RoleContext';
 import { NotificationsProvider } from './contexts/NotificationsContext';
+import { BlacklistProvider } from './contexts/BlacklistContext';
+import { AnomalyProvider } from './contexts/AnomalyContext';
 
 // Layout
 import { DashboardLayout } from './components/layout/DashboardLayout';
@@ -22,6 +24,9 @@ import { NightEntry } from './routes/dashboard/NightEntry';
 import { BatchEntry } from './routes/dashboard/BatchEntry';
 import { WarehouseEntry } from './routes/dashboard/WarehouseEntry';
 import { DailyLogPage } from './routes/dashboard/DailyLogPage';
+import { UserManagement } from './routes/dashboard/UserManagement';
+import { Blacklist } from './routes/dashboard/Blacklist';
+import { AnomalyDashboard } from './routes/dashboard/AnomalyDashboard';
 
 // L1 Operator apps (standalone — no DashboardLayout)
 import { CheckIn } from './routes/night-manager/CheckIn';
@@ -44,6 +49,8 @@ function App() {
     // everywhere in the app, including inside router-dependent hooks.
     <RoleProvider>
       <NotificationsProvider>
+      <BlacklistProvider>
+      <AnomalyProvider>
       <BrowserRouter>
         <Routes>
           {/* Auth */}
@@ -78,6 +85,9 @@ function App() {
             <Route path="batch-entry"       element={<BatchEntry />} />
             <Route path="warehouse-entry"   element={<WarehouseEntry />} />
             <Route path="daily-log"         element={<DailyLogPage />} />
+            <Route path="users"             element={<UserManagement />} />
+            <Route path="blacklist"         element={<Blacklist />} />
+            <Route path="anomalies"         element={<AnomalyDashboard />} />
           </Route>
 
           {/* L1 Operator apps — standalone, no sidebar */}
@@ -92,6 +102,8 @@ function App() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
+      </AnomalyProvider>
+      </BlacklistProvider>
       </NotificationsProvider>
     </RoleProvider>
   );

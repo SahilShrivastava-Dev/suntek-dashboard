@@ -1,0 +1,318 @@
+{
+  "generated_at": "2026-06-15T14:36:43.879Z",
+  "anchor": "2026-06-05T00:00:00.000Z",
+  "files": [
+    {
+      "file": "data/anomaly/sales_daily.csv",
+      "metric": "sales",
+      "grain": "daily",
+      "rows": 66,
+      "anomalies": 9,
+      "byLevel": {
+        "mild": 2,
+        "moderate": 5,
+        "heavy": 1,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/sales_weekly.csv",
+      "metric": "sales",
+      "grain": "weekly",
+      "rows": 10,
+      "anomalies": 2,
+      "byLevel": {
+        "mild": 1,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/sales_monthly.csv",
+      "metric": "sales",
+      "grain": "monthly",
+      "rows": 3,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/purchase_daily.csv",
+      "metric": "purchase",
+      "grain": "daily",
+      "rows": 66,
+      "anomalies": 5,
+      "byLevel": {
+        "mild": 1,
+        "moderate": 1,
+        "heavy": 3,
+        "extreme": 0
+      }
+    },
+    {
+      "file": "data/anomaly/purchase_weekly.csv",
+      "metric": "purchase",
+      "grain": "weekly",
+      "rows": 10,
+      "anomalies": 0,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 0
+      }
+    },
+    {
+      "file": "data/anomaly/purchase_monthly.csv",
+      "metric": "purchase",
+      "grain": "monthly",
+      "rows": 3,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/margin_pct_daily.csv",
+      "metric": "margin_pct",
+      "grain": "daily",
+      "rows": 66,
+      "anomalies": 12,
+      "byLevel": {
+        "mild": 3,
+        "moderate": 4,
+        "heavy": 3,
+        "extreme": 2
+      }
+    },
+    {
+      "file": "data/anomaly/margin_pct_weekly.csv",
+      "metric": "margin_pct",
+      "grain": "weekly",
+      "rows": 10,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 1,
+        "heavy": 0,
+        "extreme": 0
+      }
+    },
+    {
+      "file": "data/anomaly/margin_pct_monthly.csv",
+      "metric": "margin_pct",
+      "grain": "monthly",
+      "rows": 3,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/receipts_daily.csv",
+      "metric": "receipts",
+      "grain": "daily",
+      "rows": 66,
+      "anomalies": 12,
+      "byLevel": {
+        "mild": 2,
+        "moderate": 4,
+        "heavy": 0,
+        "extreme": 6
+      }
+    },
+    {
+      "file": "data/anomaly/receipts_weekly.csv",
+      "metric": "receipts",
+      "grain": "weekly",
+      "rows": 10,
+      "anomalies": 2,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 2
+      }
+    },
+    {
+      "file": "data/anomaly/receipts_monthly.csv",
+      "metric": "receipts",
+      "grain": "monthly",
+      "rows": 3,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 1,
+        "heavy": 0,
+        "extreme": 0
+      }
+    },
+    {
+      "file": "data/anomaly/payments_daily.csv",
+      "metric": "payments",
+      "grain": "daily",
+      "rows": 66,
+      "anomalies": 16,
+      "byLevel": {
+        "mild": 1,
+        "moderate": 5,
+        "heavy": 0,
+        "extreme": 10
+      }
+    },
+    {
+      "file": "data/anomaly/payments_weekly.csv",
+      "metric": "payments",
+      "grain": "weekly",
+      "rows": 10,
+      "anomalies": 3,
+      "byLevel": {
+        "mild": 1,
+        "moderate": 1,
+        "heavy": 1,
+        "extreme": 0
+      }
+    },
+    {
+      "file": "data/anomaly/payments_monthly.csv",
+      "metric": "payments",
+      "grain": "monthly",
+      "rows": 3,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/avg_ticket_daily.csv",
+      "metric": "avg_ticket",
+      "grain": "daily",
+      "rows": 66,
+      "anomalies": 9,
+      "byLevel": {
+        "mild": 3,
+        "moderate": 2,
+        "heavy": 3,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/avg_ticket_weekly.csv",
+      "metric": "avg_ticket",
+      "grain": "weekly",
+      "rows": 10,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 1,
+        "heavy": 0,
+        "extreme": 0
+      }
+    },
+    {
+      "file": "data/anomaly/avg_ticket_monthly.csv",
+      "metric": "avg_ticket",
+      "grain": "monthly",
+      "rows": 3,
+      "anomalies": 0,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 0
+      }
+    },
+    {
+      "file": "data/anomaly/inv_count_daily.csv",
+      "metric": "inv_count",
+      "grain": "daily",
+      "rows": 66,
+      "anomalies": 10,
+      "byLevel": {
+        "mild": 7,
+        "moderate": 1,
+        "heavy": 2,
+        "extreme": 0
+      }
+    },
+    {
+      "file": "data/anomaly/inv_count_weekly.csv",
+      "metric": "inv_count",
+      "grain": "weekly",
+      "rows": 10,
+      "anomalies": 3,
+      "byLevel": {
+        "mild": 1,
+        "moderate": 1,
+        "heavy": 0,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/inv_count_monthly.csv",
+      "metric": "inv_count",
+      "grain": "monthly",
+      "rows": 3,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/net_cash_daily.csv",
+      "metric": "net_cash",
+      "grain": "daily",
+      "rows": 66,
+      "anomalies": 18,
+      "byLevel": {
+        "mild": 2,
+        "moderate": 3,
+        "heavy": 2,
+        "extreme": 11
+      }
+    },
+    {
+      "file": "data/anomaly/net_cash_weekly.csv",
+      "metric": "net_cash",
+      "grain": "weekly",
+      "rows": 10,
+      "anomalies": 2,
+      "byLevel": {
+        "mild": 1,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 1
+      }
+    },
+    {
+      "file": "data/anomaly/net_cash_monthly.csv",
+      "metric": "net_cash",
+      "grain": "monthly",
+      "rows": 3,
+      "anomalies": 1,
+      "byLevel": {
+        "mild": 0,
+        "moderate": 0,
+        "heavy": 0,
+        "extreme": 1
+      }
+    }
+  ]
+}

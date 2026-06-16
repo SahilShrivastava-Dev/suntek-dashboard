@@ -29,3 +29,9 @@ Suntek_Project_DPR.csv
 # Auto-generated DB snapshots (rebuilt on next live DB call)
 public/data/
 server/fallback/
+
+# Python (analytics service)
+__pycache__/
+*.pyc
+.venv/
+analytics/.env

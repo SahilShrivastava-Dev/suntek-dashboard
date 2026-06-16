@@ -232,6 +232,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
 
   // Monitoring items
   const showAnomalies = canSee('/dashboard/anomalies');
+  const showAnomalyCenter = canSee('/dashboard/anomaly-center');
 
   // Admin section — user management + blacklist
   const showAdmin = activeProfile.id === 'admin';
@@ -470,21 +471,32 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       </nav>
 
       {/* ── MONITORING ────────────────────────────────────────────────────── */}
-      {showAnomalies && <SectionHeader label="Monitoring" />}
-      {showAnomalies && (
+      {(showAnomalies || showAnomalyCenter) && <SectionHeader label="Monitoring" />}
+      {(showAnomalies || showAnomalyCenter) && (
         <nav className="flex flex-col gap-1">
-          <a
-            className={`nav-link${isActive('/dashboard/anomalies') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/anomalies')}
-          >
-            <IconAlert />
-            <span>Anomaly Detection</span>
-            {criticalCount > 0 && (
-              <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>
-                {criticalCount > 9 ? '9+' : criticalCount}
-              </span>
-            )}
-          </a>
+          {showAnomalyCenter && (
+            <a
+              className={`nav-link${isActive('/dashboard/anomaly-center') ? ' active' : ''}`}
+              onClick={() => navTo('/dashboard/anomaly-center')}
+            >
+              <IconAlert />
+              <span>Anomaly Center</span>
+            </a>
+          )}
+          {showAnomalies && (
+            <a
+              className={`nav-link${isActive('/dashboard/anomalies') ? ' active' : ''}`}
+              onClick={() => navTo('/dashboard/anomalies')}
+            >
+              <IconAlert />
+              <span>Anomaly Detection</span>
+              {criticalCount > 0 && (
+                <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>
+                  {criticalCount > 9 ? '9+' : criticalCount}
+                </span>
+              )}
+            </a>
+          )}
         </nav>
       )}
 

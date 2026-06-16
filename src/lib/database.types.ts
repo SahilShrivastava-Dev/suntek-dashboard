@@ -269,6 +269,34 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['batch_edit_logs']['Insert']>;
       };
 
+      // Phase 2: the single feed every anomaly app writes into. See migration 0007.
+      anomaly_flags: {
+        Row: {
+          id: string;
+          severity: 'critical' | 'warning' | 'watch';
+          source_app: string;
+          plant: string | null;
+          entity_type: string | null;
+          entity_id: string | null;
+          entity_label: string | null;
+          title: string;
+          evidence: string | null;
+          recommended_action: string | null;
+          value_at_stake: number | null;
+          value_unit: string | null;
+          confidence: number | null;
+          status: 'open' | 'acknowledged' | 'resolved' | 'dismissed';
+          assigned_to: string | null;
+          resolution_reason: string | null;
+          route: string | null;
+          created_at: string;
+          updated_at: string;
+          resolved_at: string | null;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['anomaly_flags']['Row'], 'id' | 'created_at' | 'updated_at'>>;
+        Update: Partial<Database['public']['Tables']['anomaly_flags']['Insert']>;
+      };
+
       // Operational alerts feed (replaces ALERTS mock). See migration 0003.
       alerts: {
         Row: {

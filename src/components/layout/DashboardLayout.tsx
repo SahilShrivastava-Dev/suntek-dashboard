@@ -70,6 +70,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard/oil-ratio': 'Oil Ratio Table · the brain',
   '/dashboard/audit': 'Audit log · security logs',
   '/dashboard/anomalies': 'Anomaly Detection · live risk radar',
+  '/dashboard/anomaly-center': 'Anomaly Operations Center',
   '/dashboard/night-entry':     'Night Check-in',
   '/dashboard/batch-entry':     'Batch Logger',
   '/dashboard/warehouse-entry': 'Warehouse Console',

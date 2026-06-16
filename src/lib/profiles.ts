@@ -75,6 +75,7 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/oil-ratio',             // Reference table
       '/dashboard/audit',                 // Audit trail
       '/dashboard/anomalies',             // Anomaly detection (ops/vendor/equipment scope)
+      '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
       '/dashboard/blacklist',             // Blacklist registry (admin + unit head)
       // NOT /dashboard/sales            — sales team only
       // NOT /dashboard/customers        — accounts team only
@@ -232,6 +233,7 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/sales',                 // Sales contracts & dispatch
       '/dashboard/customers',             // Customer history
       '/dashboard/anomalies',             // Anomaly detection (financial/customer scope)
+      '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
       '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
       '/dashboard/purchase/marine',       // Marine insurance fund
       '/dashboard/purchase/labour',       // Labour cost tracking
@@ -259,6 +261,7 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/sales',                 // Sales contracts & dispatch
       '/dashboard/customers',             // Customer history
       '/dashboard/anomalies',             // Anomaly detection (financial/customer scope)
+      '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
       '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
       '/dashboard/purchase/marine',       // Marine insurance fund
       '/dashboard/purchase/labour',       // Labour cost tracking

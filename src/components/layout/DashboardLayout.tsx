@@ -72,6 +72,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard/anomalies': 'Anomaly Detection · live risk radar',
   '/dashboard/anomaly-center': 'Anomaly Operations Center',
   '/dashboard/cost-intelligence': 'Cost & Margin Intelligence',
+  '/dashboard/benchmarking': 'Multi-Plant Benchmarking',
   '/dashboard/night-entry':     'Night Check-in',
   '/dashboard/batch-entry':     'Batch Logger',
   '/dashboard/warehouse-entry': 'Warehouse Console',

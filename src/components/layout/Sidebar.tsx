@@ -234,6 +234,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
   const showAnomalies = canSee('/dashboard/anomalies');
   const showAnomalyCenter = canSee('/dashboard/anomaly-center');
   const showCostIntel = canSee('/dashboard/cost-intelligence');
+  const showBenchmark = canSee('/dashboard/benchmarking');
 
   // Admin section — user management + blacklist
   const showAdmin = activeProfile.id === 'admin';
@@ -472,8 +473,8 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       </nav>
 
       {/* ── MONITORING ────────────────────────────────────────────────────── */}
-      {(showAnomalies || showAnomalyCenter || showCostIntel) && <SectionHeader label="Monitoring" />}
-      {(showAnomalies || showAnomalyCenter || showCostIntel) && (
+      {(showAnomalies || showAnomalyCenter || showCostIntel || showBenchmark) && <SectionHeader label="Monitoring" />}
+      {(showAnomalies || showAnomalyCenter || showCostIntel || showBenchmark) && (
         <nav className="flex flex-col gap-1">
           {showCostIntel && (
             <a
@@ -482,6 +483,15 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             >
               <IconAlert />
               <span>Cost & Margin</span>
+            </a>
+          )}
+          {showBenchmark && (
+            <a
+              className={`nav-link${isActive('/dashboard/benchmarking') ? ' active' : ''}`}
+              onClick={() => navTo('/dashboard/benchmarking')}
+            >
+              <IconAlert />
+              <span>Benchmarking</span>
             </a>
           )}
           {showAnomalyCenter && (

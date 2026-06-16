@@ -29,6 +29,7 @@ const Blacklist        = lazy(() => import('./routes/dashboard/Blacklist').then(
 const AnomalyDashboard = lazy(() => import('./routes/dashboard/AnomalyDashboard').then(m => ({ default: m.AnomalyDashboard })));
 const AnomalyOperationsCenter = lazy(() => import('./routes/dashboard/AnomalyOperationsCenter').then(m => ({ default: m.AnomalyOperationsCenter })));
 const CostIntelligence = lazy(() => import('./routes/dashboard/CostIntelligence').then(m => ({ default: m.CostIntelligence })));
+const Benchmarking = lazy(() => import('./routes/dashboard/Benchmarking').then(m => ({ default: m.Benchmarking })));
 
 // Purchase sub-routes
 const StoreRequisitions = lazy(() => import('./routes/dashboard/purchase/StoreRequisitions').then(m => ({ default: m.StoreRequisitions })));
@@ -101,6 +102,7 @@ function App() {
             <Route path="anomalies"         element={<AnomalyDashboard />} />
             <Route path="anomaly-center"    element={<AnomalyOperationsCenter />} />
             <Route path="cost-intelligence" element={<CostIntelligence />} />
+            <Route path="benchmarking"      element={<Benchmarking />} />
           </Route>
 
           {/* L1 Operator apps — standalone, no sidebar */}

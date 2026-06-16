@@ -235,6 +235,9 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
   const showAnomalyCenter = canSee('/dashboard/anomaly-center');
   const showCostIntel = canSee('/dashboard/cost-intelligence');
   const showBenchmark = canSee('/dashboard/benchmarking');
+  const showPredictiveQC = canSee('/dashboard/predictive-qc');
+  const showWorkingCapital = canSee('/dashboard/working-capital');
+  const showOwner = activeProfile.id === 'admin';
 
   // Admin section — user management + blacklist
   const showAdmin = activeProfile.id === 'admin';
@@ -473,9 +476,18 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       </nav>
 
       {/* ── MONITORING ────────────────────────────────────────────────────── */}
-      {(showAnomalies || showAnomalyCenter || showCostIntel || showBenchmark) && <SectionHeader label="Monitoring" />}
-      {(showAnomalies || showAnomalyCenter || showCostIntel || showBenchmark) && (
+      {(showAnomalies || showAnomalyCenter || showCostIntel || showBenchmark || showPredictiveQC || showWorkingCapital || showOwner) && <SectionHeader label="Monitoring" />}
+      {(showAnomalies || showAnomalyCenter || showCostIntel || showBenchmark || showPredictiveQC || showWorkingCapital || showOwner) && (
         <nav className="flex flex-col gap-1">
+          {showPredictiveQC && (
+            <a
+              className={`nav-link${isActive('/dashboard/predictive-qc') ? ' active' : ''}`}
+              onClick={() => navTo('/dashboard/predictive-qc')}
+            >
+              <IconAlert />
+              <span>Predictive QC</span>
+            </a>
+          )}
           {showCostIntel && (
             <a
               className={`nav-link${isActive('/dashboard/cost-intelligence') ? ' active' : ''}`}
@@ -485,6 +497,15 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
               <span>Cost & Margin</span>
             </a>
           )}
+          {showWorkingCapital && (
+            <a
+              className={`nav-link${isActive('/dashboard/working-capital') ? ' active' : ''}`}
+              onClick={() => navTo('/dashboard/working-capital')}
+            >
+              <IconAlert />
+              <span>Working Capital</span>
+            </a>
+          )}
           {showBenchmark && (
             <a
               className={`nav-link${isActive('/dashboard/benchmarking') ? ' active' : ''}`}
@@ -492,6 +513,15 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             >
               <IconAlert />
               <span>Benchmarking</span>
+            </a>
+          )}
+          {showOwner && (
+            <a
+              className={`nav-link${isActive('/dashboard/owner') ? ' active' : ''}`}
+              onClick={() => navTo('/dashboard/owner')}
+            >
+              <IconAlert />
+              <span>Owner Intelligence</span>
             </a>
           )}
           {showAnomalyCenter && (

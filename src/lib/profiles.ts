@@ -78,6 +78,8 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
       '/dashboard/cost-intelligence',     // Phase 2: Cost & Margin Intelligence
       '/dashboard/benchmarking',          // Phase 2: Multi-Plant Benchmarking
+      '/dashboard/predictive-qc',         // Phase 2: Live Predictive QC board
+      '/dashboard/working-capital',       // Phase 2: Working Capital & Cash
       '/dashboard/blacklist',             // Blacklist registry (admin + unit head)
       // NOT /dashboard/sales            — sales team only
       // NOT /dashboard/customers        — accounts team only
@@ -238,6 +240,8 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
       '/dashboard/cost-intelligence',     // Phase 2: Cost & Margin Intelligence
       '/dashboard/benchmarking',          // Phase 2: Multi-Plant Benchmarking
+      '/dashboard/predictive-qc',         // Phase 2: Live Predictive QC board
+      '/dashboard/working-capital',       // Phase 2: Working Capital & Cash
       '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
       '/dashboard/purchase/marine',       // Marine insurance fund
       '/dashboard/purchase/labour',       // Labour cost tracking
@@ -268,6 +272,8 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
       '/dashboard/cost-intelligence',     // Phase 2: Cost & Margin Intelligence
       '/dashboard/benchmarking',          // Phase 2: Multi-Plant Benchmarking
+      '/dashboard/predictive-qc',         // Phase 2: Live Predictive QC board
+      '/dashboard/working-capital',       // Phase 2: Working Capital & Cash
       '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
       '/dashboard/purchase/marine',       // Marine insurance fund
       '/dashboard/purchase/labour',       // Labour cost tracking

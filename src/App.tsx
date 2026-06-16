@@ -30,6 +30,9 @@ const AnomalyDashboard = lazy(() => import('./routes/dashboard/AnomalyDashboard'
 const AnomalyOperationsCenter = lazy(() => import('./routes/dashboard/AnomalyOperationsCenter').then(m => ({ default: m.AnomalyOperationsCenter })));
 const CostIntelligence = lazy(() => import('./routes/dashboard/CostIntelligence').then(m => ({ default: m.CostIntelligence })));
 const Benchmarking = lazy(() => import('./routes/dashboard/Benchmarking').then(m => ({ default: m.Benchmarking })));
+const PredictiveQCBoard = lazy(() => import('./routes/dashboard/PredictiveQCBoard').then(m => ({ default: m.PredictiveQCBoard })));
+const WorkingCapital = lazy(() => import('./routes/dashboard/WorkingCapital').then(m => ({ default: m.WorkingCapital })));
+const OwnerLayer = lazy(() => import('./routes/dashboard/OwnerLayer').then(m => ({ default: m.OwnerLayer })));
 
 // Purchase sub-routes
 const StoreRequisitions = lazy(() => import('./routes/dashboard/purchase/StoreRequisitions').then(m => ({ default: m.StoreRequisitions })));
@@ -103,6 +106,9 @@ function App() {
             <Route path="anomaly-center"    element={<AnomalyOperationsCenter />} />
             <Route path="cost-intelligence" element={<CostIntelligence />} />
             <Route path="benchmarking"      element={<Benchmarking />} />
+            <Route path="predictive-qc"     element={<PredictiveQCBoard />} />
+            <Route path="working-capital"   element={<WorkingCapital />} />
+            <Route path="owner"             element={<OwnerLayer />} />
           </Route>
 
           {/* L1 Operator apps — standalone, no sidebar */}

@@ -233,6 +233,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
   // Monitoring items
   const showAnomalies = canSee('/dashboard/anomalies');
   const showAnomalyCenter = canSee('/dashboard/anomaly-center');
+  const showCostIntel = canSee('/dashboard/cost-intelligence');
 
   // Admin section — user management + blacklist
   const showAdmin = activeProfile.id === 'admin';
@@ -471,9 +472,18 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       </nav>
 
       {/* ── MONITORING ────────────────────────────────────────────────────── */}
-      {(showAnomalies || showAnomalyCenter) && <SectionHeader label="Monitoring" />}
-      {(showAnomalies || showAnomalyCenter) && (
+      {(showAnomalies || showAnomalyCenter || showCostIntel) && <SectionHeader label="Monitoring" />}
+      {(showAnomalies || showAnomalyCenter || showCostIntel) && (
         <nav className="flex flex-col gap-1">
+          {showCostIntel && (
+            <a
+              className={`nav-link${isActive('/dashboard/cost-intelligence') ? ' active' : ''}`}
+              onClick={() => navTo('/dashboard/cost-intelligence')}
+            >
+              <IconAlert />
+              <span>Cost & Margin</span>
+            </a>
+          )}
           {showAnomalyCenter && (
             <a
               className={`nav-link${isActive('/dashboard/anomaly-center') ? ' active' : ''}`}

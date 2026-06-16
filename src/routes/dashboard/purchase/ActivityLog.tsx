@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { insertRows } from '../../../lib/db';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
+import { useToast } from '../../../components/ui/toast';
+import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import type { Database } from '../../../lib/database.types';
+
+type ActivityRow = Database['public']['Tables']['activity_logs']['Row'] & { plants?: { name: string | null } | null };
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -17,26 +23,39 @@ function PicBadge({ has }: { has: boolean }) {
 const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 
 export function ActivityLog() {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<ActivityRow[]>([]);
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' });
 
-  useEffect(() => {
-    async function load() {
-      const { data: plantsData } = await (supabase.from('plants').select('id, name') as any);
+  async function load() {
+    try {
+      const { data: plantsData } = await supabase.from('plants').select('id, name')
+        .returns<{ id: string; name: string }[]>();
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
-      const { data } = await (supabase
+      const { data, error } = await supabase
         .from('activity_logs')
         .select('*, plants(name)')
-        .order('date', { ascending: false }) as any);
+        .order('date', { ascending: false })
+        .returns<ActivityRow[]>();
+      if (error) throw error;
       setLogs(data || []);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[ActivityLog] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
 
@@ -45,7 +64,7 @@ export function ActivityLog() {
   async function handleSave() {
     if (!form.equipment.trim() || !form.doneBy.trim()) return;
     const plant = dbPlants.find(p => p.name === form.plant);
-    const { data, error } = await (supabase.from('activity_logs') as any).insert({
+    const { data, error } = await insertRows('activity_logs', {
       equipment: form.equipment,
       type: form.type.toLowerCase(),
       date: form.date,
@@ -55,10 +74,10 @@ export function ActivityLog() {
     }).select('*, plants(name)').single();
 
     if (error) {
-      alert(`Save failed: ${error.message}`);
+      toast.error(`Save failed: ${error.message}`);
       return;
     }
-    if (data) setLogs(prev => [data, ...prev]);
+    if (data) setLogs(prev => [data as ActivityRow, ...prev]);
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' }); }, 1600);
   }
@@ -106,6 +125,12 @@ export function ActivityLog() {
             + Log activity
           </button>
         </div>
+        {loadError ? (
+          <ErrorState title="Couldn't load the activity log" message="The activity records failed to load."
+            onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
+        ) : loading ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -132,6 +157,7 @@ export function ActivityLog() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* Slide panel */}

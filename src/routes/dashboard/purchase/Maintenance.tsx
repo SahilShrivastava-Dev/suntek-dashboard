@@ -1,177 +1,44 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { insertRows, updateRows } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
+import { useToast } from '../../../components/ui/toast';
+import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import type { Database } from '../../../lib/database.types';
+import {
+  FREQ_OPTIONS, FREQ_LABEL, STATUS_CFG, EMERGENCY_STAGES, STAGE_LABELS,
+  statusBadge, formatDate, daysFromNow, dueDateLabel, calculateNextDue,
+  PhotoUploader, StageStrip,
+} from './maintenance/shared';
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Row types (base table rows + the joined plants(name) relation) ─────────────
+type Tables = Database['public']['Tables'];
+type PlantRel = { plants?: { name: string | null } | null };
+type TicketRow = Tables['maintenance_tickets']['Row'] & PlantRel;
+type ScheduleRow = Tables['maintenance_schedules']['Row'] & PlantRel;
+type StoreReqRow = Tables['maintenance_store_requests']['Row'];
+type NotificationInsert = Tables['notifications']['Insert'];
+type TicketUpdate = Tables['maintenance_tickets']['Update'];
+type TicketStatus = Tables['maintenance_tickets']['Row']['status'];
 
-const FREQ_OPTIONS = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'triannual'];
-const FREQ_LABEL: Record<string, string> = {
-  daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly',
-  quarterly: 'Quarterly (3-mo)', biannual: 'Bi-annual (6-mo)', triannual: '9-monthly',
-};
+// ── Domain write helpers (use Supabase; kept local) ────────────────────────────
 
-const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> = {
-  open:                     { label: 'Open',              bg: '#DBEAFE', color: '#2563EB' },
-  in_progress:              { label: 'In Progress',       bg: '#FEF3C7', color: '#D97706' },
-  pending_store:            { label: 'Pending Store',     bg: '#FEF3C7', color: '#D97706' },
-  pending_unit_head:        { label: 'Pending Approval',  bg: '#EDE9FE', color: '#7C3AED' },
-  pending_purchase:         { label: 'Purchasing',        bg: '#EDE9FE', color: '#7C3AED' },
-  pending_handover:         { label: 'Handover',          bg: '#F3E8FF', color: '#9333EA' },
-  pending_defective_return: { label: 'Defective Return',  bg: '#FEF3C7', color: '#D97706' },
-  closed:                   { label: 'Closed',            bg: '#DCFCE7', color: '#16A34A' },
-};
-
-// pending_purchase is shown in strip but may be skipped (available-in-store path)
-const EMERGENCY_STAGES = [
-  'open', 'in_progress', 'pending_store', 'pending_unit_head',
-  'pending_purchase', 'pending_handover', 'pending_defective_return', 'closed',
-];
-
-const STAGE_LABELS: Record<string, string> = {
-  open: 'Raised', in_progress: 'Assessed', pending_store: 'Store Check',
-  pending_unit_head: 'Unit Head', pending_purchase: 'Purchase',
-  pending_handover: 'Handover', pending_defective_return: 'Defective', closed: 'Closed',
-};
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function statusBadge(status: string) {
-  const cfg = STATUS_CFG[status] || { label: status, bg: '#F1F5F9', color: '#475569' };
-  return <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{cfg.label}</span>;
+function notify(payload: NotificationInsert) {
+  insertRows('notifications', payload).then(() => {}, () => {});
 }
 
-function formatDate(d: string | null | undefined) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function daysFromNow(d: string | null | undefined): number | null {
-  if (!d) return null;
-  return Math.floor((new Date(d).getTime() - Date.now()) / 86400000);
-}
-
-function dueDateLabel(days: number | null): { text: string; color: string } {
-  if (days === null) return { text: '—', color: '#94A3B8' };
-  if (days < 0) return { text: `${Math.abs(days)}d overdue`, color: '#DC2626' };
-  if (days === 0) return { text: 'Due today', color: '#D97706' };
-  if (days <= 3) return { text: `In ${days}d`, color: '#D97706' };
-  return { text: `In ${days}d`, color: '#16A34A' };
-}
-
-function calculateNextDue(frequency: string): string {
-  const d = new Date();
-  switch (frequency) {
-    case 'daily':     d.setDate(d.getDate() + 1); break;
-    case 'weekly':    d.setDate(d.getDate() + 7); break;
-    case 'monthly':   d.setMonth(d.getMonth() + 1); break;
-    case 'quarterly': d.setMonth(d.getMonth() + 3); break;
-    case 'biannual':  d.setMonth(d.getMonth() + 6); break;
-    case 'triannual': d.setMonth(d.getMonth() + 9); break;
-    default:          d.setDate(d.getDate() + 7);
-  }
-  return d.toISOString();
-}
-
-function notify(payload: object) {
-  (supabase.from('notifications') as any).insert(payload).then(() => {}).catch(() => {});
-}
-
-async function updateTicketStatus(ticketId: string, status: string, extra?: object) {
-  await (supabase.from('maintenance_tickets') as any)
-    .update({ status, ...extra })
+async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?: TicketUpdate) {
+  await updateRows('maintenance_tickets', { status, ...extra })
     .eq('id', ticketId);
-}
-
-// ── PhotoUploader ─────────────────────────────────────────────────────────────
-
-function PhotoUploader({ onBlobReady, label = 'Attach photo proof', hint = 'Take or upload a photo' }: {
-  onBlobReady: (blob: Blob | null) => void;
-  label?: string;
-  hint?: string;
-}) {
-  const [preview, setPreview] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPreview(URL.createObjectURL(file));
-    onBlobReady(file);
-  }
-
-  function clear() {
-    setPreview(null);
-    onBlobReady(null);
-    if (inputRef.current) inputRef.current.value = '';
-  }
-
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 10 }}>{hint}</div>
-      {preview ? (
-        <div style={{ position: 'relative' }}>
-          <img src={preview} alt="Preview" style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 12 }} />
-          <button onClick={clear} style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
-        </div>
-      ) : (
-        <div onClick={() => inputRef.current?.click()} style={{ border: '2px dashed #CBD5E1', borderRadius: 12, padding: '20px 16px', textAlign: 'center', cursor: 'pointer', background: '#F8FAFC' }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="1.5" style={{ margin: '0 auto 6px' }}>
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-            <circle cx="12" cy="13" r="4"/>
-          </svg>
-          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>Tap to upload a photo</div>
-          <div style={{ fontSize: 11, color: '#CBD5E1', marginTop: 2 }}>JPG / PNG · opens camera on mobile</div>
-        </div>
-      )}
-      <input ref={inputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleFile} />
-    </div>
-  );
-}
-
-// ── Stage progress strip ──────────────────────────────────────────────────────
-
-function StageStrip({ status, skippedStages = [] }: { status: string; skippedStages?: string[] }) {
-  const idx = EMERGENCY_STAGES.indexOf(status);
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, marginBottom: 20, overflowX: 'auto', paddingBottom: 2 }}>
-      {EMERGENCY_STAGES.map((s, i) => {
-        const isPast = i < idx;
-        const isCurrent = i === idx;
-        const isSkipped = skippedStages.includes(s);
-        const isLast = i === EMERGENCY_STAGES.length - 1;
-        return (
-          <React.Fragment key={s}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-              <div style={{
-                width: 22, height: 22, borderRadius: '50%',
-                background: isSkipped ? '#E2E8F0' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#E2E8F0',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: isCurrent ? '2px solid #F47651' : 'none',
-                opacity: isSkipped ? 0.4 : 1,
-              }}>
-                {isPast && !isSkipped && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6 9 17l-5-5"/></svg>}
-                {isSkipped && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="3"><path d="M5 12h14"/></svg>}
-                {isCurrent && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
-              </div>
-              <div style={{ fontSize: 8.5, fontWeight: isCurrent ? 700 : 500, color: isSkipped ? '#CBD5E1' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#94A3B8', marginTop: 3, whiteSpace: 'nowrap' }}>
-                {STAGE_LABELS[s]}{isSkipped ? ' (skipped)' : ''}
-              </div>
-            </div>
-            {!isLast && <div style={{ height: 2, flex: 1, minWidth: 12, background: (isPast && !isSkipped) ? '#16A34A' : '#E2E8F0', marginTop: 10, flexShrink: 0 }} />}
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function Maintenance() {
   const { activeProfile } = useRoleContext();
+  const toast = useToast();
   const role = activeProfile.id;
   const isTechnician = role === 'technician_shd';
   const isAdmin = role === 'admin';
@@ -180,14 +47,16 @@ export function Maintenance() {
 
   // Data
   const [tab, setTab] = useState<'periodic' | 'emergency' | 'schedule'>('periodic');
-  const [tickets, setTickets] = useState<any[]>([]);
-  const [schedules, setSchedules] = useState<any[]>([]);
+  const [tickets, setTickets] = useState<TicketRow[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   // Panel state
-  const [completingSchedule, setCompletingSchedule] = useState<any | null>(null);
-  const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
-  const [selectedStoreReq, setSelectedStoreReq] = useState<any | null>(null);
+  const [completingSchedule, setCompletingSchedule] = useState<ScheduleRow | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<TicketRow | null>(null);
+  const [selectedStoreReq, setSelectedStoreReq] = useState<StoreReqRow | null>(null);
   const [showRaisePanel, setShowRaisePanel] = useState(false);
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
 
@@ -228,26 +97,40 @@ export function Maintenance() {
   // ── Data loading ──────────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
-    const [{ data: ticketsData }, { data: schedulesData }, { data: plantsData }] = await Promise.all([
-      (supabase.from('maintenance_tickets').select('*, plants(name)').order('created_at', { ascending: false }) as any),
-      (supabase.from('maintenance_schedules').select('*, plants(name)').order('next_due_at', { ascending: true }) as any),
-      (supabase.from('plants').select('id, name') as any),
-    ]);
-    setTickets(ticketsData || []);
-    setSchedules(schedulesData || []);
-    if (plantsData?.length) setDbPlants(plantsData);
+    let ticketsData: TicketRow[] | null = null;
+    let schedulesData: ScheduleRow[] | null = null;
+    try {
+      const [tRes, sRes, pRes] = await Promise.all([
+        supabase.from('maintenance_tickets').select('*, plants(name)').order('created_at', { ascending: false }).returns<TicketRow[]>(),
+        supabase.from('maintenance_schedules').select('*, plants(name)').order('next_due_at', { ascending: true }).returns<ScheduleRow[]>(),
+        supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+      ]);
+      if (tRes.error) throw tRes.error;
+      if (sRes.error) throw sRes.error;
+      ticketsData = tRes.data;
+      schedulesData = sRes.data;
+      setTickets(ticketsData || []);
+      setSchedules(schedulesData || []);
+      if (pRes.data?.length) setDbPlants(pRes.data);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[Maintenance] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
 
     if (schedulesData) {
       for (const s of schedulesData) {
         if (!s.is_active || !s.next_due_at) continue;
         if (new Date(s.next_due_at) > new Date()) continue;
-        const hasOpen = (ticketsData || []).some((t: any) => t.schedule_id === s.id && t.status !== 'closed');
+        const hasOpen = (ticketsData || []).some((t) => t.schedule_id === s.id && t.status !== 'closed');
         if (hasOpen) continue;
-        const { data: newT } = await (supabase.from('maintenance_tickets') as any).insert({
+        const { data: newT } = await insertRows('maintenance_tickets', {
           type: 'periodic', status: 'open', title: s.title,
           equipment: s.equipment, plant_id: s.plant_id || null,
           schedule_id: s.id, description: s.description || null,
-          due_date: s.next_due_at?.split('T')[0],
+          due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
         }).select('*, plants(name)').single();
         if (newT) {
           notify({
@@ -266,8 +149,8 @@ export function Maintenance() {
 
   useEffect(() => {
     if (!selectedTicket) { setSelectedStoreReq(null); return; }
-    (supabase.from('maintenance_store_requests').select('*').eq('ticket_id', selectedTicket.id).limit(1) as any)
-      .then(({ data }: any) => setSelectedStoreReq(data?.[0] || null));
+    supabase.from('maintenance_store_requests').select('*').eq('ticket_id', selectedTicket.id).limit(1).returns<StoreReqRow[]>()
+      .then(({ data }) => setSelectedStoreReq(data?.[0] || null));
   }, [selectedTicket?.id]);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : ['SHD', 'Rehla', 'Ganjam', 'HQ'];
@@ -282,19 +165,19 @@ export function Maintenance() {
   const openEmergency = emergencyTickets.filter(t => t.status !== 'closed').length;
   const pendingStore = emergencyTickets.filter(t => ['pending_store', 'pending_unit_head'].includes(t.status)).length;
   const pendingPurchase = emergencyTickets.filter(t => ['pending_purchase', 'pending_handover'].includes(t.status)).length;
-  const closedMTD = emergencyTickets.filter(t => t.status === 'closed' && t.closed_at >= monthStart).length;
+  const closedMTD = emergencyTickets.filter(t => t.status === 'closed' && !!t.closed_at && t.closed_at >= monthStart).length;
 
   const dueToday = periodicTickets.filter(t => t.status === 'open' && t.due_date === today).length;
   const dueWeek = periodicTickets.filter(t => { const d = daysFromNow(t.due_date); return t.status === 'open' && d !== null && d >= 0 && d <= 7; }).length;
   const overdue = periodicTickets.filter(t => { const d = daysFromNow(t.due_date); return t.status === 'open' && d !== null && d < 0; }).length;
-  const closedPeriodicMTD = periodicTickets.filter(t => t.status === 'closed' && t.closed_at >= monthStart).length;
+  const closedPeriodicMTD = periodicTickets.filter(t => t.status === 'closed' && !!t.closed_at && t.closed_at >= monthStart).length;
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
   async function handleRaiseTicket() {
     if (!raiseForm.equipment.trim()) return;
     const plant = dbPlants.find(p => p.name === raiseForm.plant);
-    const { data: newTicket, error } = await (supabase.from('maintenance_tickets') as any).insert({
+    const { data: newTicket, error } = await insertRows('maintenance_tickets', {
       type: 'emergency', status: 'open',
       title: `${raiseForm.equipment} — ${raiseForm.assessment === 'repairable' ? 'Repairable' : 'Needs part'}`,
       equipment: raiseForm.equipment,
@@ -302,7 +185,7 @@ export function Maintenance() {
       description: raiseForm.description || null,
       raised_by: activeProfile.name, raised_role: role,
     }).select('*, plants(name)').single();
-    if (error) { alert(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(`Failed: ${error.message}`); return; }
     notify({
       target_roles: ['admin', 'unit_head', 'store_manager_maint'],
       title: `Maintenance ticket raised: ${raiseForm.equipment}`,
@@ -327,25 +210,24 @@ export function Maintenance() {
     try {
       let ticket = tickets.find(t => t.schedule_id === completingSchedule.id && t.status === 'open');
       if (!ticket) {
-        const { data } = await (supabase.from('maintenance_tickets') as any).insert({
+        const { data } = await insertRows('maintenance_tickets', {
           type: 'periodic', status: 'open', title: completingSchedule.title,
           equipment: completingSchedule.equipment, plant_id: completingSchedule.plant_id || null,
-          schedule_id: completingSchedule.id, due_date: completingSchedule.next_due_at?.split('T')[0],
+          schedule_id: completingSchedule.id,
+          due_date: completingSchedule.next_due_at ? completingSchedule.next_due_at.split('T')[0] : null,
           raised_by: activeProfile.name, raised_role: role,
         }).select('*, plants(name)').single();
-        ticket = data;
+        ticket = data ?? undefined;
       }
       if (!ticket) throw new Error('Could not create ticket');
       const result = await uploadMaintenancePhoto(completionBlob, {
         ticketId: ticket.id, plantName: ticket.plants?.name || completingSchedule.plants?.name || 'Plant',
         photoType: 'completion', onProgress: setUploadPct,
       });
-      await (supabase.from('maintenance_tickets') as any)
-        .update({ status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: activeProfile.name })
+      await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: activeProfile.name })
         .eq('id', ticket.id);
       const nextDue = calculateNextDue(completingSchedule.frequency);
-      await (supabase.from('maintenance_schedules') as any)
-        .update({ last_completed_at: new Date().toISOString(), next_due_at: nextDue })
+      await updateRows('maintenance_schedules', { last_completed_at: new Date().toISOString(), next_due_at: nextDue })
         .eq('id', completingSchedule.id);
       notify({
         target_roles: ['admin', 'unit_head'],
@@ -356,14 +238,14 @@ export function Maintenance() {
       });
       setCompletingSchedule(null); setCompletionBlob(null); setUploadPct(0);
       await loadData();
-    } catch (err: any) { alert(`Upload failed: ${err.message}`); }
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
   async function handleRaiseStoreReq() {
     if (!storeForm.partName.trim() || !selectedTicket) return;
     const plant = dbPlants.find(p => p.name === selectedTicket.plants?.name);
-    const { data: sr } = await (supabase.from('maintenance_store_requests') as any).insert({
+    const { data: sr } = await insertRows('maintenance_store_requests', {
       ticket_id: selectedTicket.id, part_name: storeForm.partName,
       quantity: parseFloat(storeForm.quantity) || null,
       specification: storeForm.specification || null,
@@ -371,7 +253,7 @@ export function Maintenance() {
     }).select('*').single();
     setSelectedStoreReq(sr);
     await updateTicketStatus(selectedTicket.id, 'pending_store');
-    setSelectedTicket((t: any) => t ? { ...t, status: 'pending_store' } : t);
+    setSelectedTicket((t) => t ? { ...t, status: 'pending_store' } : t);
     notify({
       target_roles: ['admin', 'store_manager_maint', 'warehouse_manager'],
       title: `Store part needed: ${storeForm.partName}`,
@@ -387,7 +269,7 @@ export function Maintenance() {
   async function startRepair() {
     if (!selectedTicket) return;
     await updateTicketStatus(selectedTicket.id, 'in_progress', { assigned_to: activeProfile.name });
-    setSelectedTicket((t: any) => t ? { ...t, status: 'in_progress' } : t);
+    setSelectedTicket((t) => t ? { ...t, status: 'in_progress' } : t);
     await loadData();
   }
 
@@ -411,7 +293,7 @@ export function Maintenance() {
       });
       setSelectedTicket(null); setCompletionBlob(null); setUploadPct(0);
       await loadData();
-    } catch (err: any) { alert(`Upload failed: ${err.message}`); }
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
@@ -419,8 +301,7 @@ export function Maintenance() {
   async function submitStoreDecision() {
     if (!selectedTicket || !selectedStoreReq || storeDecisionForm.available === null) return;
     const available = storeDecisionForm.available;
-    await (supabase.from('maintenance_store_requests') as any)
-      .update({
+    await updateRows('maintenance_store_requests', {
         store_decision: available ? 'available' : 'unavailable',
         purchase_required: !available,
         qty_in_store: available ? (parseFloat(storeDecisionForm.qtyInStore) || null) : null,
@@ -429,8 +310,8 @@ export function Maintenance() {
       })
       .eq('id', selectedStoreReq.id);
     await updateTicketStatus(selectedTicket.id, 'pending_unit_head');
-    setSelectedTicket((t: any) => t ? { ...t, status: 'pending_unit_head' } : t);
-    setSelectedStoreReq((sr: any) => sr ? {
+    setSelectedTicket((t) => t ? { ...t, status: 'pending_unit_head' } : t);
+    setSelectedStoreReq((sr) => sr ? {
       ...sr,
       store_decision: available ? 'available' : 'unavailable',
       purchase_required: !available,
@@ -458,11 +339,10 @@ export function Maintenance() {
     // If part unavailable + approved → pending_purchase (Vijay procures)
     // If rejected → open (tech re-assesses)
     const nextStatus = !approved ? 'open' : partAvailable ? 'pending_handover' : 'pending_purchase';
-    await (supabase.from('maintenance_store_requests') as any)
-      .update({ unit_head_approval: approved ? 'approved' : 'rejected' })
+    await updateRows('maintenance_store_requests', { unit_head_approval: approved ? 'approved' : 'rejected' })
       .eq('id', selectedStoreReq.id);
     await updateTicketStatus(selectedTicket.id, nextStatus);
-    setSelectedTicket((t: any) => t ? { ...t, status: nextStatus } : t);
+    setSelectedTicket((t) => t ? { ...t, status: nextStatus } : t);
     if (approved && partAvailable) {
       notify({
         target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'],
@@ -493,11 +373,10 @@ export function Maintenance() {
 
   async function markPurchased() {
     if (!selectedTicket || !selectedStoreReq || !busyRef.trim()) return;
-    await (supabase.from('maintenance_store_requests') as any)
-      .update({ busy_transaction_ref: busyRef })
+    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef })
       .eq('id', selectedStoreReq.id);
     await updateTicketStatus(selectedTicket.id, 'pending_handover');
-    setSelectedTicket((t: any) => t ? { ...t, status: 'pending_handover' } : t);
+    setSelectedTicket((t) => t ? { ...t, status: 'pending_handover' } : t);
     notify({
       target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'],
       title: `Part procured: ${selectedStoreReq.part_name}`,
@@ -511,7 +390,7 @@ export function Maintenance() {
   // Store manager: upload invoice + product photo, confirm physical handover to technician
   async function confirmHandover() {
     if (!selectedTicket || !selectedStoreReq) return;
-    if (!handoverInvoiceBlob && !handoverPhotoBlob) { alert('Please upload at least the invoice or product photo before confirming handover.'); return; }
+    if (!handoverInvoiceBlob && !handoverPhotoBlob) { toast.error('Please upload at least the invoice or product photo before confirming handover.'); return; }
     setUploading(true);
     try {
       let invoiceUrl: string | null = null;
@@ -530,8 +409,7 @@ export function Maintenance() {
         });
         photoUrl = r.secure_url;
       }
-      await (supabase.from('maintenance_store_requests') as any)
-        .update({
+      await updateRows('maintenance_store_requests', {
           ...(invoiceUrl ? { handover_invoice_url: invoiceUrl } : {}),
           ...(photoUrl ? { handover_photo_url: photoUrl } : {}),
           ...(handoverNotes.trim() ? { handover_notes: handoverNotes } : {}),
@@ -540,7 +418,7 @@ export function Maintenance() {
         })
         .eq('id', selectedStoreReq.id);
       await updateTicketStatus(selectedTicket.id, 'pending_defective_return');
-      setSelectedTicket((t: any) => t ? { ...t, status: 'pending_defective_return' } : t);
+      setSelectedTicket((t) => t ? { ...t, status: 'pending_defective_return' } : t);
       notify({
         target_roles: ['technician_shd', 'admin', 'unit_head'],
         title: `Part handed over: ${selectedStoreReq.part_name}`,
@@ -550,7 +428,7 @@ export function Maintenance() {
       });
       setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); setUploadPct(0);
       await loadData();
-    } catch (err: any) { alert(`Upload failed: ${err.message}`); }
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
@@ -577,20 +455,20 @@ export function Maintenance() {
       });
       setSelectedTicket(null); setDefectiveBlob(null); setDefectiveDecision(''); setUploadPct(0);
       await loadData();
-    } catch (err: any) { alert(`Upload failed: ${err.message}`); }
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
   async function handleAddSchedule() {
     if (!scheduleForm.title.trim() || !scheduleForm.equipment.trim()) return;
     const plant = dbPlants.find(p => p.name === scheduleForm.plant);
-    const { error } = await (supabase.from('maintenance_schedules') as any).insert({
+    const { error } = await insertRows('maintenance_schedules', {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
-      plant_id: plant?.id || null, frequency: scheduleForm.frequency,
+      plant_id: plant?.id || null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
       description: scheduleForm.description || null, is_active: true,
       next_due_at: scheduleForm.firstDue ? new Date(scheduleForm.firstDue).toISOString() : null,
     });
-    if (error) { alert(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(`Failed: ${error.message}`); return; }
     setScheduleSaved(true);
     await loadData();
     setTimeout(() => {
@@ -903,6 +781,17 @@ export function Maintenance() {
         )}
       </div>
 
+      {loadError ? (
+        <ErrorState
+          title="Couldn't load maintenance"
+          message="The maintenance tickets and schedules failed to load. Check your connection and try again."
+          onRetry={() => { setLoading(true); setLoadError(false); loadData(); }}
+        />
+      ) : loading ? (
+        <div className="card p-5"><SkeletonRows rows={6} /></div>
+      ) : (
+      <>
+
       {/* ── PERIODIC TAB ─────────────────────────────────────────────────── */}
       {tab === 'periodic' && (
         <>
@@ -1082,6 +971,9 @@ export function Maintenance() {
             </table>
           </div>
         </div>
+      )}
+
+      </>
       )}
 
       {/* ── PANEL: Raise ticket ──────────────────────────────────────────── */}

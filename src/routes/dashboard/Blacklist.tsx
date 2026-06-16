@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import { insertRows, updateRows } from '../../lib/db';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
+import { useToast } from '../../components/ui/toast';
 import type { BlacklistEntry } from '../../contexts/BlacklistContext';
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -55,6 +57,7 @@ const BLANK_RESOLVE = { reason: '' };
 
 export function Blacklist() {
   const { activeProfile } = useRoleContext();
+  const toast = useToast();
 
   const [entries, setEntries] = useState<BlacklistEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +81,7 @@ export function Blacklist() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await (supabase.from('blacklist').select('*').order('created_at', { ascending: false }) as any);
+    const { data } = await supabase.from('blacklist').select('*').order('created_at', { ascending: false }).returns<BlacklistEntry[]>();
     setEntries(data || []);
     setLoading(false);
   }, []);
@@ -121,11 +124,11 @@ export function Blacklist() {
       added_by_role: activeProfile.roleLabel,
       is_active: true,
     };
-    const { error } = await (supabase.from('blacklist') as any).insert(payload);
-    if (error) { alert(`Failed: ${error.message}`); return; }
+    const { error } = await insertRows('blacklist', payload);
+    if (error) { toast.error(`Failed: ${error.message}`); return; }
 
     // Notify admin + unit_head
-    (supabase.from('notifications') as any).insert({
+    insertRows('notifications', {
       target_roles: ['admin', 'unit_head'],
       title: `New blacklist entry added`,
       body: `${TYPE_CFG[form.type].label} "${form.name.trim()}" blacklisted (${form.severity}) by ${activeProfile.name}`,
@@ -134,7 +137,7 @@ export function Blacklist() {
       actor_name: activeProfile.name,
       actor_role: activeProfile.roleLabel,
       read_by: [],
-    }).then(() => {}).catch(() => {});
+    }).then(() => {}, () => {});
 
     setSaved(true);
     await load();
@@ -148,17 +151,16 @@ export function Blacklist() {
   // ── Resolve (remove from blacklist) ────────────────────────────────────────
   async function handleResolve() {
     if (!resolvingEntry || !resolveForm.reason.trim()) return;
-    const { error } = await (supabase.from('blacklist') as any)
-      .update({
+    const { error } = await updateRows('blacklist', {
         is_active: false,
         resolved_at: new Date().toISOString(),
         resolved_by: activeProfile.name,
         resolved_reason: resolveForm.reason.trim(),
       })
       .eq('id', resolvingEntry.id);
-    if (error) { alert(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(`Failed: ${error.message}`); return; }
 
-    (supabase.from('notifications') as any).insert({
+    insertRows('notifications', {
       target_roles: ['admin', 'unit_head'],
       title: `Blacklist entry resolved`,
       body: `"${resolvingEntry.name}" removed from blacklist by ${activeProfile.name}`,
@@ -167,7 +169,7 @@ export function Blacklist() {
       actor_name: activeProfile.name,
       actor_role: activeProfile.roleLabel,
       read_by: [],
-    }).then(() => {}).catch(() => {});
+    }).then(() => {}, () => {});
 
     setResolveSaved(true);
     await load();
@@ -181,8 +183,7 @@ export function Blacklist() {
 
   // ── Re-blacklist ────────────────────────────────────────────────────────────
   async function reBlacklist(entry: BlacklistEntry) {
-    await (supabase.from('blacklist') as any)
-      .update({ is_active: true, resolved_at: null, resolved_by: null, resolved_reason: null })
+    await updateRows('blacklist', { is_active: true, resolved_at: null, resolved_by: null, resolved_reason: null })
       .eq('id', entry.id);
     await load();
   }

@@ -1,23 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelTextarea, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
+import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import type { Database } from '../../../lib/database.types';
+
+type LabourRow = Database['public']['Tables']['labour_costs']['Row'] & { plants?: { name: string | null } | null };
 
 export function Labour() {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [costs, setCosts] = useState<any[]>([]);
+  const [costs, setCosts] = useState<LabourRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [form, setForm] = useState({ baseRate: '1487', targetRate: '1450', overhead: '12', transport: '85', reason: '' });
 
-  useEffect(() => {
-    async function load() {
-      const { data } = await (supabase
+  async function load() {
+    try {
+      const { data, error } = await supabase
         .from('labour_costs')
         .select('*, plants(name)')
-        .order('date', { ascending: false }) as any);
+        .order('date', { ascending: false })
+        .returns<LabourRow[]>();
+      if (error) throw error;
       setCosts(data || []);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[Labour] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -75,6 +90,12 @@ export function Labour() {
             Edit formula
           </button>
         </div>
+        {loadError ? (
+          <ErrorState title="Couldn't load labour costs" message="The labour cost records failed to load."
+            onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
+        ) : loading ? (
+          <SkeletonRows rows={5} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -118,6 +139,7 @@ export function Labour() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* Slide panel */}

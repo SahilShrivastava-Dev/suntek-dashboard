@@ -11,7 +11,8 @@
  * Route: /dashboard/daily-log
  */
 import React, { useState, useRef, useCallback } from 'react';
-import { supabase } from '../../lib/supabase';
+import { insertRows } from '../../lib/db';
+import { useToast } from '../../components/ui/toast';
 import {
   extractDailyLog,
   resizeImageToDataUrl,
@@ -61,6 +62,7 @@ function rowVal(r: EditableReading, key: keyof DailyLogReading): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function DailyLogPage() {
+  const toast = useToast();
   const [stage, setStage]           = useState<Stage>('idle');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError]           = useState<string | null>(null);
@@ -98,8 +100,8 @@ export function DailyLogPage() {
       // 1200px is sufficient for the 11B model and keeps the base64 payload small
       apiImageRef.current = await resizeImageToDataUrl(file, 1200);
       setStage('ready');
-    } catch (e: any) {
-      setError(`Image processing failed: ${e?.message ?? e}`); setStage('error');
+    } catch (e) {
+      setError(`Image processing failed: ${e instanceof Error ? e.message : String(e)}`); setStage('error');
     }
   }, []);
 
@@ -132,8 +134,8 @@ export function DailyLogPage() {
         })
       );
       setStage('review');
-    } catch (e: any) {
-      setError(e?.message ?? String(e)); setStage('error');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e)); setStage('error');
     }
   };
 
@@ -171,7 +173,7 @@ export function DailyLogPage() {
   // ── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (!date) { alert('Date is required.'); return; }
+    if (!date) { toast.error('Date is required.'); return; }
     setStage('saving');
 
     try {
@@ -190,12 +192,12 @@ export function DailyLogPage() {
       };
 
       // Try inserting into unit_log_entries; fallback to audit log if table doesn't exist
-      const { error: insertErr } = await (supabase.from('unit_log_entries') as any).insert(payload);
+      const { error: insertErr } = await insertRows('unit_log_entries', payload);
 
       if (insertErr) {
         // Table might not exist yet — store in audit log as fallback
         console.warn('[DailyLogPage] unit_log_entries insert failed, falling back to audit log:', insertErr.message);
-        await (supabase.from('batch_edit_logs') as any).insert({
+        await insertRows('batch_edit_logs', {
           batch_no: `daily-log-${date}`,
           action_type: 'daily_log_upload',
           details: payload,
@@ -205,8 +207,8 @@ export function DailyLogPage() {
 
       setDoneSummary(`${readings.length} hourly readings · ${date} · ${shift}`);
       setStage('done');
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
       setStage('error');
     }
   };
@@ -413,7 +415,7 @@ export function DailyLogPage() {
           </div>
 
           {/* Truncation warning */}
-          {(rawData as any)?._truncated && (
+          {(rawData as { _truncated?: boolean } | null)?._truncated && (
             <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-xl p-3">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" className="shrink-0 mt-0.5">
                 <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>

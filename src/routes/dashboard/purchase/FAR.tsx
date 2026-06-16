@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { insertRows } from '../../../lib/db';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
+import { useToast } from '../../../components/ui/toast';
+import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import type { Database } from '../../../lib/database.types';
+
+type AssetRow = Database['public']['Tables']['fixed_assets']['Row'] & { plants?: { name: string | null } | null };
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -21,10 +27,13 @@ const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 const ACCOUNT_HEADS = ['Plant & Machinery', 'Electrical Equipment', 'Vehicles', 'Furniture & Fixtures', 'Computer & Peripherals', 'Office Equipment'];
 
 export function FAR() {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [assets, setAssets] = useState<any[]>([]);
+  const [assets, setAssets] = useState<AssetRow[]>([]);
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({
     mark: '', model: '', capacity: '', origin: 'India',
@@ -33,19 +42,29 @@ export function FAR() {
     account: 'Plant & Machinery', plant: 'SHD',
   });
 
-  useEffect(() => {
-    async function load() {
-      const { data: plantsData } = await (supabase.from('plants').select('id, name') as any);
+  async function load() {
+    try {
+      const { data: plantsData } = await supabase.from('plants').select('id, name')
+        .returns<{ id: string; name: string }[]>();
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
-      const { data } = await (supabase
+      const { data, error } = await supabase
         .from('fixed_assets')
         .select('*, plants(name)')
-        .order('created_at', { ascending: false }) as any);
+        .order('created_at', { ascending: false })
+        .returns<AssetRow[]>();
+      if (error) throw error;
       setAssets(data || []);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[FAR] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
 
@@ -68,8 +87,8 @@ export function FAR() {
     if (!form.mark.trim() || !form.model.trim()) return;
     const plant = dbPlants.find(p => p.name === form.plant);
     const plantId = plant?.id || dbPlants[0]?.id || null;
-    const { data, error } = await (supabase.from('fixed_assets') as any).insert({
-      ...(plantId ? { plant_id: plantId } : {}),
+    const { data, error } = await insertRows('fixed_assets', {
+      plant_id: plantId,
       name: form.mark,
       identification_mark: form.mark,
       model: form.model || null,
@@ -83,10 +102,10 @@ export function FAR() {
     }).select('*, plants(name)').single();
 
     if (error) {
-      alert(`Save failed: ${error.message}`);
+      toast.error(`Save failed: ${error.message}`);
       return;
     }
-    if (data) setAssets(prev => [data, ...prev]);
+    if (data) setAssets(prev => [data as AssetRow, ...prev]);
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ mark: '', model: '', capacity: '', origin: 'India', year: new Date().getFullYear().toString(), value: '', invoice: '', purchaseDate: today, account: 'Plant & Machinery', plant: 'SHD' }); }, 1600);
   }
@@ -135,6 +154,15 @@ export function FAR() {
             + Register asset
           </button>
         </div>
+        {loadError ? (
+          <ErrorState
+            title="Couldn't load the asset register"
+            message="The fixed-asset records failed to load."
+            onRetry={() => { setLoading(true); setLoadError(false); load(); }}
+          />
+        ) : loading ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -174,6 +202,7 @@ export function FAR() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* Slide panel */}

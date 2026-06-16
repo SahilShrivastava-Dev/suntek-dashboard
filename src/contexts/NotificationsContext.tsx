@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { insertRows, updateRows } from '../lib/db';
 import { useRoleContext } from './RoleContext';
 
 export interface AppNotification {
@@ -47,12 +48,13 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   // Load notifications for the current role from Supabase
   const loadNotifications = useCallback(async () => {
     try {
-      const { data, error } = await (supabase
+      const { data, error } = await supabase
         .from('notifications')
         .select('*')
         .contains('target_roles', [roleId])
         .order('created_at', { ascending: false })
-        .limit(50) as any);
+        .limit(50)
+        .returns<AppNotification[]>();
       if (error) {
         // Table doesn't exist yet — degrade gracefully
         if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('notifications')) {
@@ -80,7 +82,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         event: 'INSERT',
         schema: 'public',
         table: 'notifications',
-      }, (payload: any) => {
+      }, (payload) => {
         const n = payload.new as AppNotification;
         if (n.target_roles?.includes(roleId)) {
           setNotifications(prev => [n, ...prev]);
@@ -100,16 +102,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       )
     );
     // Persist read state to DB (non-blocking) — optimistic local state is primary
-    (supabase.from('notifications') as any)
-      .select('read_by').eq('id', id).single()
-      .then(({ data }: any) => {
-        if (data && !data.read_by?.includes(roleId)) {
-          (supabase.from('notifications') as any)
-            .update({ read_by: [...(data.read_by || []), roleId] })
+    supabase.from('notifications')
+      .select('read_by').eq('id', id).limit(1).returns<{ read_by: string[] | null }[]>()
+      .then(({ data }) => {
+        const row = data?.[0];
+        if (row && !row.read_by?.includes(roleId)) {
+          updateRows('notifications', { read_by: [...(row.read_by || []), roleId] })
             .eq('id', id)
-            .then(() => {}).catch(() => {});
+            .then(() => {}, () => {});
         }
-      }).catch(() => {});
+      }, () => {});
   }
 
   function markAllRead() {
@@ -121,10 +123,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   async function addNotification(n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) {
     if (!tableReady) return;
-    await (supabase.from('notifications') as any).insert({
+    await insertRows('notifications', {
       ...n,
       read_by: [],
-    }).then(() => {}).catch(() => {});
+    }).then(() => {}, () => {});
   }
 
   return (

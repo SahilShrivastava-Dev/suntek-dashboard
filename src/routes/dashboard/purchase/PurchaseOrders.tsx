@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { insertRows } from '../../../lib/db';
 import { exportToXlsx } from '../../../lib/utils/exportXlsx';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelSection, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
+import { useToast } from '../../../components/ui/toast';
+import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import type { Database } from '../../../lib/database.types';
+
+type OrderRow = Database['public']['Tables']['oil_contracts']['Row'];
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -27,29 +33,41 @@ const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 const UNITS  = ['nos', 'kg', 'MT', 'L', 'sets', 'boxes'];
 
 export function PurchaseOrders() {
+  const toast = useToast();
   const [filter, setFilter] = useState('all');
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const { activeProfile } = useRoleContext();
   const [form, setForm] = useState({ material: '', type: 'PO', supplier: '', destination: 'SHD', qty: '', unit: 'nos', value: '', notes: '' });
 
-  useEffect(() => {
-    async function load() {
-      const { data } = await (supabase
+  async function load() {
+    try {
+      const { data, error } = await supabase
         .from('oil_contracts')
         .select('*')
-        .order('created_at', { ascending: false }) as any);
+        .order('created_at', { ascending: false })
+        .returns<OrderRow[]>();
+      if (error) throw error;
       setOrders(data || []);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[PurchaseOrders] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
   async function handleSave() {
     if (!form.material.trim() || !form.supplier.trim()) return;
-    const { data, error } = await (supabase.from('oil_contracts') as any).insert({
+    const { data, error } = await insertRows('oil_contracts', {
       oil_type: form.material,
       company: form.supplier,
       date: new Date().toISOString().split('T')[0],
@@ -58,8 +76,8 @@ export function PurchaseOrders() {
       port: form.destination,
     }).select('*').single();
 
-    if (error) { alert(`Save failed: ${error.message}`); return; }
-    if (data) setOrders(prev => [data, ...prev]);
+    if (error) { toast.error(`Save failed: ${error.message}`); return; }
+    if (data) setOrders(prev => [data as OrderRow, ...prev]);
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ material: '', type: 'PO', supplier: '', destination: 'SHD', qty: '', unit: 'nos', value: '', notes: '' }); }, 1600);
   }
@@ -141,6 +159,12 @@ export function PurchaseOrders() {
             </button>
           </div>
         </div>
+        {loadError ? (
+          <ErrorState title="Couldn't load purchase orders" message="The purchase order records failed to load."
+            onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
+        ) : loading ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -171,6 +195,7 @@ export function PurchaseOrders() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* Modal */}

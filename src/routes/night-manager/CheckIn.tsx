@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { validateGeofence } from '../../lib/algorithms/geofencing';
 import { uploadCheckinPhoto } from '../../lib/cloudinary';
-import { supabase } from '../../lib/supabase';
+import { insertRows } from '../../lib/db';
 
 // ── Plant config ── Replace with real coordinates before production ──────────
 const PLANT_LAT      = 24.1856;
@@ -87,11 +87,11 @@ export function CheckIn({ embedded = false }: CheckInProps) {
       });
       streamRef.current = stream;
       setCameraState('live');         // triggers useEffect to bind to <video>
-    } catch (err: any) {
+    } catch (err) {
       console.warn('getUserMedia failed, falling back to file input:', err);
       setCameraState('cam_error');
       setCameraError(
-        err.name === 'NotAllowedError'
+        (err instanceof Error && err.name === 'NotAllowedError')
           ? 'Camera permission denied. Please allow camera access and try again.'
           : 'Could not access camera. Using file picker instead.'
       );
@@ -211,16 +211,16 @@ export function CheckIn({ embedded = false }: CheckInProps) {
       });
       finalPhotoUrl = result.secure_url;
       setCloudinaryUrl(finalPhotoUrl);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Cloudinary upload failed:', err);
-      setSubmitError(`Photo upload failed: ${err.message}`);
+      setSubmitError(`Photo upload failed: ${err instanceof Error ? err.message : String(err)}`);
       setSubmitState('error');
       return;
     }
 
     // 2 ── Save record to Supabase ─────────────────────────────────────────
     setSubmitState('saving');
-    const { error: dbError } = await (supabase.from('shift_logs') as any).insert({
+    const { error: dbError } = await insertRows('shift_logs', {
       photo_url:  finalPhotoUrl,
       lat:        gpsData.lat,
       lng:        gpsData.lng,
@@ -236,7 +236,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
 
     // 3 ── Notify admin/unit-head ──────────────────────────────────────────
     const zoneLabel = gpsData.isOnSite ? 'On-site ✓' : 'Out-of-zone ⚠️';
-    await (supabase.from('notifications') as any).insert({
+    insertRows('notifications', {
       target_roles: ['admin', 'unit_head'],
       title: `Night Manager check-in: ${PLANT_NAME}`,
       body: `${zoneLabel} · ${gpsData.lat.toFixed(4)}, ${gpsData.lng.toFixed(4)}`,
@@ -244,7 +244,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
       route: '/dashboard/night-manager',
       actor_name: PLANT_NAME,
       actor_role: 'night_manager',
-    }).then(() => {}).catch(() => {}); // non-blocking
+    }).then(() => {}, () => {}); // non-blocking
 
     setSubmitState('done');
   }

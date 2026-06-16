@@ -27,10 +27,11 @@ export function AuditLog() {
     setLoading(true);
 
     try {
-      const { data, error } = await (supabase
-        .from('batch_edit_logs') as any)
+      const { data, error } = await supabase
+        .from('batch_edit_logs')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .returns<AuditLogEntry[]>();
       if (!error && data) {
         setLogs(data);
       }
@@ -39,8 +40,8 @@ export function AuditLog() {
     }
 
     try {
-      const { count } = await (supabase
-        .from('operator_sessions') as any)
+      const { count } = await supabase
+        .from('operator_sessions')
         .select('*', { count: 'exact', head: true });
       setActiveSessionsCount(count || 0);
     } catch (e) {

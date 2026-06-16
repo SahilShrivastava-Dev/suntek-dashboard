@@ -13,7 +13,8 @@
  *   onCancel   — called when user discards
  */
 import React, { useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { insertRows, updateRows } from '../lib/db';
+import { useToast } from './ui/toast';
 import {
   parsePressureToKg,
   parseBatchTimestamp,
@@ -49,6 +50,7 @@ export function BatchSheetReview({
   onCancel,
   readOnly = false,
 }: BatchSheetReviewProps) {
+  const toast = useToast();
 
   // ── Header fields ─────────────────────────────────────────────────────────
   const [batchNo, setBatchNo]           = useState(data.batchNo ?? '');
@@ -108,7 +110,7 @@ export function BatchSheetReview({
   // ── Save ─────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (!batchNo) { alert('Batch number is required.'); return; }
+    if (!batchNo) { toast.error('Batch number is required.'); return; }
     setSaving(true);
     setSaveError(null);
 
@@ -124,15 +126,14 @@ export function BatchSheetReview({
 
       if (existing) {
         batchId = existing.id;
-        await (supabase.from('active_batches') as any).update({
+        await updateRows('active_batches', {
           final_gravity: fgNum,
           total_drums: drumsNum,
           paraffin_weight: parfNum,
           hcl_quantity: hclNum,
         }).eq('id', batchId);
       } else {
-        const { data: nb, error: e } = await (supabase.from('active_batches') as any)
-          .insert({
+        const { data: nb, error: e } = await insertRows('active_batches', {
             batch_no: batchNo,
             recipe: typeOfOil || 'Unknown',
             target_qty: 0,
@@ -161,12 +162,12 @@ export function BatchSheetReview({
         }));
 
       if (toInsert.length > 0) {
-        const { error: re } = await (supabase.from('batch_readings') as any).insert(toInsert);
+        const { error: re } = await insertRows('batch_readings', toInsert);
         if (re) throw re;
       }
 
       // 3. Audit log
-      await (supabase.from('batch_edit_logs') as any).insert({
+      await insertRows('batch_edit_logs', {
         ip_address: ipAddress ?? 'unknown',
         batch_no: batchNo,
         action_type: 'sheet_upload',

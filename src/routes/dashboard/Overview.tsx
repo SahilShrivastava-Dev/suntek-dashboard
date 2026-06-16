@@ -1,14 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  ALERTS, MODULES, TANKS, CP_LOCATIONS, CP_DENSITIES,
-  CP_MATRIX, BATCH_GRID_PATTERN
-} from '../../data/mockData';
+import { MODULES, BATCH_GRID_PATTERN } from '../../data/mockData';
+import { supabase } from '../../lib/supabase';
+import type { Database } from '../../lib/database.types';
+
+type AlertRow = Database['public']['Tables']['alerts']['Row'];
+type TankRow = Database['public']['Tables']['tanks']['Row'];
+type DrumRow = Database['public']['Tables']['cpm_drum_stock']['Row'];
 import {
   useOverviewKPIs, useTopCustomers, useRecentMovements, useAnalyticsKPIs, fmtINR,
 } from '../../hooks/useBusyData';
 import { DSOGauge, RingProgress, MiniBarChart, BulletCompare, DeltaBadge, OverdueAgingBar } from '../../components/charts/AnalyticsViz';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
+import { StockSnapshot } from '../../components/overview/StockSnapshot';
+import { AlertsPanel } from '../../components/overview/AlertsPanel';
 
 const now = new Date();
 
@@ -23,16 +28,6 @@ function toast(msg: string) {
 
 const COMPANIES = ['All', 'SCPL', 'SPPL', 'KG', 'Madan'];
 const PERIODS   = ['FY 26-27 · Q1', 'FY 26-27 · Q2', 'FY 26-27 · Q3', 'FY 26-27 · Q4', 'FY 26-27 · Full Year'];
-
-/** Map ALERTS.who → dashboard route for direct navigation */
-const ALERT_ROUTE: Record<string, string> = {
-  'Marine ledger':     '/dashboard/purchase/marine',
-  'CPM Stock':         '/dashboard/stock',
-  'Batch · Oil Ratio': '/dashboard/batches',
-  'Sales · Payments':  '/dashboard/sales',
-  'Night Manager':     '/dashboard/night-manager',
-  'Maintenance':       '/dashboard/purchase/maint',
-};
 
 /** Map movement type → dashboard route */
 const MOVE_ROUTE: Record<string, string> = {
@@ -53,6 +48,31 @@ export function Overview() {
   const { data: topCustomers } = useTopCustomers(3);
   const { data: busyMovements } = useRecentMovements(3);
   const { data: analytics } = useAnalyticsKPIs();
+
+  // Supabase snapshot data (alerts feed + stock snapshot)
+  const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  const [tanks, setTanks] = useState<TankRow[]>([]);
+  const [drumRows, setDrumRows] = useState<DrumRow[]>([]);
+  useEffect(() => {
+    (async () => {
+      const [alertsRes, tanksRes, drumsRes] = await Promise.all([
+        supabase.from('alerts').select('*').eq('is_resolved', false).order('created_at', { ascending: false }).returns<AlertRow[]>(),
+        supabase.from('tanks').select('*').order('sort_order', { ascending: true }).returns<TankRow[]>(),
+        supabase.from('cpm_drum_stock').select('*').returns<DrumRow[]>(),
+      ]);
+      setAlerts(alertsRes.data || []);
+      setTanks(tanksRes.data || []);
+      setDrumRows(drumsRes.data || []);
+    })();
+  }, []);
+
+  // Pivot drum rows into the density×location matrix (same shape as CPMStock).
+  const densities = [...new Set(drumRows.map(r => r.density))].sort((a, b) => a - b);
+  const locations = [...new Set(drumRows.map(r => r.location))];
+  const drumLookup = new Map(drumRows.map(r => [`${r.location}|${r.density}`, r.drums]));
+  const matrix: Record<string, number[]> = Object.fromEntries(
+    locations.map(loc => [loc, densities.map(d => drumLookup.get(`${loc}|${d}`) ?? 0)]),
+  );
 
   // Company + period filter dropdowns
   const [company, setCompany]         = useState('All');
@@ -85,8 +105,6 @@ export function Overview() {
   const displayCustomers = topCustomers && topCustomers.length > 0
     ? topCustomers.map(c => ({ name: c.name, mtdVal: fmtINR(c.mtdRevenue).replace('₹ ', '') }))
     : [{ name: '—', mtdVal: '—' }];
-
-  const sevColor: Record<string, string> = { red: '#DC2626', amber: '#D97706', low: '#475569' };
 
   return (
     <>
@@ -660,134 +678,16 @@ export function Overview() {
           </div>
         </div>
 
-        {/* Alerts card — items navigate to relevant section */}
-        <div className="col-span-12 lg:col-span-3 card p-6" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Open Alerts', what: 'Operational alerts across all modules — marine insurance balance, stock levels, batch timing, maintenance overdue. Colour-coded by severity (red=high, amber=medium, grey=low). Click any alert to navigate to the relevant module.', source: 'Mock data', note: 'Currently hardcoded in ALERTS constant (mockData.ts). Future: Supabase alerts table with real-time triggers.' }} />
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="text-base font-bold">Open alerts</div>
-              <div className="text-xs text-slate-500">Click to navigate · real-time</div>
-            </div>
-            <span className="badge" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>7 open</span>
-          </div>
-          <div className="space-y-2.5">
-            {ALERTS.map((a, i) => {
-              const route = ALERT_ROUTE[a.who];
-              return (
-                <div
-                  key={i}
-                  className={`flex items-center gap-3 p-2.5 rounded-2xl hover:bg-slate-50 transition-colors ${route ? 'cursor-pointer' : ''}`}
-                  onClick={() => route && navigate(route)}
-                >
-                  <div
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ background: sevColor[a.sev] || sevColor.low }}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm leading-tight">{a.text}</div>
-                    <div className="text-[11px] text-slate-400">{a.who} · {a.when}</div>
-                  </div>
-                  {route && (
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="2.4">
-                      <path d="m9 6 6 6-6 6"/>
-                    </svg>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <AlertsPanel alerts={alerts} onNavigate={(route) => navigate(route)} />
       </div>
 
-      {/* ── Stock snapshot ── */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        {/* CPM Matrix — green-soft */}
-        <div className="col-span-12 lg:col-span-7 card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'CPM Stock Matrix', what: 'Drums of CP (Chemical Product) on hand at each location, broken down by density grade. Cell shading intensity shows relative volume — darker = more stock. Click "Open Stock" for full inventory view.', source: 'Mock data', note: 'Dummy data from CP_MATRIX constant (mockData.ts). Future: Supabase stock_levels table, updated per batch completion and dispatch.' }} />
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
-            <div>
-              <div className="text-base font-bold">CPM Stock · density × location</div>
-              <div className="text-xs text-slate-500">Drums on hand, live · cell shading shows relative volume</div>
-            </div>
-            <button
-              className="btn-outline pill px-3 py-2 text-xs font-semibold"
-              onClick={() => navigate('/dashboard/stock')}
-            >
-              Open Stock →
-            </button>
-          </div>
-          <div className="overflow-x-auto scroll-x">
-            <table className="dt">
-              <thead>
-                <tr>
-                  <th>Location</th>
-                  {CP_DENSITIES.map(d => (
-                    <th key={d} className="num">d {d}</th>
-                  ))}
-                  <th className="num">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {CP_LOCATIONS.map(loc => {
-                  const row = CP_MATRIX[loc];
-                  const total = row.reduce((a, b) => a + b, 0);
-                  return (
-                    <tr key={loc}>
-                      <td className="font-semibold">{loc}</td>
-                      {row.map((v, i) => {
-                        const intensity = Math.min(v / 400, 1);
-                        return (
-                          <td key={i} className="num">
-                            <span style={{ background: `rgba(244,118,81,${intensity * 0.28})`, padding: '3px 10px', borderRadius: '8px' }}>
-                              {v}
-                            </span>
-                          </td>
-                        );
-                      })}
-                      <td className="num font-bold">{total}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Tank levels — each card navigates to Stock page */}
-        <div className="col-span-12 lg:col-span-5 card p-6" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Tank Levels', what: 'Current fill level of each raw material / output tank at port and factory locations. Red = low alert, orange = 30-70%, green = above 70%. Click any tank to open the full stock view.', source: 'Mock data', note: 'Dummy data from TANKS constant (mockData.ts). Future: real-time sensor feed or manual stock entry in Supabase.' }} />
-          <div className="text-base font-bold">Tank levels · port + factory</div>
-          <div className="text-xs text-slate-500 mb-4">Click any tank to open full stock view</div>
-          <div className="space-y-2.5">
-            {TANKS.map(tk => {
-              const color = tk.alert ? '#DC2626' : tk.level > 70 ? '#16A34A' : tk.level > 30 ? '#F47651' : '#D97706';
-              return (
-                <div
-                  key={tk.name}
-                  className="p-2.5 rounded-2xl border border-slate-100 hover:bg-slate-50 cursor-pointer hover:border-slate-200 transition-colors"
-                  onClick={() => navigate('/dashboard/stock')}
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div>
-                      <div className="font-semibold text-sm">{tk.name}</div>
-                      <div className="text-[11px] text-slate-500">{tk.loc} · cap {tk.cap} {tk.unit}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-bold num text-sm">{Math.round(tk.cap * tk.level / 100)} {tk.unit}</div>
-                      <div className="text-[11px] font-semibold" style={{ color }}>
-                        {tk.level}%{tk.alert ? ' · low' : ''}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="progress" style={{ height: '6px' }}>
-                    <div style={{ width: `${tk.level}%`, background: color }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+      <StockSnapshot
+        densities={densities}
+        locations={locations}
+        matrix={matrix}
+        tanks={tanks}
+        onOpenStock={() => navigate('/dashboard/stock')}
+      />
 
       {/* Toast element */}
       <div id="sk-toast" className="toast">Action recorded</div>

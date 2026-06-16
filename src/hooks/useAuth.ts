@@ -27,23 +27,25 @@ export function useAuth() {
   });
 
   async function fetchProfile(authUser: User, session: Session) {
-    // Use any to avoid strict type mismatch when Supabase project isn't configured yet
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', authUser.id)
-      .single();
+      .limit(1)
+      .returns<{ name: string; role: string; plant_id: string | null }[]>();
 
-    const profile = data as { name: string; role: string; plant_id: string | null } | null;
+    const profile = data?.[0];
 
     if (error || !profile) {
-      // Profile not found — use defaults for development
+      // Authenticated but no profile row — FAIL CLOSED: grant the lowest
+      // privilege (L1), never admin. A missing profile is a misconfiguration,
+      // not a reason to hand out full access.
       setState({
         user: {
           id: authUser.id,
           email: authUser.email,
           name: authUser.email?.split('@')[0] ?? 'User',
-          role: 'L4', // Default to admin for dev
+          role: 'L1',
           plantId: null,
         },
         session,

@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 
 
 export function Login() {
-  const { signIn, loading, error } = useAuth();
+  const { signIn, loading, error, session } = useAuth();
   const navigate = useNavigate();
+
+  // Already signed in → go straight to the dashboard.
+  useEffect(() => {
+    if (session) navigate('/dashboard', { replace: true });
+  }, [session, navigate]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -77,19 +82,22 @@ export function Login() {
             </button>
           </form>
 
-          {/* Dev bypass notice */}
-          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <p className="text-xs text-amber-700 font-medium">Development Mode</p>
-            <p className="text-xs text-amber-600 mt-0.5">
-              Supabase not configured yet. Sign in will use mock L4 admin access.
-            </p>
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="mt-2 text-xs font-semibold text-amber-700 underline hover:no-underline"
-            >
-              → Enter dashboard directly
-            </button>
-          </div>
+          {/* Dev bypass — only present in development builds. Production requires
+              a real Supabase sign-in (the dashboard auth gate enforces it). */}
+          {import.meta.env.DEV && (
+            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-xs text-amber-700 font-medium">Development Mode</p>
+              <p className="text-xs text-amber-600 mt-0.5">
+                Skip auth to preview the dashboard with the role switcher.
+              </p>
+              <button
+                onClick={() => navigate('/dashboard')}
+                className="mt-2 text-xs font-semibold text-amber-700 underline hover:no-underline"
+              >
+                → Enter dashboard directly
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Role guide */}

@@ -1,8 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { upsertRows } from '../../lib/db';
+import { useToast } from '../../components/ui/toast';
+import type { Database } from '../../lib/database.types';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+
+type DeviceMappingRow = Database['public']['Tables']['device_mappings']['Row'];
+type ShiftLogJoined = Database['public']['Tables']['shift_logs']['Row'] & {
+  profiles?: { name: string | null; role: string | null; phone: string | null } | null;
+  plants?: { name: string | null } | null;
+};
 
 const PIN_COLOR: Record<string, string> = {
   green: '#16A34A',
@@ -114,8 +123,9 @@ const createCustomIcon = (initials: string, status: string) => {
 };
 
 export function NightManagerBoard() {
+  const toast = useToast();
   const [liveDuty, setLiveDuty] = useState<CheckInLog[]>([]);
-  const [deviceMappings, setDeviceMappings] = useState<any[]>([]);
+  const [deviceMappings, setDeviceMappings] = useState<DeviceMappingRow[]>([]);
   const [selectedCheckIn, setSelectedCheckIn] = useState<CheckInLog | null>(null);
   
   // Start centered broadly on our Indian plants
@@ -135,7 +145,8 @@ export function NightManagerBoard() {
   const loadAllData = async () => {
     try {
       // 1. Fetch current mappings
-      const { data: mappingsData } = await supabase.from('device_mappings').select('*') as any;
+      const { data: mappingsData } = await supabase.from('device_mappings').select('*')
+        .returns<DeviceMappingRow[]>();
       const activeMappings = mappingsData || [];
       setDeviceMappings(activeMappings);
 
@@ -143,12 +154,13 @@ export function NightManagerBoard() {
       const { data: logsData } = await supabase
         .from('shift_logs')
         .select('*, profiles(name, role, phone), plants(name)')
-        .order('submitted_at', { ascending: false }) as any;
-      
+        .order('submitted_at', { ascending: false })
+        .returns<ShiftLogJoined[]>();
+
       const logs = logsData || [];
-      
+
       // 3. Format shift logs with mapping resolution
-      const formatted = logs.map((row: any, index: number) => {
+      const formatted = logs.map((row, index: number) => {
         const isGuest = !row.employee_id;
         const ip = row.ip_address;
         
@@ -158,7 +170,7 @@ export function NightManagerBoard() {
         let isMapped = false;
         
         if (isGuest && ip) {
-          const mapping = activeMappings.find((m: any) => m.ip_address === ip);
+          const mapping = activeMappings.find((m) => m.ip_address === ip);
           if (mapping) {
             name = mapping.name;
             role = mapping.department ? `${mapping.department} (Guest)` : 'Guest';
@@ -245,17 +257,15 @@ export function NightManagerBoard() {
     if (!modalData) return;
     setIsSubmittingMapping(true);
     try {
-      const { error } = await (supabase
-        .from('device_mappings') as any)
-        .upsert({
-          ip_address: modalData.ip_address,
-          name: modalData.name,
-          department: modalData.department || null,
-          phone: modalData.phone || null,
-        });
+      const { error } = await upsertRows('device_mappings', {
+        ip_address: modalData.ip_address,
+        name: modalData.name,
+        department: modalData.department || null,
+        phone: modalData.phone || null,
+      });
 
       if (error) {
-        alert(`Error saving mapping: ${error.message}`);
+        toast.error(`Error saving mapping: ${error.message}`);
       } else {
         setIsModalOpen(false);
         setModalData(null);

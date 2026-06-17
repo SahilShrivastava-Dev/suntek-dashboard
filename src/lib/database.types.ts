@@ -480,8 +480,9 @@ export interface Database {
           title: string;
           equipment: string;
           plant_id: string | null;
-          frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'biannual' | 'triannual';
+          frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'biannual' | 'triannual' | 'annual';
           description: string | null;
+          assigned_to: string | null;
           is_active: boolean;
           next_due_at: string | null;
           last_completed_at: string | null;

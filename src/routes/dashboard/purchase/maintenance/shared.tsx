@@ -2,10 +2,11 @@ import React, { useState, useRef } from 'react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const FREQ_OPTIONS = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'triannual'];
+export const FREQ_OPTIONS = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'triannual', 'annual'];
 export const FREQ_LABEL: Record<string, string> = {
   daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly',
   quarterly: 'Quarterly (3-mo)', biannual: 'Bi-annual (6-mo)', triannual: '9-monthly',
+  annual: 'Yearly (12-mo)',
 };
 
 export const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> = {
@@ -65,6 +66,7 @@ export function calculateNextDue(frequency: string): string {
     case 'quarterly': d.setMonth(d.getMonth() + 3); break;
     case 'biannual':  d.setMonth(d.getMonth() + 6); break;
     case 'triannual': d.setMonth(d.getMonth() + 9); break;
+    case 'annual':    d.setFullYear(d.getFullYear() + 1); break;
     default:          d.setDate(d.getDate() + 7);
   }
   return d.toISOString();

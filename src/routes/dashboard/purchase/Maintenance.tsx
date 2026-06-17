@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows, updateRows } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
+import { MOCK_PROFILES } from '../../../lib/profiles';
+import { useBlacklist } from '../../../contexts/BlacklistContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
 import { useToast } from '../../../components/ui/toast';
@@ -34,10 +36,18 @@ async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?
     .eq('id', ticketId);
 }
 
+// People/teams an admin can assign a maintenance task to. Name-based so the
+// blacklist guard (which matches on person name) can flag a restricted assignee.
+const ASSIGNABLE_ROLE_IDS = ['technician_shd', 'store_manager_maint', 'factory_operator', 'unit_head'];
+const ASSIGNABLE_STAFF = MOCK_PROFILES
+  .filter((p) => ASSIGNABLE_ROLE_IDS.includes(p.id))
+  .map((p) => ({ name: p.name, label: `${p.name} · ${p.roleLabel}` }));
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function Maintenance() {
   const { activeProfile } = useRoleContext();
+  const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const toast = useToast();
   const role = activeProfile.id;
   const isTechnician = role === 'technician_shd';
@@ -63,7 +73,7 @@ export function Maintenance() {
   // Form state
   const today = new Date().toISOString().split('T')[0];
   const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable' });
-  const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today });
+  const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
   const [storeForm, setStoreForm] = useState({ partName: '', quantity: '', specification: '' });
   const [showStoreForm, setShowStoreForm] = useState(false);
 
@@ -130,6 +140,7 @@ export function Maintenance() {
           type: 'periodic', status: 'open', title: s.title,
           equipment: s.equipment, plant_id: s.plant_id || null,
           schedule_id: s.id, description: s.description || null,
+          assigned_to: s.assigned_to || null,
           due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
         }).select('*, plants(name)').single();
         if (newT) {
@@ -184,6 +195,8 @@ export function Maintenance() {
       plant_id: plant?.id || null,
       description: raiseForm.description || null,
       raised_by: activeProfile.name, raised_role: role,
+      // A technician raising their own job is implicitly assigned to themselves.
+      assigned_to: isTechnician ? activeProfile.name : null,
     }).select('*, plants(name)').single();
     if (error) { toast.error(`Failed: ${error.message}`); return; }
     notify({
@@ -216,6 +229,7 @@ export function Maintenance() {
           schedule_id: completingSchedule.id,
           due_date: completingSchedule.next_due_at ? completingSchedule.next_due_at.split('T')[0] : null,
           raised_by: activeProfile.name, raised_role: role,
+          assigned_to: completingSchedule.assigned_to || null,
         }).select('*, plants(name)').single();
         ticket = data ?? undefined;
       }
@@ -224,7 +238,7 @@ export function Maintenance() {
         ticketId: ticket.id, plantName: ticket.plants?.name || completingSchedule.plants?.name || 'Plant',
         photoType: 'completion', onProgress: setUploadPct,
       });
-      await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: activeProfile.name })
+      await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: completingSchedule.assigned_to || activeProfile.name })
         .eq('id', ticket.id);
       const nextDue = calculateNextDue(completingSchedule.frequency);
       await updateRows('maintenance_schedules', { last_completed_at: new Date().toISOString(), next_due_at: nextDue })
@@ -466,14 +480,20 @@ export function Maintenance() {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
       plant_id: plant?.id || null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
       description: scheduleForm.description || null, is_active: true,
+      assigned_to: scheduleForm.assignedTo || null,
       next_due_at: scheduleForm.firstDue ? new Date(scheduleForm.firstDue).toISOString() : null,
     });
     if (error) { toast.error(`Failed: ${error.message}`); return; }
+    // If the assignee is restricted, alert admin + unit head immediately.
+    if (scheduleForm.assignedTo) {
+      const entry = isPersonBlacklisted(scheduleForm.assignedTo);
+      if (entry) notifyActivity(entry, `assigned the recurring task "${scheduleForm.title}" (${FREQ_LABEL[scheduleForm.frequency] || scheduleForm.frequency})`);
+    }
     setScheduleSaved(true);
     await loadData();
     setTimeout(() => {
       setShowSchedulePanel(false); setScheduleSaved(false);
-      setScheduleForm({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today });
+      setScheduleForm({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
     }, 1400);
   }
 
@@ -763,6 +783,39 @@ export function Maintenance() {
     ? ['pending_purchase']
     : [];
 
+  // ── Blacklist guard ─────────────────────────────────────────────────────────
+  // A ticket assigned to (or raised by) a restricted person is flagged. We check
+  // assigned_to first (the active worker), then fall back to raised_by. When a hit
+  // is found we surface a banner in the drawer AND fire one urgent notification to
+  // admin + unit_head so the restriction is visible even to supervisors who aren't
+  // themselves locked out by the dashboard-level overlay.
+  const blacklistHit = (() => {
+    if (!selectedTicket || !blacklistReady) return null;
+    const candidates: { who: string; name: string | null }[] = [
+      { who: 'assigned to', name: selectedTicket.assigned_to },
+      { who: 'raised by',   name: selectedTicket.raised_by   },
+    ];
+    for (const c of candidates) {
+      if (!c.name) continue;
+      const entry = isPersonBlacklisted(c.name);
+      if (entry) return { entry, who: c.who, name: c.name };
+    }
+    return null;
+  })();
+
+  const blacklistNotifiedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!blacklistHit || !selectedTicket) return;
+    const key = `${selectedTicket.id}:${blacklistHit.entry.id}`;
+    if (blacklistNotifiedRef.current === key) return;
+    blacklistNotifiedRef.current = key;
+    notifyActivity(
+      blacklistHit.entry,
+      `${blacklistHit.who} maintenance ticket "${selectedTicket.equipment}" (#${selectedTicket.id.slice(0, 8)})`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blacklistHit?.entry.id, selectedTicket?.id]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -1027,9 +1080,22 @@ export function Maintenance() {
         {selectedTicket && (
           <>
             <StageStrip status={selectedTicket.status} skippedStages={skippedStages} />
+            {blacklistHit && (
+              <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  🚫 Restricted person on this ticket
+                </div>
+                <div style={{ fontSize: 12, color: '#7F1D1D', marginTop: 4, lineHeight: 1.5 }}>
+                  <strong>{blacklistHit.name}</strong> is {blacklistHit.who} this ticket but is on the active
+                  blacklist (<strong>{blacklistHit.entry.severity}</strong>). Reason: {blacklistHit.entry.reason}.
+                  <br />Admin &amp; Unit Head have been notified.
+                </div>
+              </div>
+            )}
             <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>
-                #{selectedTicket.id.slice(0, 8)} · Raised by {selectedTicket.raised_by || '—'} · {formatDate(selectedTicket.created_at)}
+                #{selectedTicket.id.slice(0, 8)} · Raised by {selectedTicket.raised_by || '—'}
+                {selectedTicket.assigned_to && <> · Assigned to {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
               </div>
               {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}>{selectedTicket.description}</div>}
             </div>
@@ -1059,9 +1125,22 @@ export function Maintenance() {
             </PanelSelect>
           </PanelField>
         </PanelRow>
-        <PanelField label="First due date">
-          <PanelInput type="date" value={scheduleForm.firstDue} onChange={e => setScheduleForm(f => ({ ...f, firstDue: e.target.value }))} />
-        </PanelField>
+        <PanelRow>
+          <PanelField label="First due date">
+            <PanelInput type="date" value={scheduleForm.firstDue} onChange={e => setScheduleForm(f => ({ ...f, firstDue: e.target.value }))} />
+          </PanelField>
+          <PanelField label="Assign to">
+            <PanelSelect value={scheduleForm.assignedTo} onChange={e => setScheduleForm(f => ({ ...f, assignedTo: e.target.value }))}>
+              <option value="">— Unassigned —</option>
+              {ASSIGNABLE_STAFF.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
+            </PanelSelect>
+          </PanelField>
+        </PanelRow>
+        {scheduleForm.assignedTo && blacklistReady && isPersonBlacklisted(scheduleForm.assignedTo) && (
+          <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: '#B91C1C', fontWeight: 600 }}>
+            🚫 {scheduleForm.assignedTo} is on the active blacklist. Admin &amp; Unit Head will be notified on save.
+          </div>
+        )}
         <PanelField label="Task description / checklist">
           <PanelTextarea value={scheduleForm.description} onChange={e => setScheduleForm(f => ({ ...f, description: e.target.value }))} placeholder="Steps to complete, tools needed, safety precautions…" />
         </PanelField>

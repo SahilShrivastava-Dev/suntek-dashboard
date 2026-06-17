@@ -111,13 +111,6 @@ const PURCHASE_TAB_PATHS = [
 export function DashboardLayout() {
   const { user, signOut, session, loading: authLoading } = useAuth();
   const { isViewingAs, activeProfile, switchProfile } = useRoleContext();
-
-  // Production auth gate: a real Supabase session is required to reach the
-  // management dashboard. In development we leave it open so the role/profile
-  // switcher ("view-as") demo works without standing up auth.
-  if (import.meta.env.PROD && !authLoading && !session) {
-    return <Navigate to="/login" replace />;
-  }
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const location = useLocation();
   const navigate = useNavigate();
@@ -133,6 +126,18 @@ export function DashboardLayout() {
       notifyActivity(blacklistEntry, `Dashboard accessed via role preview as ${activeProfile.roleLabel}`);
     }
   }, [blacklistEntry?.id]);
+
+  // Production auth gate: a real Supabase session is required to reach the
+  // management dashboard. In development we leave it open so the role/profile
+  // switcher ("view-as") demo works without standing up auth.
+  //
+  // IMPORTANT: this guard must run AFTER every hook above — returning early
+  // before a hook call changes the hook count between renders and crashes React
+  // (Minified React error #300). All hooks are unconditional; only the render
+  // output below is gated.
+  if (import.meta.env.PROD && !authLoading && !session) {
+    return <Navigate to="/login" replace />;
+  }
 
   const path = location.pathname;
 

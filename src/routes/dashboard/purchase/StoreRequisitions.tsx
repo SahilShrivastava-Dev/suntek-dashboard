@@ -10,11 +10,19 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import type { Database } from '../../../lib/database.types';
 
 type ReqRow = Database['public']['Tables']['store_requisitions']['Row'] & { plants?: { name: string | null } | null };
-type InvRow = Database['public']['Tables']['store_inventory']['Row'];
+type MaintStoreReq = Database['public']['Tables']['maintenance_store_requests']['Row'];
+type MaintTicket = Database['public']['Tables']['maintenance_tickets']['Row'] & { plants?: { name: string | null } | null };
 
-function invStatus(r: InvRow): { label: string; bg: string; color: string } {
-  if (Number(r.quantity) <= 0) return { label: 'Out of stock', bg: '#FEE2E2', color: '#DC2626' };
-  if (Number(r.quantity) <= Number(r.low_threshold ?? 2)) return { label: 'Low', bg: '#FEF3C7', color: '#D97706' };
+const UNIT_LABELS: Record<string, string> = { chlorides: 'Suntek Chlorides', plasticiser: 'Suntek Plasticiser' };
+
+/** A store-register row, DERIVED from a maintenance store request (single source). */
+interface RegisterRow {
+  id: string; part: string; store: string; equipment: string;
+  inStore: number; requested: number; remaining: number;
+}
+function regStatus(remaining: number): { label: string; bg: string; color: string } {
+  if (remaining <= 0) return { label: 'Out of stock', bg: '#FEE2E2', color: '#DC2626' };
+  if (remaining <= 2) return { label: 'Low', bg: '#FEF3C7', color: '#D97706' };
   return { label: 'In stock', bg: '#DCFCE7', color: '#16A34A' };
 }
 
@@ -65,8 +73,8 @@ export function StoreRequisitions() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
-  // Store register (maintenance spare-parts inventory)
-  const [inventory, setInventory] = useState<InvRow[]>([]);
+  // Store register — derived from the maintenance store requests (in-store path)
+  const [register, setRegister] = useState<RegisterRow[]>([]);
   const [storeFilter, setStoreFilter] = useState<string[]>([]); // empty = all stores
 
   async function load() {
@@ -83,9 +91,27 @@ export function StoreRequisitions() {
       if (error) throw error;
       setItems(data || []);
 
-      const { data: inv } = await supabase.from('store_inventory').select('*')
-        .order('store', { ascending: true }).order('part_name', { ascending: true }).returns<InvRow[]>();
-      setInventory(inv || []);
+      // Derive the store register from the maintenance flow (parent source):
+      // in-store store requests become register rows; remaining = in-store − requested.
+      const { data: tickets } = await supabase.from('maintenance_tickets')
+        .select('*, plants(name)').eq('type', 'emergency').returns<MaintTicket[]>();
+      const tIds = (tickets || []).map(t => t.id);
+      let srs: MaintStoreReq[] = [];
+      if (tIds.length) {
+        const { data: srData } = await supabase.from('maintenance_store_requests').select('*').in('ticket_id', tIds).returns<MaintStoreReq[]>();
+        srs = srData || [];
+      }
+      const tById = new Map((tickets || []).map(t => [t.id, t]));
+      const reg: RegisterRow[] = srs
+        .filter(s => s.store_decision === 'available')
+        .map(s => {
+          const t = tById.get(s.ticket_id);
+          const store = t?.unit ? (UNIT_LABELS[t.unit] || t.unit) : (t?.plants?.name || 'Store');
+          const inStore = Number(s.qty_in_store ?? 0);
+          const requested = Number(s.quantity ?? 0);
+          return { id: s.id, part: s.part_name, store, equipment: t?.equipment || '', inStore, requested, remaining: Math.max(0, inStore - requested) };
+        });
+      setRegister(reg);
       setLoadError(false);
     } catch (err) {
       console.error('[StoreRequisitions] load failed', err);
@@ -99,9 +125,9 @@ export function StoreRequisitions() {
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : FALLBACK_PLANTS;
 
-  // ── Store register (inventory) derived ────────────────────────────────────
-  const stores = [...new Set(inventory.map(r => r.store))].sort();
-  const shownInv = storeFilter.length ? inventory.filter(r => storeFilter.includes(r.store)) : inventory;
+  // ── Store register derived ────────────────────────────────────────────────
+  const stores = [...new Set(register.map(r => r.store))].sort();
+  const shownReg = storeFilter.length ? register.filter(r => storeFilter.includes(r.store)) : register;
   function toggleStore(s: string) { setStoreFilter(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]); }
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
@@ -209,18 +235,21 @@ export function StoreRequisitions() {
 
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
-            <thead><tr><th>Part</th><th>Store</th><th className="num">Quantity</th><th>Status</th></tr></thead>
+            <thead><tr><th>Part</th><th>Equipment</th><th>Store</th><th className="num">In store</th><th className="num">Requested</th><th className="num">Remaining</th><th>Status</th></tr></thead>
             <tbody>
-              {shownInv.length === 0 && (
-                <tr><td colSpan={4} className="text-center text-slate-400 py-6 text-sm">No parts in the register yet — it fills as store managers report stock in the maintenance flow.</td></tr>
+              {shownReg.length === 0 && (
+                <tr><td colSpan={7} className="text-center text-slate-400 py-6 text-sm">No in-store parts yet — fills when a store manager marks a maintenance part “in stock”.</td></tr>
               )}
-              {shownInv.map(r => {
-                const st = invStatus(r);
+              {shownReg.map(r => {
+                const st = regStatus(r.remaining);
                 return (
                   <tr key={r.id}>
-                    <td className="font-semibold text-slate-700">{r.part_name}</td>
+                    <td className="font-semibold text-slate-700">{r.part}</td>
+                    <td className="text-slate-500 text-xs">{r.equipment}</td>
                     <td className="text-slate-500 text-xs">{r.store}</td>
-                    <td className="num font-bold" style={{ color: st.color }}>{Number(r.quantity)}</td>
+                    <td className="num">{r.inStore}</td>
+                    <td className="num">{r.requested}</td>
+                    <td className="num font-bold" style={{ color: st.color }}>{r.remaining}</td>
                     <td><span className="badge" style={{ background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span></td>
                   </tr>
                 );

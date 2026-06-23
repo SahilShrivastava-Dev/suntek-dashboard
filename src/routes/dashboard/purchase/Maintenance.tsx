@@ -144,24 +144,6 @@ export function Maintenance() {
     await notifyWatchers({ ref: ticketRef(t), actor: actorObj(), title, body, type, addNotification: addNote });
   }
 
-  // ── Store register (inventory) helpers ──────────────────────────────────────
-  // Store key = the Jharkhand unit (if set) else the plant.
-  const storeKeyOf = (t: TicketRow) => t.unit ? (UNIT_LABELS[t.unit as Unit] || t.unit) : (t.plants?.name || 'Store');
-  async function setInventory(store: string, part: string, qty: number) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase.from('store_inventory') as any)
-      .upsert({ store, part_name: part, quantity: qty, updated_at: new Date().toISOString() }, { onConflict: 'store,part_name' })
-      .then(() => {}, () => {});
-  }
-  async function subtractInventory(store: string, part: string, qty: number) {
-    const { data } = await supabase.from('store_inventory').select('id, quantity')
-      .eq('store', store).eq('part_name', part).limit(1).returns<{ id: string; quantity: number }[]>();
-    const row = data?.[0];
-    if (!row) return;
-    const next = Math.max(0, Number(row.quantity) - qty);
-    await updateRows('store_inventory', { quantity: next, updated_at: new Date().toISOString() }).eq('id', row.id).then(() => {}, () => {});
-  }
-
   const isTechnician = role === 'technician_shd';
   const isAdmin = role === 'admin';
   const isUnitHead = role === 'unit_head';
@@ -741,11 +723,6 @@ export function Maintenance() {
       type: available ? 'info' : 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
-    // Record the current stock for this part in the store register.
-    if (available) {
-      const qty = parseFloat(storeDecisionForm.qtyInStore) || 0;
-      await setInventory(storeKeyOf(selectedTicket), selectedStoreReq.part_name, qty);
-    }
     setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' });
     await loadData();
   }
@@ -841,20 +818,8 @@ export function Maintenance() {
       await updateRows('maintenance_store_requests', { handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total })
         .eq('id', selectedStoreReq.id);
       setSelectedStoreReq((sr) => sr ? { ...sr, handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total } : sr);
-
-      // Externally-bought part → record it as a Purchase Order (supplier from the
-      // unit head, price from the bill the PM just entered) so it shows on the PO page.
-      await insertRows('oil_contracts', {
-        oil_type: `${selectedStoreReq.part_name} (maintenance part)`,
-        company: selectedStoreReq.supplier_name || `Maintenance · ${selectedTicket.equipment}`,
-        paraffin_type: 'Maintenance part',
-        port: selectedTicket.plants?.name || null,
-        date: new Date().toISOString().split('T')[0],
-        book_qty_mt: qty,
-        price: total,
-        status: 'pending',
-      }).then(() => {}, () => {});
-
+      // The Purchase Orders page derives this external buy directly from the
+      // store request (single source of truth) — no separate PO row to insert.
       await updateTicketStatus(selectedTicket.id, 'pending_handover');
       setSelectedTicket((t) => t ? { ...t, status: 'pending_handover' } : t);
       notify({
@@ -901,11 +866,6 @@ export function Maintenance() {
           bill_verified: true,
         })
         .eq('id', selectedStoreReq.id);
-      // If the part came FROM store (in-store path), subtract the supplied qty
-      // from the store register. (External buys aren't in the register.)
-      if (selectedStoreReq.store_decision === 'available') {
-        await subtractInventory(storeKeyOf(selectedTicket), selectedStoreReq.part_name, selectedStoreReq.quantity || 1);
-      }
       await updateTicketStatus(selectedTicket.id, 'pending_defective_return');
       setSelectedTicket((t) => t ? { ...t, status: 'pending_defective_return' } : t);
       notify({

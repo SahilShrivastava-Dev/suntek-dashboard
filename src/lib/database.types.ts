@@ -684,23 +684,6 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['entity_notes']['Insert']>;
       };
 
-      // ── Store inventory (maintenance spare-parts register) ────────────────
-      store_inventory: {
-        Row: {
-          id: string;
-          store: string;
-          part_name: string;
-          quantity: number;
-          low_threshold: number;
-          updated_at: string;
-          created_at: string;
-        };
-        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_inventory']['Row'], 'id' | 'created_at' | 'updated_at'>> & {
-          updated_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['store_inventory']['Insert']>;
-      };
-
       // ── Blacklist audit trail ─────────────────────────────────────────────
       // Lifecycle + fuzzy-match-detection events for the blacklist. See 12_blacklist_audit.sql.
       blacklist_events: {

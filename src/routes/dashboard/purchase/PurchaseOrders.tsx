@@ -12,6 +12,16 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import type { Database } from '../../../lib/database.types';
 
 type OrderRow = Database['public']['Tables']['oil_contracts']['Row'];
+type MaintStoreReq = Database['public']['Tables']['maintenance_store_requests']['Row'];
+type MaintTicket = Database['public']['Tables']['maintenance_tickets']['Row'] & { plants?: { name: string | null } | null };
+
+const UNIT_LABELS: Record<string, string> = { chlorides: 'Suntek Chlorides', plasticiser: 'Suntek Plasticiser' };
+
+/** An externally-bought maintenance part, DERIVED from a store request (single source). */
+interface MaintPO {
+  id: string; part: string; equipment: string; store: string; supplier: string;
+  qty: number; unitPrice: number | null; total: number | null; date: string | null; busyRef: string | null;
+}
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -42,6 +52,7 @@ export function PurchaseOrders() {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [maintPOs, setMaintPOs] = useState<MaintPO[]>([]); // derived from the maintenance flow
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const { activeProfile } = useRoleContext();
@@ -56,6 +67,32 @@ export function PurchaseOrders() {
         .returns<OrderRow[]>();
       if (error) throw error;
       setOrders(data || []);
+
+      // Derive externally-bought maintenance parts (store said "not available")
+      // straight from the maintenance flow — single source, always in sync.
+      const { data: tickets } = await supabase.from('maintenance_tickets')
+        .select('*, plants(name)').eq('type', 'emergency').returns<MaintTicket[]>();
+      const tIds = (tickets || []).map(t => t.id);
+      let srs: MaintStoreReq[] = [];
+      if (tIds.length) {
+        const { data: srData } = await supabase.from('maintenance_store_requests').select('*').in('ticket_id', tIds).returns<MaintStoreReq[]>();
+        srs = srData || [];
+      }
+      const tById = new Map((tickets || []).map(t => [t.id, t]));
+      const mpos: MaintPO[] = srs
+        .filter(s => s.store_decision === 'unavailable' && (s.busy_transaction_ref || s.supplier_name || s.total_price != null))
+        .map(s => {
+          const t = tById.get(s.ticket_id);
+          const store = t?.unit ? (UNIT_LABELS[t.unit] || t.unit) : (t?.plants?.name || '—');
+          return {
+            id: s.id, part: s.part_name, equipment: t?.equipment || '', store,
+            supplier: s.supplier_name || '—', qty: Number(s.quantity ?? 0),
+            unitPrice: s.unit_price != null ? Number(s.unit_price) : null,
+            total: s.total_price != null ? Number(s.total_price) : null,
+            date: t?.closed_at || t?.created_at || null, busyRef: s.busy_transaction_ref,
+          };
+        });
+      setMaintPOs(mpos);
       setLoadError(false);
     } catch (err) {
       console.error('[PurchaseOrders] load failed', err);
@@ -129,8 +166,8 @@ export function PurchaseOrders() {
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Total Orders', what: 'Total count of oil/material purchase contracts on record.', source: 'Supabase', tables: ['oil_contracts'] }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total orders</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{orders.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">on record</div>
+          <div className="text-[28px] font-extrabold mt-1 num">{orders.length + maintPOs.length}</div>
+          <div className="text-[11px] text-slate-500 mt-1">{maintPOs.length ? `${orders.length} oil · ${maintPOs.length} maintenance` : 'on record'}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Total Booked Qty', what: 'Sum of all booked quantities (MT) across all purchase orders.', source: 'Supabase', tables: ['oil_contracts'] }} />
@@ -213,6 +250,38 @@ export function PurchaseOrders() {
           </table>
         </div>
         )}
+      </div>
+
+      {/* ── Maintenance purchases (derived from the maintenance flow) ─────────── */}
+      <div className="card p-6 mt-5">
+        <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <div className="text-base font-bold">Maintenance purchases</div>
+          <div className="text-xs num font-bold text-slate-700">Total ₹ {maintPOs.reduce((s, m) => s + (m.total || 0), 0).toLocaleString('en-IN')}</div>
+        </div>
+        <div className="text-xs text-slate-500 mb-4">Parts not in store → bought externally · auto-pulled from the maintenance workflow (in sync, no manual entry)</div>
+        <div className="overflow-x-auto scroll-x">
+          <table className="dt">
+            <thead><tr><th>Part</th><th>Equipment</th><th>Store / unit</th><th>Supplier</th><th className="num">Qty</th><th className="num">Unit price</th><th className="num">Total</th><th>BUSY ref</th><th>Date</th></tr></thead>
+            <tbody>
+              {maintPOs.length === 0 && (
+                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">No external maintenance buys yet — they appear here when the Purchase Manager bills a part that wasn’t in store.</td></tr>
+              )}
+              {maintPOs.map(m => (
+                <tr key={m.id}>
+                  <td className="font-semibold">{m.part}</td>
+                  <td className="text-slate-500 text-xs">{m.equipment}</td>
+                  <td className="text-slate-500 text-xs">{m.store}</td>
+                  <td>{m.supplier}</td>
+                  <td className="num">{m.qty}</td>
+                  <td className="num">{m.unitPrice != null ? `₹ ${m.unitPrice.toLocaleString('en-IN')}` : '—'}</td>
+                  <td className="num font-semibold">{m.total != null ? `₹ ${m.total.toLocaleString('en-IN')}` : '—'}</td>
+                  <td className="text-slate-500 text-xs">{m.busyRef || '—'}</td>
+                  <td className="text-slate-500 text-xs">{m.date ? new Date(m.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Modal */}

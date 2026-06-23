@@ -15,6 +15,7 @@ export const STATUS_CFG: Record<string, { label: string; bg: string; color: stri
   pending_store:            { label: 'Pending Store',     bg: '#FEF3C7', color: '#D97706' },
   pending_unit_head:        { label: 'Pending Approval',  bg: '#EDE9FE', color: '#7C3AED' },
   pending_purchase:         { label: 'Purchasing',        bg: '#EDE9FE', color: '#7C3AED' },
+  pending_purchase_manager: { label: 'Bill & Dispatch',   bg: '#FAE8FF', color: '#A21CAF' },
   pending_handover:         { label: 'Handover',          bg: '#F3E8FF', color: '#9333EA' },
   pending_defective_return: { label: 'Defective Return',  bg: '#FEF3C7', color: '#D97706' },
   closed:                   { label: 'Closed',            bg: '#DCFCE7', color: '#16A34A' },
@@ -23,12 +24,12 @@ export const STATUS_CFG: Record<string, { label: string; bg: string; color: stri
 // pending_purchase is shown in strip but may be skipped (available-in-store path)
 export const EMERGENCY_STAGES = [
   'open', 'in_progress', 'pending_store', 'pending_unit_head',
-  'pending_purchase', 'pending_handover', 'pending_defective_return', 'closed',
+  'pending_purchase', 'pending_purchase_manager', 'pending_handover', 'pending_defective_return', 'closed',
 ];
 
 export const STAGE_LABELS: Record<string, string> = {
   open: 'Raised', in_progress: 'Assessed', pending_store: 'Store Check',
-  pending_unit_head: 'Unit Head', pending_purchase: 'Purchase',
+  pending_unit_head: 'Unit Head', pending_purchase: 'Purchase', pending_purchase_manager: 'Purchase Mgr',
   pending_handover: 'Handover', pending_defective_return: 'Defective', closed: 'Closed',
 };
 
@@ -121,7 +122,13 @@ export function PhotoUploader({ onBlobReady, label = 'Attach photo proof', hint 
 
 // ── Stage progress strip ──────────────────────────────────────────────────────
 
-export function StageStrip({ status, skippedStages = [] }: { status: string; skippedStages?: string[] }) {
+export function StageStrip({ status, skippedStages = [], onStageClick, activeStage }: {
+  status: string;
+  skippedStages?: string[];
+  /** Click a reached stage to see what happened there (read-only). */
+  onStageClick?: (stage: string) => void;
+  activeStage?: string | null;
+}) {
   const idx = EMERGENCY_STAGES.indexOf(status);
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, marginBottom: 20, overflowX: 'auto', paddingBottom: 2 }}>
@@ -130,21 +137,29 @@ export function StageStrip({ status, skippedStages = [] }: { status: string; ski
         const isCurrent = i === idx;
         const isSkipped = skippedStages.includes(s);
         const isLast = i === EMERGENCY_STAGES.length - 1;
+        // A stage is inspectable once reached (past or current) and not skipped.
+        const clickable = !!onStageClick && i <= idx && !isSkipped;
+        const isActive = activeStage === s;
         return (
           <React.Fragment key={s}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <div
+              onClick={clickable ? () => onStageClick!(s) : undefined}
+              title={clickable ? `View ${STAGE_LABELS[s]} details` : undefined}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, cursor: clickable ? 'pointer' : 'default' }}
+            >
               <div style={{
                 width: 22, height: 22, borderRadius: '50%',
                 background: isSkipped ? '#E2E8F0' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#E2E8F0',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: isCurrent ? '2px solid #F47651' : 'none',
+                border: isActive ? '2px solid #0F172A' : isCurrent ? '2px solid #F47651' : 'none',
+                boxShadow: isActive ? '0 0 0 3px rgba(15,23,42,0.12)' : 'none',
                 opacity: isSkipped ? 0.4 : 1,
               }}>
                 {isPast && !isSkipped && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6 9 17l-5-5"/></svg>}
                 {isSkipped && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="3"><path d="M5 12h14"/></svg>}
                 {isCurrent && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
               </div>
-              <div style={{ fontSize: 8.5, fontWeight: isCurrent ? 700 : 500, color: isSkipped ? '#CBD5E1' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#94A3B8', marginTop: 3, whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 8.5, fontWeight: isActive || isCurrent ? 700 : 500, color: isActive ? '#0F172A' : isSkipped ? '#CBD5E1' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#94A3B8', marginTop: 3, whiteSpace: 'nowrap', textDecoration: clickable ? 'underline dotted' : 'none', textUnderlineOffset: 2 }}>
                 {STAGE_LABELS[s]}{isSkipped ? ' (skipped)' : ''}
               </div>
             </div>

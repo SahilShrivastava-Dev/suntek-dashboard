@@ -103,6 +103,19 @@ const ASSIGNABLE_STAFF = MOCK_PROFILES
   .filter((p) => ASSIGNABLE_ROLE_IDS.includes(p.id))
   .map((p) => ({ name: p.name, label: `${p.name} · ${p.roleLabel}` }));
 
+// ── Jharkhand procurement units — store requests route to the matching store manager.
+type Unit = 'chlorides' | 'plasticiser';
+const UNIT_LABELS: Record<Unit, string> = { chlorides: 'Suntek Chlorides', plasticiser: 'Suntek Plasticiser' };
+const UNIT_STORE_MANAGER: Record<Unit, string> = { chlorides: 'store_manager_chlorides', plasticiser: 'store_manager_plasticiser' };
+const ALL_STORE_MANAGER_IDS = ['store_manager_maint', 'store_manager_chlorides', 'store_manager_plasticiser', 'warehouse_manager'];
+/** Derive a unit from a profile's plant string. */
+function unitOf(plant?: string | null): Unit | null {
+  const p = (plant || '').toLowerCase();
+  if (p.includes('chlorid')) return 'chlorides';
+  if (p.includes('plastic')) return 'plasticiser';
+  return null;
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function Maintenance() {
@@ -133,7 +146,9 @@ export function Maintenance() {
   const isTechnician = role === 'technician_shd';
   const isAdmin = role === 'admin';
   const isUnitHead = role === 'unit_head';
-  const isStoreManager = role === 'store_manager_maint' || role === 'warehouse_manager';
+  const isStoreManager = ALL_STORE_MANAGER_IDS.includes(role);
+  const isPurchaseManager = role === 'purchase_manager';
+  const myStoreUnit = unitOf(activeProfile.plant); // for unit-specific store managers
 
   // Data
   const [tab, setTab] = useState<'periodic' | 'emergency' | 'schedule'>('periodic');
@@ -152,7 +167,7 @@ export function Maintenance() {
 
   // Form state
   const today = new Date().toISOString().split('T')[0];
-  const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable' });
+  const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
   const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
   const [storeForm, setStoreForm] = useState({ partName: '', quantity: '', specification: '' });
   const [showStoreForm, setShowStoreForm] = useState(false);
@@ -168,10 +183,12 @@ export function Maintenance() {
   // Handover form (store manager uploads invoice + product photo)
   const [handoverInvoiceBlob, setHandoverInvoiceBlob] = useState<Blob | null>(null);
   const [handoverPhotoBlob, setHandoverPhotoBlob] = useState<Blob | null>(null);
+  const [dispatchBlob, setDispatchBlob] = useState<Blob | null>(null); // purchase manager bill photo
   const [handoverNotes, setHandoverNotes] = useState('');
 
   // Other action state
   const [busyRef, setBusyRef] = useState('');
+  const [unitPrice, setUnitPrice] = useState(''); // procurement unit price (₹) → feeds FAR cost
   const [defectiveDecision, setDefectiveDecision] = useState<'repair' | 'scrap' | ''>('');
 
   // Upload
@@ -190,6 +207,7 @@ export function Maintenance() {
   // Admin edit + report
   const [editingTicket, setEditingTicket] = useState(false);
   const [editForm, setEditForm] = useState({ equipment: '', description: '', plant: '', status: '' });
+  const [viewStage, setViewStage] = useState<string | null>(null); // clicked stage in the timeline
   const [showReport, setShowReport] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [reportForm, setReportForm] = useState({ emergency: true, periodic: true, status: 'all', from: '', to: '', includeNotes: true });
@@ -279,7 +297,7 @@ export function Maintenance() {
 
   const openEmergency = emergencyTickets.filter(t => t.status !== 'closed').length;
   const pendingStore = emergencyTickets.filter(t => ['pending_store', 'pending_unit_head'].includes(t.status)).length;
-  const pendingPurchase = emergencyTickets.filter(t => ['pending_purchase', 'pending_handover'].includes(t.status)).length;
+  const pendingPurchase = emergencyTickets.filter(t => ['pending_purchase', 'pending_purchase_manager', 'pending_handover'].includes(t.status)).length;
   const closedMTD = emergencyTickets.filter(t => t.status === 'closed' && !!t.closed_at && t.closed_at >= monthStart).length;
 
   const dueToday = periodicTickets.filter(t => t.status === 'open' && t.due_date === today).length;
@@ -299,6 +317,7 @@ export function Maintenance() {
       title: `${raiseForm.equipment} — ${raiseForm.assessment === 'repairable' ? 'Repairable' : 'Needs part'}`,
       equipment: raiseForm.equipment,
       plant_id: plant?.id || null,
+      unit: raiseForm.unit || null,
       description: raiseForm.description || null,
       raised_by: activeProfile.name, raised_role: role,
       // A technician raising their own job is implicitly assigned to themselves.
@@ -344,7 +363,7 @@ export function Maintenance() {
     await loadData();
     setTimeout(() => {
       setShowRaisePanel(false); setRaiseSaved(false);
-      setRaiseForm({ equipment: '', plant: '', description: '', assessment: 'repairable' });
+      setRaiseForm({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
       if (newTicket && raiseForm.assessment === 'needs_part') {
         setSelectedTicket(newTicket); setShowStoreForm(true);
       }
@@ -598,9 +617,15 @@ export function Maintenance() {
     setSelectedStoreReq(sr);
     await updateTicketStatus(selectedTicket.id, 'pending_store');
     setSelectedTicket((t) => t ? { ...t, status: 'pending_store' } : t);
+    // Route to the store manager of the ticket's Jharkhand unit (Chlorides /
+    // Plasticiser); fall back to the generic store manager if no unit is set.
+    const unit = (selectedTicket.unit as Unit | null) || null;
+    const storeTargets = unit
+      ? [UNIT_STORE_MANAGER[unit], 'admin']
+      : ['admin', 'store_manager_maint', 'warehouse_manager'];
     notify({
-      target_roles: ['admin', 'store_manager_maint', 'warehouse_manager'],
-      title: `Store part needed: ${storeForm.partName}`,
+      target_roles: storeTargets,
+      title: `Store part needed${unit ? ` · ${UNIT_LABELS[unit]}` : ''}: ${storeForm.partName}`,
       body: `${selectedTicket.equipment} · Qty: ${storeForm.quantity || '—'} · Check availability`,
       type: 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
@@ -613,6 +638,23 @@ export function Maintenance() {
     setStoreForm({ partName: '', quantity: '', specification: '' });
     await loadData();
     } finally { actionBusyRef.current = false; }
+  }
+
+  // Unit head override: reroute the store request to the other unit's store manager.
+  async function rerouteStoreUnit() {
+    if (!selectedTicket) return;
+    const cur = (selectedTicket.unit as Unit | null) || 'chlorides';
+    const other: Unit = cur === 'chlorides' ? 'plasticiser' : 'chlorides';
+    await updateRows('maintenance_tickets', { unit: other }).eq('id', selectedTicket.id);
+    setSelectedTicket((t) => t ? { ...t, unit: other } : t);
+    notify({
+      target_roles: [UNIT_STORE_MANAGER[other], 'admin'],
+      title: `Rerouted to ${UNIT_LABELS[other]} store`,
+      body: `${activeProfile.name} rerouted "${selectedTicket.equipment}" to the ${UNIT_LABELS[other]} store manager.`,
+      type: 'warning', route: '/dashboard/purchase/maint',
+      actor_name: activeProfile.name, actor_role: role, read_by: [],
+    });
+    await loadData();
   }
 
   async function startRepair() {
@@ -729,18 +771,55 @@ export function Maintenance() {
 
   async function markPurchased() {
     if (!selectedTicket || !selectedStoreReq || !busyRef.trim()) return;
-    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef })
+    const qty = selectedStoreReq.quantity || 1;
+    const up = unitPrice.trim() ? parseFloat(unitPrice.replace(/[^0-9.]/g, '')) : null;
+    const total = up != null ? up * qty : null;
+    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, unit_price: up, total_price: total })
       .eq('id', selectedStoreReq.id);
-    await updateTicketStatus(selectedTicket.id, 'pending_handover');
-    setSelectedTicket((t) => t ? { ...t, status: 'pending_handover' } : t);
+    setSelectedStoreReq((sr) => sr ? { ...sr, busy_transaction_ref: busyRef, unit_price: up, total_price: total } : sr);
+    // Procured by unit head → hand to the Purchase Manager (bill + dispatch).
+    await updateTicketStatus(selectedTicket.id, 'pending_purchase_manager');
+    setSelectedTicket((t) => t ? { ...t, status: 'pending_purchase_manager' } : t);
     notify({
-      target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'],
-      title: `Part procured: ${selectedStoreReq.part_name}`,
-      body: `BUSY ref: ${busyRef} — store manager to receive, upload invoice + photo, hand over to technician`,
+      target_roles: ['purchase_manager', 'admin'],
+      title: `Procured — upload bill: ${selectedStoreReq.part_name}`,
+      body: `BUSY ref: ${busyRef}${total != null ? ` · ₹${total.toLocaleString('en-IN')}` : ''} — Purchase Manager to upload the supplier bill and mark the part en route to store.`,
       type: 'info', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
-    setBusyRef(''); await loadData();
+    setBusyRef(''); setUnitPrice(''); await loadData();
+  }
+
+  // Purchase Manager: upload the supplier bill photo + mark the part en route.
+  async function confirmDispatch() {
+    if (!selectedTicket || !selectedStoreReq || !dispatchBlob) return;
+    setUploading(true);
+    try {
+      const r = await uploadMaintenancePhoto(dispatchBlob, {
+        ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
+        photoType: 'bill', creator: activeProfile.name, onProgress: setUploadPct,
+      });
+      // Purchase manager can confirm/correct the price from the actual bill.
+      const qty = selectedStoreReq.quantity || 1;
+      const up = unitPrice.trim() ? parseFloat(unitPrice.replace(/[^0-9.]/g, '')) : selectedStoreReq.unit_price ?? null;
+      const total = up != null ? up * qty : selectedStoreReq.total_price ?? null;
+      await updateRows('maintenance_store_requests', { handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total })
+        .eq('id', selectedStoreReq.id);
+      setSelectedStoreReq((sr) => sr ? { ...sr, handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total } : sr);
+      await updateTicketStatus(selectedTicket.id, 'pending_handover');
+      setSelectedTicket((t) => t ? { ...t, status: 'pending_handover' } : t);
+      notify({
+        target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'],
+        title: `Part en route: ${selectedStoreReq.part_name}`,
+        body: `${activeProfile.name} uploaded the supplier bill — part dispatched to store. Confirm receipt on arrival.`,
+        type: 'info', route: '/dashboard/purchase/maint',
+        actor_name: activeProfile.name, actor_role: role, read_by: [],
+      });
+      await notifyTicketWatchers(selectedTicket, `Part dispatched: ${selectedTicket.equipment}`, `${activeProfile.name} uploaded the bill — en route to store.`);
+      setDispatchBlob(null); setUploadPct(0);
+      await loadData();
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
+    finally { setUploading(false); }
   }
 
   // Store manager: upload invoice + product photo, confirm physical handover to technician
@@ -851,6 +930,66 @@ export function Maintenance() {
     } finally { setSavingSchedule(false); }
   }
 
+  // ── Read-only stage history (click a stage in the strip) ────────────────────
+  function renderStageDetail(stage: string) {
+    const t = selectedTicket;
+    if (!t) return null;
+    const sr = selectedStoreReq;
+    const label = STAGE_LABELS[stage] || stage;
+
+    const photo = (url: string | null | undefined, cap: string) => url ? (
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>{cap}</div>
+        <img src={url} alt={cap} style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 10, border: '1px solid #E2E8F0' }} />
+        <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 4 }}>Open full image ↗</a>
+      </div>
+    ) : null;
+    const line = (k: string, v: React.ReactNode) => (v || v === 0) ? (
+      <div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}><span style={{ color: '#94A3B8' }}>{k}: </span><strong>{v}</strong></div>
+    ) : null;
+
+    let body: React.ReactNode = <div style={{ fontSize: 12.5, color: '#94A3B8' }}>No details captured for this step.</div>;
+    switch (stage) {
+      case 'open':
+        body = <>{line('Raised by', t.raised_by)}{line('Role', roleLabelFor(t.raised_role))}{line('When', formatDate(t.created_at))}{t.description && <div style={{ fontSize: 12.5, color: '#334155', marginTop: 6 }}><MentionText text={t.description} /></div>}</>;
+        break;
+      case 'in_progress':
+        body = <>{line('Handled by', t.assigned_to || t.raised_by)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>{sr ? 'Needs a part — store request raised.' : 'Decided to fix in-house.'}</div></>;
+        break;
+      case 'pending_store':
+        if (sr) body = <>{line('Part requested', sr.part_name)}{line('Qty', sr.quantity)}{line('Specification', sr.specification)}{line('Store decision', sr.store_decision)}{line('Qty in store', sr.qty_in_store)}{line('Shelf', sr.shelf_location)}{line('Condition', sr.part_condition)}</>;
+        break;
+      case 'pending_unit_head':
+        if (sr) body = <>{line('Unit head decision', sr.unit_head_approval)}{line('Part availability', sr.store_decision)}</>;
+        break;
+      case 'pending_purchase':
+        if (sr) body = <>{line('BUSY transaction ref', sr.busy_transaction_ref)}{line('Unit price', sr.unit_price != null ? `₹ ${Number(sr.unit_price).toLocaleString('en-IN')}` : null)}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement by unit head.</div></>;
+        break;
+      case 'pending_purchase_manager':
+        if (sr) body = <>{line('Bill uploaded', sr.bill_verified ? 'Yes' : '—')}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}{photo(sr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
+        break;
+      case 'pending_handover':
+        if (sr) body = <>{line('Receipt confirmed', sr.handover_confirmed_at ? formatDate(sr.handover_confirmed_at) : '—')}{line('Notes', sr.handover_notes)}{photo(sr.handover_invoice_url, 'Bill / invoice')}{photo(sr.handover_photo_url, 'Part received photo')}</>;
+        break;
+      case 'pending_defective_return':
+        body = <>{line('Defective part decision', t.defective_part_decision)}{photo(t.defective_part_photo_url, 'Defective part photo')}</>;
+        break;
+      case 'closed':
+        body = <>{line('Closed at', t.closed_at ? formatDate(t.closed_at) : '—')}{line('Defective part', t.defective_part_decision)}{photo(t.completion_photo_url, 'Completion photo')}</>;
+        break;
+    }
+
+    return (
+      <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16, marginBottom: 16, background: '#FCFCFD' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: '#0F172A' }}>{label} — what happened <span style={{ fontWeight: 500, color: '#94A3B8' }}>(read-only)</span></div>
+          <button onClick={() => setViewStage(null)} style={{ border: 'none', background: 'transparent', color: '#94A3B8', cursor: 'pointer', fontSize: 16, lineHeight: 1, fontFamily: 'inherit' }}>×</button>
+        </div>
+        {body}
+      </div>
+    );
+  }
+
   // ── Ticket action panel ───────────────────────────────────────────────────
 
   function renderTicketActions() {
@@ -932,9 +1071,21 @@ export function Maintenance() {
     // ── pending_store: store manager checks availability ──
     if (status === 'pending_store') {
       if (!selectedStoreReq) return <div style={{ fontSize: 12, color: '#94A3B8' }}>Loading store request…</div>;
-      if (isStoreManager || isAdmin) {
+      const ticketUnit = (selectedTicket.unit as Unit | null) || null;
+      // The matching unit's store manager (or generic/warehouse, or admin) can act.
+      const storeManagerCanAct = isAdmin || (isStoreManager && (
+        role === 'store_manager_maint' || role === 'warehouse_manager' || !ticketUnit || myStoreUnit === ticketUnit
+      ));
+      // Unit head can override the routing to the other unit's store.
+      const overrideBtn = (isUnitHead || isAdmin) ? (
+        <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', marginTop: 10 }}>
+          ⇄ Override · reroute to {UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser']} store
+        </button>
+      ) : null;
+      if (storeManagerCanAct) {
         return (
           <div>
+            {ticketUnit && <div style={{ fontSize: 11, color: '#A21CAF', fontWeight: 700, marginBottom: 8 }}>Routed to {UNIT_LABELS[ticketUnit]} store</div>}
             {/* Part request info */}
             <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: '#EA580C', textTransform: 'uppercase', marginBottom: 6 }}>Store request — check availability</div>
@@ -988,10 +1139,16 @@ export function Maintenance() {
               style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: storeDecisionForm.available === null ? 0.4 : 1 }}>
               Submit to unit head for approval
             </button>
+            {overrideBtn}
           </div>
         );
       }
-      return <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Awaiting store manager decision…</div>;
+      return (
+        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+          <div style={{ fontSize: 12, color: '#94A3B8' }}>Awaiting {ticketUnit ? `${UNIT_LABELS[ticketUnit]} ` : ''}store manager decision…</div>
+          {overrideBtn}
+        </div>
+      );
     }
 
     // ── pending_unit_head: unit head approves based on store decision ──
@@ -1046,12 +1203,54 @@ export function Maintenance() {
               <PanelField label="BUSY transaction reference *">
                 <PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" />
               </PanelField>
+              <PanelRow>
+                <PanelField label="Unit price (₹)">
+                  <PanelInput type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder="e.g. 4500" />
+                </PanelField>
+                <PanelField label={`Total (× ${selectedStoreReq?.quantity || 1})`}>
+                  <PanelInput value={unitPrice.trim() ? `₹ ${((parseFloat(unitPrice.replace(/[^0-9.]/g, '')) || 0) * (selectedStoreReq?.quantity || 1)).toLocaleString('en-IN')}` : '—'} disabled />
+                </PanelField>
+              </PanelRow>
               <button onClick={markPurchased} disabled={!busyRef.trim()} style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#7C3AED', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: !busyRef.trim() ? 0.5 : 1 }}>
-                Mark as purchased — notify store manager
+                Mark as purchased — send to Purchase Manager
               </button>
             </div>
           ) : (
             <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Vijay Ji is procuring the part…</div>
+          )}
+        </div>
+      );
+    }
+
+    // ── pending_purchase_manager: purchase manager uploads supplier bill, marks en route ──
+    if (status === 'pending_purchase_manager') {
+      return (
+        <div>
+          <div style={{ background: '#FDF4FF', border: '1px solid #F5D0FE', borderRadius: 12, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#A21CAF', textTransform: 'uppercase', marginBottom: 4 }}>Upload supplier bill &amp; dispatch</div>
+            <div style={{ fontSize: 13, color: '#475569' }}>
+              Procured via BUSY ({selectedStoreReq?.busy_transaction_ref || 'ref pending'}). Upload the supplier bill photo and confirm the part is en route to the store.
+            </div>
+          </div>
+          {isPurchaseManager || isAdmin ? (
+            <div>
+              <PanelRow>
+                <PanelField label="Unit price (₹)">
+                  <PanelInput type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder={selectedStoreReq?.unit_price != null ? String(selectedStoreReq.unit_price) : 'e.g. 4500'} />
+                </PanelField>
+                <PanelField label={`Total (× ${selectedStoreReq?.quantity || 1})`}>
+                  <PanelInput disabled value={(() => { const up = unitPrice.trim() ? (parseFloat(unitPrice.replace(/[^0-9.]/g, '')) || 0) : (selectedStoreReq?.unit_price || 0); return up ? `₹ ${(up * (selectedStoreReq?.quantity || 1)).toLocaleString('en-IN')}` : '—'; })()} />
+                </PanelField>
+              </PanelRow>
+              <PhotoUploader onBlobReady={setDispatchBlob} label="Supplier bill / invoice photo" hint="Clear photo of the supplier bill for this part" />
+              {uploading && <UploadBar pct={uploadPct} color="#A21CAF" />}
+              <button onClick={confirmDispatch} disabled={!dispatchBlob || uploading}
+                style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#A21CAF', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>
+                {uploading ? `Uploading… ${uploadPct}%` : 'Upload bill — mark en route to store'}
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Purchase Manager (Anshul) uploading the bill…</div>
           )}
         </div>
       );
@@ -1133,8 +1332,9 @@ export function Maintenance() {
   }
 
   // skipped stages for stage strip (pending_purchase skipped if part was in store)
+  // Part-in-store path skips both the external purchase and the purchase-manager dispatch.
   const skippedStages = selectedTicket && selectedStoreReq?.store_decision === 'available'
-    ? ['pending_purchase']
+    ? ['pending_purchase', 'pending_purchase_manager']
     : [];
 
   // ── Blacklist guard ─────────────────────────────────────────────────────────
@@ -1415,12 +1615,21 @@ export function Maintenance() {
         <PanelField label="Equipment / asset *">
           <PanelInput value={raiseForm.equipment} onChange={e => setRaiseForm(f => ({ ...f, equipment: e.target.value }))} placeholder="e.g. Reactor R-1, Cooling tower pump" />
         </PanelField>
-        <PanelField label="Plant">
-          <PanelSelect value={raiseForm.plant} onChange={e => setRaiseForm(f => ({ ...f, plant: e.target.value }))}>
-            <option value="">— Select plant —</option>
-            {plantNames.map(p => <option key={p}>{p}</option>)}
-          </PanelSelect>
-        </PanelField>
+        <PanelRow>
+          <PanelField label="Plant">
+            <PanelSelect value={raiseForm.plant} onChange={e => setRaiseForm(f => ({ ...f, plant: e.target.value }))}>
+              <option value="">— Select plant —</option>
+              {plantNames.map(p => <option key={p}>{p}</option>)}
+            </PanelSelect>
+          </PanelField>
+          <PanelField label="Procurement unit (Jharkhand)">
+            <PanelSelect value={raiseForm.unit} onChange={e => setRaiseForm(f => ({ ...f, unit: e.target.value }))}>
+              <option value="">— Not Jharkhand / N/A —</option>
+              <option value="chlorides">Suntek Chlorides</option>
+              <option value="plasticiser">Suntek Plasticiser</option>
+            </PanelSelect>
+          </PanelField>
+        </PanelRow>
         <PanelField label="Issue description">
           <PanelTextarea value={raiseForm.description} onChange={e => setRaiseForm(f => ({ ...f, description: e.target.value }))} placeholder="What broke? What symptoms? What was the impact?" />
         </PanelField>
@@ -1454,13 +1663,14 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setBusyRef(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
       >
         {selectedTicket && (
           <>
-            <StageStrip status={selectedTicket.status} skippedStages={skippedStages} />
+            <StageStrip status={selectedTicket.status} skippedStages={skippedStages} onStageClick={(s) => setViewStage((cur) => cur === s ? null : s)} activeStage={viewStage} />
+            {viewStage && renderStageDetail(viewStage)}
             {blacklistHit && (
               <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1477,6 +1687,7 @@ export function Maintenance() {
               <div style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>
                 #{selectedTicket.id.slice(0, 8)} · Raised by {selectedTicket.raised_by || '—'}
                 {selectedTicket.assigned_to && <> · Assigned to {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
+                {selectedTicket.unit && <> · <span style={{ color: '#A21CAF', fontWeight: 700 }}>{UNIT_LABELS[selectedTicket.unit as Unit] || selectedTicket.unit}</span></>}
               </div>
               {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><MentionText text={selectedTicket.description} /></div>}
             </div>

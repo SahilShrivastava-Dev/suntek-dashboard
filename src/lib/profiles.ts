@@ -197,6 +197,40 @@ export const MOCK_PROFILES: MockProfile[] = [
     accessNote: 'Maintenance store actions only · no financial or production access',
   },
 
+  // ── L2: Store Manager · Suntek Chlorides (Jharkhand / Rehla) ───────────────
+  {
+    id: 'store_manager_chlorides',
+    name: 'Suresh Kumar',
+    role: 'L2',
+    roleLabel: 'Store Manager · Chlorides',
+    roleDescription: 'Spare-parts store for the Suntek Chlorides unit',
+    initials: 'SK',
+    avatarFrom: 'from-lime-400',
+    avatarTo: 'to-lime-600',
+    plant: 'Suntek Chlorides',
+    homeRoute: '/dashboard/purchase/maint',
+    allowedDashboardRoutes: ['/dashboard/purchase/maint', '/dashboard/purchase/storereq'],
+    standaloneOnly: false,
+    accessNote: 'Suntek Chlorides store · maintenance only',
+  },
+
+  // ── L2: Store Manager · Suntek Plasticiser (Jharkhand / Rehla) ─────────────
+  {
+    id: 'store_manager_plasticiser',
+    name: 'Ravi Verma',
+    role: 'L2',
+    roleLabel: 'Store Manager · Plasticiser',
+    roleDescription: 'Spare-parts store for the Suntek Plasticiser unit',
+    initials: 'RV',
+    avatarFrom: 'from-teal-400',
+    avatarTo: 'to-teal-600',
+    plant: 'Suntek Plasticiser',
+    homeRoute: '/dashboard/purchase/maint',
+    allowedDashboardRoutes: ['/dashboard/purchase/maint', '/dashboard/purchase/storereq'],
+    standaloneOnly: false,
+    accessNote: 'Suntek Plasticiser store · maintenance only',
+  },
+
   // ── L1: Technician — maintenance ticket management ────────────────────────
   // Sees own maintenance tickets only. Closes tickets with photo proof.
   // Cannot access financial, sales, or production data.
@@ -216,6 +250,28 @@ export const MOCK_PROFILES: MockProfile[] = [
     ],
     standaloneOnly: false,
     accessNote: 'Maintenance tickets only · no financial or production access',
+  },
+
+  // ── L2: Purchase Manager — procurement bill + dispatch tracking ────────────
+  // After the unit head approves external procurement and procures (BUSY ref),
+  // the ticket comes here: the purchase manager uploads the supplier bill photo
+  // and marks the part en route to the store.
+  {
+    id: 'purchase_manager',
+    name: 'Anshul',
+    role: 'L2',
+    roleLabel: 'Purchase Manager',
+    roleDescription: 'Procurement bills · dispatch tracking',
+    initials: 'AN',
+    avatarFrom: 'from-fuchsia-400',
+    avatarTo: 'to-fuchsia-600',
+    homeRoute: '/dashboard/purchase/maint',
+    allowedDashboardRoutes: [
+      '/dashboard/purchase/maint',
+      '/dashboard/purchase/purchase',
+    ],
+    standaloneOnly: false,
+    accessNote: 'Procurement bill upload + dispatch tracking · maintenance & POs',
   },
 
   // ── L2: Accountant (Delhi) — Delhi factory financial/operational data ─────

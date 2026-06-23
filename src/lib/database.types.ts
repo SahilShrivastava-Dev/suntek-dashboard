@@ -505,12 +505,14 @@ export interface Database {
             | 'pending_store'
             | 'pending_unit_head'
             | 'pending_purchase'
+            | 'pending_purchase_manager'
             | 'pending_handover'
             | 'pending_defective_return'
             | 'closed';
           title: string;
           equipment: string;
           plant_id: string | null;
+          unit: string | null; // 'chlorides' | 'plasticiser' | null — Jharkhand procurement unit
           schedule_id: string | null;
           description: string | null;
           due_date: string | null;
@@ -546,6 +548,8 @@ export interface Database {
           part_condition: string | null;
           unit_head_approval: 'approved' | 'rejected' | null;
           busy_transaction_ref: string | null;
+          unit_price: number | null;
+          total_price: number | null;
           handover_invoice_url: string | null;
           handover_photo_url: string | null;
           handover_notes: string | null;

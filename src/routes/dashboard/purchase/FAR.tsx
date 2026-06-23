@@ -1,13 +1,113 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
+import { uploadWorkflowFile } from '../../../lib/cloudinary';
+import * as XLSX from 'xlsx';
 import type { Database } from '../../../lib/database.types';
 
+// ── FAR bulk-import (CSV / Excel → verify → register) ─────────────────────────
+interface FarImportRow {
+  mark: string; model: string; capacity: string; origin: string;
+  year: string; value: string; invoice: string; purchaseDate: string; account: string;
+}
+const FAR_HEADER_MAP: { field: keyof FarImportRow; keys: string[] }[] = [
+  { field: 'mark',         keys: ['identification', 'mark', 'asset name', 'asset', 'particular', 'description', 'item', 'name'] },
+  { field: 'model',        keys: ['model', 'make'] },
+  { field: 'capacity',     keys: ['capacity', 'spec'] },
+  { field: 'origin',       keys: ['origin', 'country'] },
+  { field: 'year',         keys: ['year'] },
+  { field: 'value',        keys: ['taxable value', 'value', 'amount', 'cost', 'wdv', 'gross'] },
+  { field: 'invoice',      keys: ['invoice'] },
+  { field: 'purchaseDate', keys: ['date of purchase', 'purchase date', 'dop', 'date'] },
+  { field: 'account',      keys: ['account head', 'account', 'category', 'head', 'block'] },
+];
+function mapHeader(h: string): keyof FarImportRow | null {
+  const k = h.toLowerCase().trim();
+  for (const m of FAR_HEADER_MAP) if (m.keys.some(x => k.includes(x))) return m.field;
+  return null;
+}
+function normDate(v: string): string | null {
+  if (!v) return null;
+  // Excel serial number → date
+  if (/^\d{4,5}$/.test(v.trim())) {
+    const d = XLSX.SSF ? XLSX.SSF.parse_date_code(Number(v)) : null;
+    if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+  }
+  const dt = new Date(v);
+  return isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10);
+}
+async function parseFarFile(file: File): Promise<FarImportRow[]> {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+  return raw.map((r) => {
+    const out: FarImportRow = { mark: '', model: '', capacity: '', origin: '', year: '', value: '', invoice: '', purchaseDate: '', account: '' };
+    for (const [h, v] of Object.entries(r)) {
+      const f = mapHeader(h);
+      if (f && out[f] === '') out[f] = v == null ? '' : String(v).trim();
+    }
+    return out;
+  }).filter((r) => r.mark || r.model || r.value);
+}
+const IMPORT_CSV_COLUMNS: CsvColumn[] = [
+  { header: 'Identification mark', key: 'mark' }, { header: 'Model', key: 'model' },
+  { header: 'Capacity', key: 'capacity' }, { header: 'Origin', key: 'origin' },
+  { header: 'Year', key: 'year' }, { header: 'Taxable value', key: 'value' },
+  { header: 'Invoice no', key: 'invoice' }, { header: 'Date of purchase', key: 'purchaseDate' },
+  { header: 'Account head', key: 'account' },
+];
+
 type AssetRow = Database['public']['Tables']['fixed_assets']['Row'] & { plants?: { name: string | null } | null };
+type MaintTicketRow = Database['public']['Tables']['maintenance_tickets']['Row'] & { plants?: { name: string | null } | null };
+type MaintStoreReqRow = Database['public']['Tables']['maintenance_store_requests']['Row'];
+
+/** A single repair/maintenance done — the unit of the annual FAR cost register. */
+interface MaintEntry {
+  id: string;
+  equipment: string;
+  plant: string;
+  part: string;
+  cost: number;
+  status: string;
+  created_at: string;
+  closed_at: string | null;
+  busyRef: string | null;
+  fy: string;
+}
+
+/** Indian financial year (Apr–Mar) label for a date, e.g. "FY2025-26". */
+function fyOf(d: string | null | undefined): string {
+  if (!d) return 'Unknown';
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return 'Unknown';
+  const y = dt.getFullYear();
+  const apr = dt.getMonth() >= 3; // month 3 = April
+  const start = apr ? y : y - 1;
+  return `FY${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+function fmtDT(d: string | null | undefined): string {
+  return d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+}
+function inr(n: number): string { return `₹ ${Math.round(n).toLocaleString('en-IN')}`; }
+
+const MAINT_CSV_COLUMNS: CsvColumn[] = [
+  { header: 'Ticket #', key: 'ticket' },
+  { header: 'Equipment', key: 'equipment' },
+  { header: 'Plant', key: 'plant' },
+  { header: 'Part / type', key: 'part' },
+  { header: 'Status', key: 'status' },
+  { header: 'Raised at', key: 'created' },
+  { header: 'Closed at', key: 'closed' },
+  { header: 'BUSY ref', key: 'busy' },
+  { header: 'Cost (INR)', key: 'cost' },
+];
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -34,6 +134,19 @@ export function FAR() {
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // Maintenance/repair cost register (annual, for insurance)
+  const [maintEntries, setMaintEntries] = useState<MaintEntry[]>([]);
+  const [selectedFY, setSelectedFY] = useState<string | null>(null);
+  const [drillEntry, setDrillEntry] = useState<MaintEntry | null>(null);
+  // Bulk import accordion
+  const [importOpen, setImportOpen] = useState(false);
+  const [importStage, setImportStage] = useState<'idle' | 'uploading' | 'parsing' | 'review' | 'importing' | 'done' | 'error'>('idle');
+  const [parsedRows, setParsedRows] = useState<FarImportRow[]>([]);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importedCount, setImportedCount] = useState(0);
+  const [cloudUrl, setCloudUrl] = useState<string | null>(null);
+  const [importFileName, setImportFileName] = useState('');
+  const importInputRef = useRef<HTMLInputElement>(null);
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({
     mark: '', model: '', capacity: '', origin: 'India',
@@ -56,6 +169,37 @@ export function FAR() {
       if (error) throw error;
       setAssets(data || []);
       setLoadError(false);
+
+      // Maintenance/repair cost register — emergency tickets + their part costs.
+      const { data: tickets } = await supabase.from('maintenance_tickets')
+        .select('*, plants(name)').eq('type', 'emergency')
+        .order('created_at', { ascending: false }).returns<MaintTicketRow[]>();
+      const ids = (tickets || []).map((t) => t.id);
+      let srs: MaintStoreReqRow[] = [];
+      if (ids.length) {
+        const { data: srData } = await supabase.from('maintenance_store_requests')
+          .select('*').in('ticket_id', ids).returns<MaintStoreReqRow[]>();
+        srs = srData || [];
+      }
+      const srBy = new Map<string, MaintStoreReqRow>();
+      srs.forEach((s) => { if (s.ticket_id && !srBy.has(s.ticket_id)) srBy.set(s.ticket_id, s); });
+      const entries: MaintEntry[] = (tickets || []).map((t) => {
+        const sr = srBy.get(t.id);
+        const when = t.closed_at || t.created_at;
+        return {
+          id: t.id,
+          equipment: t.equipment,
+          plant: t.plants?.name || '—',
+          part: sr?.part_name || 'In-house repair',
+          cost: sr?.total_price != null ? Number(sr.total_price) : 0,
+          status: t.status,
+          created_at: t.created_at,
+          closed_at: t.closed_at,
+          busyRef: sr?.busy_transaction_ref ?? null,
+          fy: fyOf(when),
+        };
+      });
+      setMaintEntries(entries);
     } catch (err) {
       console.error('[FAR] load failed', err);
       setLoadError(true);
@@ -67,6 +211,106 @@ export function FAR() {
   useEffect(() => { load(); }, []);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
+
+  // ── Maintenance cost register, grouped by financial year ──────────────────
+  const fyList = useMemo(
+    () => [...new Set(maintEntries.map(e => e.fy))].filter(fy => fy !== 'Unknown').sort().reverse(),
+    [maintEntries],
+  );
+  useEffect(() => { if (!selectedFY && fyList.length) setSelectedFY(fyList[0]); }, [fyList, selectedFY]);
+  const activeFY = selectedFY || fyList[0] || null;
+  const fyEntries = useMemo(
+    () => maintEntries.filter(e => e.fy === activeFY)
+      .sort((a, b) => (b.closed_at || b.created_at).localeCompare(a.closed_at || a.created_at)),
+    [maintEntries, activeFY],
+  );
+  const fyTotal = fyEntries.reduce((s, e) => s + e.cost, 0);
+  const fyLastUpdated = fyEntries.reduce((mx, e) => { const d = e.closed_at || e.created_at; return d > mx ? d : mx; }, '');
+
+  function downloadMaintCsv() {
+    if (!activeFY) return;
+    const rows = fyEntries.map(e => ({
+      ticket: e.id.slice(0, 8), equipment: e.equipment, plant: e.plant, part: e.part,
+      status: e.status, created: fmtDT(e.created_at), closed: fmtDT(e.closed_at),
+      busy: e.busyRef || '', cost: Math.round(e.cost),
+    }));
+    const preamble: (string | number)[][] = [
+      ['Suntek — Maintenance & Repairs Register'],
+      ['Financial year', activeFY],
+      ['Total maintenance cost (insurance deduction)', inr(fyTotal)],
+      ['Entries', fyEntries.length],
+      ['Generated at', new Date().toLocaleString('en-IN')],
+    ];
+    exportToCsv(`maintenance-register-${activeFY}`, MAINT_CSV_COLUMNS, rows, preamble);
+  }
+
+  // ── Bulk import: file → cloud copy → AI parse → verify → register ─────────
+  function resetImport() {
+    setImportStage('idle'); setParsedRows([]); setImportError(null);
+    setImportedCount(0); setCloudUrl(null); setImportFileName('');
+  }
+  async function handleImportFile(file: File) {
+    setImportError(null); setImportFileName(file.name); setParsedRows([]);
+    setImportStage('uploading');
+    try {
+      // 1. Keep a copy of the original file in the cloud (reference).
+      try {
+        const up = await uploadWorkflowFile(file, { workflow: 'general', subfolder: 'far-imports', kind: 'far', creator: 'admin' });
+        setCloudUrl(up.secure_url);
+      } catch { /* cloud copy is best-effort */ }
+
+      // 2. Extract the rows.
+      setImportStage('parsing');
+      const isSheet = /\.(csv|xlsx|xls)$/i.test(file.name);
+      if (!isSheet) {
+        throw new Error('Image/PDF extraction is coming next — for now upload a CSV or Excel. (Your file has been saved to the cloud for reference.)');
+      }
+      await new Promise((r) => setTimeout(r, 800)); // brief AI-reading step
+      const rows = await parseFarFile(file);
+      if (!rows.length) throw new Error('No asset rows detected. Make sure the sheet has headers like “Identification mark”, “Model”, “Taxable value”, “Year”, “Date of purchase”.');
+      setParsedRows(rows);
+      setImportStage('review');
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : String(e));
+      setImportStage('error');
+    }
+  }
+  async function confirmImport() {
+    setImportStage('importing');
+    try {
+      const plantId = dbPlants[0]?.id || null;
+      const payload = parsedRows.map((r) => ({
+        plant_id: plantId,
+        name: r.mark || r.model,
+        identification_mark: r.mark || r.model,
+        model: r.model || null,
+        capacity: r.capacity || null,
+        origin: r.origin || null,
+        year: r.year ? (parseInt(r.year) || null) : null,
+        value: r.value ? (parseFloat(String(r.value).replace(/[^0-9.]/g, '')) || null) : null,
+        invoice_no: r.invoice || null,
+        purchase_date: normDate(r.purchaseDate),
+        account_head: r.account || null,
+      }));
+      const { error } = await insertRows('fixed_assets', payload);
+      if (error) throw error;
+      setImportedCount(payload.length);
+      setImportStage('done');
+      await load();
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : String(e));
+      setImportStage('error');
+    }
+  }
+  function downloadImportCsv() {
+    exportToCsv(`far-import-${today}`, IMPORT_CSV_COLUMNS, parsedRows as unknown as Record<string, unknown>[], [
+      ['Suntek — FAR Import (AI-extracted)'],
+      ['Source file', importFileName],
+      ['Cloud copy', cloudUrl || '—'],
+      ['Rows', parsedRows.length],
+      ['Generated at', new Date().toLocaleString('en-IN')],
+    ]);
+  }
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -142,6 +386,77 @@ export function FAR() {
         </div>
       </div>
 
+      {/* ── Maintenance & Repairs by Financial Year ─────────────────────────── */}
+      <div className="card p-6 mb-5">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+          <div>
+            <div className="text-base font-bold">Maintenance &amp; Repairs · by Financial Year</div>
+            <div className="text-xs text-slate-500">Annual repair / maintenance cost — the amount deducted from insurance · click a row for the full timeline</div>
+          </div>
+          <button onClick={downloadMaintCsv} disabled={!fyEntries.length} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, opacity: fyEntries.length ? 1 : 0.5 }}>
+            ⬇ Download CSV report
+          </button>
+        </div>
+
+        {/* Financial-year chips */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {fyList.length === 0
+            ? <span className="text-xs text-slate-400">No maintenance cost recorded yet — costs appear once tickets are procured.</span>
+            : fyList.map(fy => (
+              <button key={fy} onClick={() => setSelectedFY(fy)} className={`chip${activeFY === fy ? ' active' : ''}`}>{fy}</button>
+            ))}
+        </div>
+
+        {activeFY && (
+          <>
+            {/* Aggregate row */}
+            <div className="grid grid-cols-12 gap-4 mb-4">
+              <div className="col-span-12 sm:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
+                <div className="text-[11px] text-slate-500 uppercase tracking-wider">Aggregate cost · {activeFY}</div>
+                <div className="text-[24px] font-extrabold mt-1 num text-slate-800">{inr(fyTotal)}</div>
+                <div className="text-[11px] text-green-600 mt-1">deducted from insurance</div>
+              </div>
+              <div className="col-span-6 sm:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
+                <div className="text-[11px] text-slate-500 uppercase tracking-wider">Maintenance entries</div>
+                <div className="text-[24px] font-extrabold mt-1 num">{fyEntries.length}</div>
+              </div>
+              <div className="col-span-6 sm:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
+                <div className="text-[11px] text-slate-500 uppercase tracking-wider">Last updated</div>
+                <div className="text-sm font-semibold mt-2 text-slate-700">{fyLastUpdated ? fmtDT(fyLastUpdated) : '—'}</div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto scroll-x">
+              <table className="dt">
+                <thead>
+                  <tr><th>Equipment</th><th>Part / type</th><th>Status</th><th>Closed</th><th className="num">Cost</th></tr>
+                </thead>
+                <tbody>
+                  {fyEntries.length === 0 && (
+                    <tr><td colSpan={5} className="text-center text-slate-400 py-6 text-sm">No maintenance in {activeFY}</td></tr>
+                  )}
+                  {fyEntries.map(e => (
+                    <tr key={e.id} onClick={() => setDrillEntry(e)} style={{ cursor: 'pointer' }}>
+                      <td className="font-semibold text-slate-700">{e.equipment}</td>
+                      <td className="text-slate-500 text-xs">{e.part}</td>
+                      <td className="text-slate-500 text-xs">{e.status.replace(/_/g, ' ')}</td>
+                      <td className="text-slate-500 text-xs">{e.closed_at ? fmtDT(e.closed_at) : '—'}</td>
+                      <td className="num font-semibold">{e.cost ? inr(e.cost) : '—'}</td>
+                    </tr>
+                  ))}
+                  {fyEntries.length > 0 && (
+                    <tr style={{ borderTop: '2px solid #E2E8F0' }}>
+                      <td colSpan={4} className="font-bold text-right pr-4">Total · {activeFY}</td>
+                      <td className="num font-extrabold text-slate-800">{inr(fyTotal)}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+
       {/* FAR table — amber-soft */}
       <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a', position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Fixed Asset Register (FAR)', what: 'Complete list of all capitalized fixed assets across 4 plants. Each asset must be individually named on the FAR to be covered by the marine/fire insurance policy. Photo proof required for audit. New assets added via the "+ Add asset" slide panel.', source: 'Form entry', formLabel: '+ Add asset form', formPath: '/dashboard/purchase/far', note: 'Data from FAR_DATA mock (mockData.ts). Future: Supabase fixed_assets table.' }} />
@@ -150,10 +465,82 @@ export function FAR() {
             <div className="text-base font-bold">Fixed Asset Register</div>
             <div className="text-xs text-slate-500">Each asset is named — used in insurance · pic proof on file</div>
           </div>
-          <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-            + Register asset
-          </button>
+          <div className="flex items-center gap-2">
+            <button className="chip" onClick={() => { setImportOpen(o => !o); if (importStage === 'done') resetImport(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              ⬆ Import (CSV / Excel)
+            </button>
+            <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
+              + Register asset
+            </button>
+          </div>
         </div>
+
+        {/* Bulk-import accordion */}
+        {importOpen && (
+          <div style={{ border: '1px dashed #F59E0B', background: '#FFFBEB', borderRadius: 14, padding: 16, marginBottom: 16 }}>
+            <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls,image/*,application/pdf" style={{ display: 'none' }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportFile(f); e.target.value = ''; }} />
+
+            {(importStage === 'idle' || importStage === 'error') && (
+              <>
+                <div onClick={() => importInputRef.current?.click()}
+                  style={{ cursor: 'pointer', border: '2px dashed #FCD34D', borderRadius: 12, padding: '20px', textAlign: 'center', background: '#FEFCE8' }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#92400E' }}>⬆ Upload a previous-year FAR sheet</div>
+                  <div style={{ fontSize: 12, color: '#A16207', marginTop: 4 }}>CSV or Excel · AI maps the columns, you verify, then register. A copy is kept in the cloud.</div>
+                </div>
+                {importError && <div style={{ marginTop: 10, fontSize: 12, color: '#DC2626', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '10px 12px' }}>{importError}</div>}
+              </>
+            )}
+
+            {(importStage === 'uploading' || importStage === 'parsing' || importStage === 'importing') && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 4px' }}>
+                <svg className="animate-spin" width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#FDE68A" strokeWidth="3" /><path d="M12 2 A10 10 0 0 1 22 12" stroke="#D97706" strokeWidth="3" strokeLinecap="round" /></svg>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#92400E' }}>
+                  {importStage === 'uploading' ? '☁ Saving a copy to the cloud…'
+                    : importStage === 'parsing' ? '🤖 AI is reading the sheet & mapping columns…'
+                    : `🤖 Registering ${parsedRows.length} assets…`}
+                </div>
+              </div>
+            )}
+
+            {importStage === 'review' && (
+              <>
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <div style={{ fontSize: 12.5, color: '#92400E', fontWeight: 700 }}>
+                    🤖 {parsedRows.length} assets extracted from <strong>{importFileName}</strong> — verify &amp; edit below, then register.
+                  </div>
+                  <button onClick={downloadImportCsv} className="chip">⬇ Download extracted CSV</button>
+                </div>
+                <div className="overflow-x-auto scroll-x" style={{ maxHeight: 280 }}>
+                  <table className="dt">
+                    <thead><tr><th>Identification mark</th><th>Model</th><th>Year</th><th>Taxable value</th><th>Invoice</th><th>Purchase date</th><th>Account head</th></tr></thead>
+                    <tbody>
+                      {parsedRows.map((r, i) => {
+                        const upd = (k: keyof FarImportRow, v: string) => setParsedRows(prev => prev.map((x, j) => j === i ? { ...x, [k]: v } : x));
+                        const cell = (k: keyof FarImportRow) => <td><input value={r[k]} onChange={e => upd(k, e.target.value)} style={{ width: '100%', minWidth: 90, padding: '4px 6px', border: '1px solid #FDE68A', borderRadius: 6, fontSize: 12, background: '#fff' }} /></td>;
+                        return <tr key={i}>{cell('mark')}{cell('model')}{cell('year')}{cell('value')}{cell('invoice')}{cell('purchaseDate')}{cell('account')}</tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => resetImport()} className="chip">Cancel</button>
+                  <button onClick={confirmImport} className="btn-accent pill px-4 py-2 font-semibold text-sm" style={{ background: '#16A34A' }}>
+                    ✓ Register {parsedRows.length} asset{parsedRows.length !== 1 ? 's' : ''}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {importStage === 'done' && (
+              <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#15803D' }}>✓ {importedCount} assets imported to the FAR</div>
+                {cloudUrl && <a href={cloudUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#2563EB', display: 'inline-block', marginTop: 6 }}>View saved file in cloud ↗</a>}
+                <div><button onClick={() => { resetImport(); setImportOpen(false); }} className="chip" style={{ marginTop: 10 }}>Done</button></div>
+              </div>
+            )}
+          </div>
+        )}
         {loadError ? (
           <ErrorState
             title="Couldn't load the asset register"
@@ -283,6 +670,36 @@ export function FAR() {
           disabled={!form.mark.trim() || !form.model.trim()}
           requiredHint="Fill in Identification mark and Model to register"
         />
+      </SlidePanel>
+
+      {/* Maintenance entry drill-down */}
+      <SlidePanel open={!!drillEntry} onClose={() => setDrillEntry(null)} title={drillEntry?.equipment || 'Maintenance'} subtitle="Maintenance detail">
+        {drillEntry && (() => {
+          const Row = ({ k, v }: { k: string; v: React.ReactNode }) => (
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: '1px solid #F1F5F9' }}>
+              <span style={{ fontSize: 12, color: '#94A3B8' }}>{k}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#0F172A', textAlign: 'right' }}>{v}</span>
+            </div>
+          );
+          return (
+            <div>
+              <Row k="Ticket #" v={drillEntry.id.slice(0, 8)} />
+              <Row k="Equipment" v={drillEntry.equipment} />
+              <Row k="Plant" v={drillEntry.plant} />
+              <Row k="Part / type" v={drillEntry.part} />
+              <Row k="Status" v={drillEntry.status.replace(/_/g, ' ')} />
+              <Row k="Financial year" v={drillEntry.fy} />
+              <Row k="Raised at" v={fmtDT(drillEntry.created_at)} />
+              <Row k="Closed at" v={drillEntry.closed_at ? fmtDT(drillEntry.closed_at) : '— (open)'} />
+              {drillEntry.busyRef && <Row k="BUSY ref" v={drillEntry.busyRef} />}
+              <div style={{ marginTop: 14, padding: '14px 16px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#15803D' }}>Cost</span>
+                <span style={{ fontSize: 18, fontWeight: 800, color: '#15803D' }}>{drillEntry.cost ? inr(drillEntry.cost) : '— (in-house / no part)'}</span>
+              </div>
+              <a href="/dashboard/purchase/maint" style={{ display: 'block', textAlign: 'center', marginTop: 14, fontSize: 12, color: '#2563EB' }}>Open in Maintenance →</a>
+            </div>
+          );
+        })()}
       </SlidePanel>
     </>
   );

@@ -148,6 +148,50 @@ export async function uploadWorkflowImage(
   }
 }
 
+/**
+ * Upload ANY file (CSV, Excel, PDF, image…) to Cloudinary for reference, so the
+ * cloud keeps a copy of everything we ingest. Uses the /auto/ endpoint so raw
+ * documents are accepted. Same folder/identity convention as images.
+ */
+export async function uploadWorkflowFile(
+  file: File,
+  meta: { workflow: WorkflowBucket; subfolder?: string; entityId?: string; kind?: string; creator?: string; onProgress?: (pct: number) => void },
+): Promise<CloudinaryUploadResult> {
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME as string | undefined;
+  const uploadPreset = (import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET as string | undefined) ?? 'suntek_checkins';
+  if (!cloudName || cloudName === 'your_cloud_name_here') {
+    throw new Error('VITE_CLOUDINARY_CLOUD_NAME is not set. Add it to .env.local and restart.');
+  }
+  const today = new Date().toISOString().split('T')[0];
+  const timestamp = Date.now();
+  const subfolder = slug(meta.subfolder || today, today);
+  const folder = `suntek/${meta.workflow}/${subfolder}`;
+  const entityShort = meta.entityId ? meta.entityId.replace(/-/g, '').slice(0, 8) : '';
+  const publicId = [slug(meta.kind, 'file'), entityShort, timestamp, slug(meta.creator, 'unknown')].filter(Boolean).join('_');
+
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let p = 0;
+  if (meta.onProgress) {
+    meta.onProgress(0);
+    timer = setInterval(() => { p = Math.min(p + Math.random() * 12 + 3, 88); meta.onProgress?.(Math.round(p)); }, 250);
+  }
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('upload_preset', uploadPreset);
+    fd.append('folder', folder);
+    fd.append('public_id', publicId);
+    fd.append('tags', [`workflow:${meta.workflow}`, ...(meta.kind ? [`kind:${slug(meta.kind)}`] : []), ...(meta.creator ? [`by:${slug(meta.creator)}`] : []), `date:${today}`].join(','));
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error?.message ?? `Cloudinary upload failed (HTTP ${res.status})`);
+    meta.onProgress?.(100);
+    return data as CloudinaryUploadResult;
+  } finally {
+    if (timer) clearInterval(timer);
+  }
+}
+
 // ── Workflow-specific wrappers ───────────────────────────────────────────────
 
 export interface MaintenancePhotoMeta {

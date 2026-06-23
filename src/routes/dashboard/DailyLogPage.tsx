@@ -14,6 +14,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import { MentionTextarea } from '../../components/mentions';
 import { insertRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
+import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { useToast } from '../../components/ui/toast';
 import {
   extractDailyLog,
@@ -66,6 +67,7 @@ function rowVal(r: EditableReading, key: keyof DailyLogReading): string {
 export function DailyLogPage() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const [stage, setStage]           = useState<Stage>('idle');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError]           = useState<string | null>(null);
@@ -176,6 +178,7 @@ export function DailyLogPage() {
   // ── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
+    if (stage === 'saving') return; // double-submit guard
     if (!date) { toast.error('Date is required.'); return; }
     setStage('saving');
 
@@ -211,6 +214,19 @@ export function DailyLogPage() {
       await notifyMentions(remarks, {
         entityLabel: `Daily log · ${unitName || 'Unit'} · ${date}`, route: '/daily-log',
       });
+
+      // Screen OCR/entered operator + helper names against the blacklist.
+      const hits = await screenBlacklist(
+        [
+          ...operators.split(',').map((n) => ({ value: n.trim(), label: 'Operator' })),
+          { value: helper, label: 'Helper' },
+        ],
+        { workflow: 'Daily Log OCR', source: 'ocr', entityLabel: `Daily log · ${unitName || 'Unit'} · ${date}` },
+      );
+      if (hits.length) {
+        const h = hits[0];
+        toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      }
 
       setDoneSummary(`${readings.length} hourly readings · ${date} · ${shift}`);
       setStage('done');

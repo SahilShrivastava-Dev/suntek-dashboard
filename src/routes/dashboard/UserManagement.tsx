@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
+import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { MOCK_PROFILES } from '../../lib/profiles';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
@@ -86,6 +87,7 @@ const SYSTEM_USERS: DisplayUser[] = MOCK_PROFILES.map(p => ({
 export function UserManagement() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const [users, setUsers] = useState<DisplayUser[]>([]);
   const [plants, setPlants] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,6 +194,14 @@ export function UserManagement() {
       entityType: 'user_account', entityId: editingUser?.id,
       entityLabel: `User · ${form.name.trim()}`, route: '/dashboard/users',
     });
+    const hits = await screenBlacklist(
+      [{ value: form.name, label: 'Name' }, { value: form.designation, label: 'Designation' }],
+      { workflow: 'User Management', source: 'entry', entityLabel: `User · ${form.name.trim()}` },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+    }
     setSaved(true);
     await loadData();
     setTimeout(() => {

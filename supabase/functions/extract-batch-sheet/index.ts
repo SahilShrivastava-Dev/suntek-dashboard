@@ -29,7 +29,7 @@ Carefully read and extract ALL handwritten data from this batch log sheet image.
 Return ONLY a valid JSON object — no markdown fences, no explanation, just JSON.
 
 SHEET SECTIONS:
-1. HEADER: "BATCH NO." value (just the number, e.g. "1228") and "FINAL GRAVITY" value (number, e.g. 1390)
+1. HEADER: the printed COMPANY / FIRM name at the very top of the sheet (e.g. "Madan Chemicals Pvt Ltd Unit-II" → "Madan Chemicals Pvt Ltd"), the "BATCH NO." value (just the number, e.g. "1228") and "FINAL GRAVITY" value (number, e.g. 1390)
 
 2. MAIN TABLE — extract every row that has any data written. Columns:
    - DATE: format DD/MM/YY (e.g. "22/02/26")
@@ -53,6 +53,7 @@ SHEET SECTIONS:
 Return this EXACT JSON (no extra keys, all values exactly typed as shown):
 {
   "batchNo": "string",
+  "companyName": "string_or_null",
   "finalGravity": number_or_null,
   "readings": [
     {

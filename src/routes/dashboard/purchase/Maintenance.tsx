@@ -11,6 +11,7 @@ import { MentionText, NotesButton } from '../../../components/mentions';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { useDirectory, useMentionNotifier, extractMentionIds, addWatchers, notifyWatchers, truncate } from '../../../lib/mentions';
+import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import type { AppNotification } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
@@ -110,6 +111,8 @@ export function Maintenance() {
   const toast = useToast();
   const people = useDirectory();
   const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
+  const actionBusyRef = useRef(false); // guards one-shot workflow actions from double-clicks
   const role = activeProfile.id;
 
   // ── @-mention / watcher plumbing for tickets ────────────────────────────────
@@ -325,6 +328,16 @@ export function Maintenance() {
           actor_name: activeProfile.name, actor_role: role, read_by: [],
         });
       }
+    }
+
+    // Screen the equipment/description against the blacklist.
+    const hits = await screenBlacklist(
+      [{ value: raiseForm.equipment, label: 'Equipment' }, { value: raiseForm.description, label: 'Description' }],
+      { workflow: 'Maintenance', source: 'entry', entityLabel: raiseForm.equipment },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
     }
 
     setRaiseSaved(true);
@@ -572,7 +585,9 @@ export function Maintenance() {
   }
 
   async function handleRaiseStoreReq() {
-    if (!storeForm.partName.trim() || !selectedTicket) return;
+    if (!storeForm.partName.trim() || !selectedTicket || actionBusyRef.current) return;
+    actionBusyRef.current = true;
+    try {
     const plant = dbPlants.find(p => p.name === selectedTicket.plants?.name);
     const { data: sr } = await insertRows('maintenance_store_requests', {
       ticket_id: selectedTicket.id, part_name: storeForm.partName,
@@ -597,6 +612,7 @@ export function Maintenance() {
     setShowStoreForm(false);
     setStoreForm({ partName: '', quantity: '', specification: '' });
     await loadData();
+    } finally { actionBusyRef.current = false; }
   }
 
   async function startRepair() {

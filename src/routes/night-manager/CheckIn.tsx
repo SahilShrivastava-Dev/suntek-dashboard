@@ -4,6 +4,7 @@ import { validateGeofence } from '../../lib/algorithms/geofencing';
 import { uploadCheckinPhoto } from '../../lib/cloudinary';
 import { insertRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
+import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { useRoleContext } from '../../contexts/RoleContext';
 
 // ── Plant config ── Replace with real coordinates before production ──────────
@@ -55,6 +56,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
   // Form
   const [note,        setNote]        = useState('');
   const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const { activeProfile } = useRoleContext();
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -191,6 +193,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
   // ── Submit: upload → Supabase ──────────────────────────────────────────────
   async function handleSubmit() {
     if (!photoBlob || !gpsData) return;
+    if (submitState !== 'idle') return; // double-submit guard
 
     // Warn if out of zone, but allow override
     if (!gpsData.isOnSite) {
@@ -254,6 +257,12 @@ export function CheckIn({ embedded = false }: CheckInProps) {
 
     // Tag anyone @-mentioned in the shift note.
     notifyMentions(note, { entityLabel: `Night check-in · ${PLANT_NAME}`, route: '/dashboard/night-manager' });
+
+    // If the person checking in is themselves on the blacklist, alert admin.
+    await screenBlacklist(
+      [{ value: activeProfile.name, label: 'Night Manager' }],
+      { workflow: 'Night Check-in', source: 'image', entityLabel: PLANT_NAME, imageUrl: finalPhotoUrl || null },
+    );
 
     setSubmitState('done');
   }

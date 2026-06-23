@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
+import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
@@ -49,6 +50,7 @@ const STATUS_STAGE: Record<string, { bg: string; color: string; label: string }>
 export function StoreRequisitions() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [items, setItems] = useState<ReqRow[]>([]);
@@ -118,6 +120,14 @@ export function StoreRequisitions() {
         entityType: 'store_requisition', entityId: (data as ReqRow).id,
         entityLabel: `Store req · ${form.item}`, route: '/dashboard/purchase/storereq',
       });
+    }
+    const hits = await screenBlacklist(
+      [{ value: form.item, label: 'Item' }, { value: form.notes, label: 'Notes' }],
+      { workflow: 'Store Requisition', source: 'entry', entityLabel: `Store req · ${form.item}` },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
     }
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' }); }, 1600);

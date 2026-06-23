@@ -321,16 +321,18 @@ export interface Database {
           target_roles: string[];
           title: string;
           body: string | null;
-          type: 'info' | 'warning' | 'urgent';
+          type: 'info' | 'warning' | 'urgent' | 'critical';
           route: string | null;
           actor_name: string | null;
           actor_role: string | null;
           read_by: string[];
+          cleared_by: string[];
           created_at: string;
         };
-        // read_by has a DB default ('{}'), so it is optional on insert.
-        Insert: OptionalNulls<Omit<Database['public']['Tables']['notifications']['Row'], 'id' | 'created_at' | 'read_by'>> & {
+        // read_by / cleared_by have DB defaults ('{}'), so they're optional on insert.
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['notifications']['Row'], 'id' | 'created_at' | 'read_by' | 'cleared_by'>> & {
           read_by?: string[];
+          cleared_by?: string[];
         };
         Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
       };
@@ -675,6 +677,30 @@ export interface Database {
           mentions?: string[];
         };
         Update: Partial<Database['public']['Tables']['entity_notes']['Insert']>;
+      };
+
+      // ── Blacklist audit trail ─────────────────────────────────────────────
+      // Lifecycle + fuzzy-match-detection events for the blacklist. See 12_blacklist_audit.sql.
+      blacklist_events: {
+        Row: {
+          id: string;
+          blacklist_id: string | null;
+          event_type: string; // 'added' | 'resolved' | 're_added' | 'match_detected'
+          entity_name: string;
+          entity_type: string | null;
+          matched_value: string | null;
+          similarity: number | null;
+          workflow: string | null;
+          source: string | null;
+          actor_id: string | null;
+          actor_name: string | null;
+          actor_role: string | null;
+          image_url: string | null;
+          details: Record<string, unknown> | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['blacklist_events']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['blacklist_events']['Insert']>;
       };
 
       // CC / watchers: people who follow an entity and get notified on changes.

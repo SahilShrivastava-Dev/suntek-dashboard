@@ -6,6 +6,7 @@ import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { useDirectory, extractMentionIds, truncate } from '../../../lib/mentions';
+import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { useNotifications } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
@@ -30,6 +31,7 @@ export function ActivityLog() {
   const people = useDirectory();
   const { activeProfile } = useRoleContext();
   const { addNotification } = useNotifications();
+  const screenBlacklist = useBlacklistGuard();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [logs, setLogs] = useState<ActivityRow[]>([]);
@@ -97,6 +99,20 @@ export function ActivityLog() {
         actor_name: activeProfile.name,
         actor_role: activeProfile.roleLabel,
       });
+    }
+
+    // Screen the people/equipment named on this entry against the blacklist.
+    const hits = await screenBlacklist(
+      [
+        { value: form.doneBy, label: 'Done by' },
+        { value: form.verifiedBy, label: 'Verified by' },
+        { value: form.equipment, label: 'Equipment' },
+      ],
+      { workflow: 'Activity Log', source: 'entry', entityLabel: form.equipment },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
     }
 
     setSaved(true);

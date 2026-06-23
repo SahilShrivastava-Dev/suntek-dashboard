@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
+import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
@@ -14,6 +15,7 @@ type LedgerRow = Database['public']['Tables']['marine_insurance']['Row'];
 export function MarineInsurance() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const [panel, setPanel] = useState<Panel>(null);
   const [saved, setSaved] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState<'all' | 'top-up' | 'deduct'>('all');
@@ -68,6 +70,14 @@ export function MarineInsurance() {
       entityType: 'marine_insurance', entityId: (data as LedgerRow | undefined)?.id,
       entityLabel: 'Marine insurance top-up', route: '/dashboard/purchase/marine',
     });
+    const hits = await screenBlacklist(
+      [{ value: form.reference, label: 'Reference' }, { value: form.notes, label: 'Notes' }],
+      { workflow: 'Marine Insurance', source: 'entry', entityLabel: 'Marine insurance top-up' },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+    }
     setSaved(true);
     setTimeout(() => { setPanel(null); setSaved(false); setForm({ amount: '', reference: '', date: today, mode: 'NEFT', notes: '' }); }, 1600);
   }

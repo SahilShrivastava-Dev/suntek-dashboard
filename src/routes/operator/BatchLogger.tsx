@@ -8,6 +8,7 @@ import { BatchSheetReview } from '../../components/BatchSheetReview';
 import { SalesUploadPanel, PurchaseUploadPanel, SalesReviewPanel, PurchaseReviewPanel } from './uploadPanels';
 import type { ExtractedBatchSheet } from '../../lib/nvidiaOcr';
 import { resizeImageToDataUrl, extractSalesSheet, extractPurchaseSheet } from '../../lib/nvidiaOcr';
+import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import type { ExtractedSalesSheet, ExtractedPurchaseSheet } from '../../lib/nvidiaOcr';
 
 type BatchRow = Database['public']['Tables']['active_batches']['Row'];
@@ -165,6 +166,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
   // Sales / Purchase upload state (simple inline review panels)
   const [salesUpload, setSalesUpload]     = useState<{ stage: 'idle' | 'loading' | 'done' | 'error'; data?: ExtractedSalesSheet; imageUrl?: string; error?: string }>({ stage: 'idle' });
   const [purchaseUpload, setPurchaseUpload] = useState<{ stage: 'idle' | 'loading' | 'done' | 'error'; data?: ExtractedPurchaseSheet; imageUrl?: string; error?: string }>({ stage: 'idle' });
+  const screenBlacklist = useBlacklistGuard();
 
   // Tab State
   const [activeTab, setActiveTab] = useState<'reading' | 'new-batch' | 'upload' | 'upload-sales' | 'upload-purchase'>('reading');
@@ -525,6 +527,15 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                     const dataUrl = await resizeImageToDataUrl(file);
                     const data = await extractSalesSheet(dataUrl);
                     setSalesUpload({ stage: 'done', data, imageUrl: url });
+                    // Screen OCR-extracted parties against the blacklist.
+                    screenBlacklist(
+                      [
+                        { value: data.customerName ?? '', label: 'Customer' },
+                        { value: data.vehicleNumber ?? '', label: 'Vehicle' },
+                        { value: data.driverName ?? '', label: 'Driver' },
+                      ],
+                      { workflow: 'Sales Sheet OCR', source: 'ocr', entityLabel: data.dcNumber ? `DC ${data.dcNumber}` : 'Sales sheet' },
+                    );
                   } catch (e) {
                     setSalesUpload({ stage: 'error', error: e instanceof Error ? e.message : String(e), imageUrl: url });
                   }
@@ -541,6 +552,15 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                     const dataUrl = await resizeImageToDataUrl(file);
                     const data = await extractPurchaseSheet(dataUrl);
                     setPurchaseUpload({ stage: 'done', data, imageUrl: url });
+                    // Screen OCR-extracted supplier/GSTIN/buyer against the blacklist.
+                    screenBlacklist(
+                      [
+                        { value: data.supplierName ?? '', label: 'Supplier' },
+                        { value: data.supplierGstin ?? '', label: 'GSTIN' },
+                        { value: data.buyerName ?? '', label: 'Buyer' },
+                      ],
+                      { workflow: 'Purchase Sheet OCR', source: 'ocr', entityLabel: data.invoiceNumber ? `Invoice ${data.invoiceNumber}` : 'Purchase sheet' },
+                    );
                   } catch (e) {
                     setPurchaseUpload({ stage: 'error', error: e instanceof Error ? e.message : String(e), imageUrl: url });
                   }

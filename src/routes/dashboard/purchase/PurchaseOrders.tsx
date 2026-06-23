@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
+import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { exportToXlsx } from '../../../lib/utils/exportXlsx';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelSection, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
@@ -36,6 +37,7 @@ const UNITS  = ['nos', 'kg', 'MT', 'L', 'sets', 'boxes'];
 export function PurchaseOrders() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const [filter, setFilter] = useState('all');
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -84,6 +86,15 @@ export function PurchaseOrders() {
       entityType: 'oil_contract', entityId: (data as OrderRow | undefined)?.id,
       entityLabel: `PO · ${form.material || form.supplier}`, route: '/dashboard/purchase/purchase',
     });
+    // Screen the supplier/material against the blacklist (vendor risk).
+    const hits = await screenBlacklist(
+      [{ value: form.supplier, label: 'Supplier' }, { value: form.material, label: 'Material' }],
+      { workflow: 'Purchase Orders', source: 'entry', entityLabel: `PO · ${form.material || form.supplier}` },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+    }
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ material: '', type: 'PO', supplier: '', destination: 'SHD', qty: '', unit: 'nos', value: '', notes: '' }); }, 1600);
   }

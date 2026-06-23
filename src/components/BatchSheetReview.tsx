@@ -14,6 +14,7 @@
  */
 import React, { useState } from 'react';
 import { insertRows, updateRows } from '../lib/db';
+import { useBlacklistGuard } from '../lib/blacklist/guard';
 import { useToast } from './ui/toast';
 import {
   parsePressureToKg,
@@ -51,6 +52,7 @@ export function BatchSheetReview({
   readOnly = false,
 }: BatchSheetReviewProps) {
   const toast = useToast();
+  const screenBlacklist = useBlacklistGuard();
 
   // ── Header fields ─────────────────────────────────────────────────────────
   const [batchNo, setBatchNo]           = useState(data.batchNo ?? '');
@@ -185,6 +187,22 @@ export function BatchSheetReview({
         },
         created_at: new Date().toISOString(),
       });
+
+      // Screen the OCR-extracted names (company header, operators, helper)
+      // against the blacklist — reuses the OCR we already ran (not a 2nd pass).
+      const hits = await screenBlacklist(
+        [
+          { value: data.companyName ?? '', label: 'Company' },
+          { value: operator, label: 'Operator' },
+          { value: helper, label: 'Helper' },
+          ...readings.map((r) => ({ value: r.operator ?? '', label: 'Operator' })),
+        ],
+        { workflow: 'Batch Sheet OCR', source: 'ocr', entityLabel: `Batch ${batchNo}` },
+      );
+      if (hits.length) {
+        const h = hits[0];
+        toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      }
 
       onSaved(batchNo);
     } catch (e: any) {

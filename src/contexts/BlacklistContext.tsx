@@ -73,6 +73,17 @@ export function BlacklistProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Keep the blacklist live so screening/guards see new entries immediately
+  // (without needing a page reload). Best-effort; degrades if realtime is off.
+  useEffect(() => {
+    if (!tableReady) return;
+    const channel = supabase
+      .channel('blacklist:all')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'blacklist' }, () => { load(); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [tableReady, load]);
+
   const activeEntries = entries.filter(e => e.is_active);
 
   function isPersonBlacklisted(name: string): BlacklistEntry | null {

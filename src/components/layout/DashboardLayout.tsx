@@ -117,6 +117,9 @@ export function DashboardLayout() {
 
   // Detect if the currently previewed profile is blacklisted
   const blacklistEntry = blacklistReady ? isPersonBlacklisted(activeProfile.name) : null;
+  // Severity policy: LOW = monitor only (no access block, admin just gets alerts);
+  // MEDIUM / HIGH / CRITICAL = restrict dashboard access.
+  const restrictsAccess = !!blacklistEntry && blacklistEntry.severity !== 'low';
 
   // Fire a one-time notification when admin switches to a blacklisted profile
   const notifiedRef = useRef<string | null>(null);
@@ -217,9 +220,9 @@ export function DashboardLayout() {
             </div>
           )}
 
-          {/* Route guard: blacklist check → access check → content */}
+          {/* Route guard: blacklist (severity ≥ medium) → access check → content */}
           {canAccessRoute
-            ? blacklistEntry
+            ? restrictsAccess && blacklistEntry
               ? <BlacklistedOverlay entry={blacklistEntry} onBack={() => { switchProfile('admin'); navigate('/dashboard'); }} />
               : (
                 // Per-page boundary keyed on path: a crash in one page shows a

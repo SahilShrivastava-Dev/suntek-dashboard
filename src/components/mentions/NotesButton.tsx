@@ -4,6 +4,7 @@ import { SlidePanel } from '../SlidePanel';
 import { MentionTextarea } from './MentionTextarea';
 import { MentionText } from './MentionText';
 import { CcSelect } from './CcSelect';
+import { supabase } from '../../lib/supabase';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { useToast } from '../ui/toast';
@@ -78,6 +79,25 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
     getNotesCount(entityType, entityId).then((c) => { if (!cancelled) setCount(c); });
     return () => { cancelled = true; };
   }, [entityType, entityId]);
+
+  // Real-time: while the thread is open, append notes others post live.
+  useEffect(() => {
+    if (!open) return;
+    const channel = supabase
+      .channel(`entity_notes:${entityType}:${entityId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'entity_notes' }, (payload) => {
+        const n = payload.new as EntityNote;
+        if (n.entity_type !== entityType || n.entity_id !== entityId) return;
+        setNotes((prev) => {
+          if (prev.some((x) => x.id === n.id)) return prev;
+          const next = [...prev, n];
+          setCount(next.length);
+          return next;
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [open, entityType, entityId]);
 
   async function post() {
     if (!body.trim()) return;

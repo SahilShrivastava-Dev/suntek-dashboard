@@ -373,6 +373,22 @@ export function PanelFooter({
   disabled = false,
   requiredHint,
 }: PanelFooterProps) {
+  // Universal double-submit guard: once Save is clicked, the button is locked
+  // until onSave() settles — so rapid clicks can never fire duplicate writes.
+  // Every panel form that uses PanelFooter inherits this for free.
+  const [submitting, setSubmitting] = useState(false);
+  const blocked = disabled || submitting;
+
+  async function handleSave() {
+    if (blocked) return;
+    setSubmitting(true);
+    try {
+      await onSave();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   if (saved) {
     return (
       <div style={{ textAlign: 'center', padding: '24px 0' }}>
@@ -402,27 +418,30 @@ export function PanelFooter({
         <button
           type="button"
           onClick={onCancel}
+          disabled={submitting}
           style={{
             flex: 1, padding: '11px 0', borderRadius: 24, border: '1px solid #E2E8F0',
             background: '#F8FAFC', fontSize: 13, fontWeight: 600, color: '#475569',
-            cursor: 'pointer', fontFamily: 'inherit',
+            cursor: submitting ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+            opacity: submitting ? 0.6 : 1,
           }}
         >
           Cancel
         </button>
         <button
           type="button"
-          onClick={disabled ? undefined : onSave}
+          onClick={handleSave}
+          disabled={blocked}
           style={{
             flex: 2, padding: '11px 0', borderRadius: 24, border: 'none',
-            background: disabled ? '#CBD5E1' : '#F47651',
+            background: blocked ? '#CBD5E1' : '#F47651',
             fontSize: 13, fontWeight: 700, color: '#fff',
-            cursor: disabled ? 'not-allowed' : 'pointer',
+            cursor: blocked ? 'not-allowed' : 'pointer',
             fontFamily: 'inherit',
             transition: 'background 0.15s',
           }}
         >
-          {saveLabel}
+          {submitting ? 'Saving…' : saveLabel}
         </button>
       </div>
     </div>

@@ -1,4 +1,7 @@
 import React, { useState, useRef } from 'react';
+import { MentionTextarea } from '../../components/mentions';
+import { useMentionNotifier } from '../../lib/mentions';
+import { useBlacklistGuard } from '../../lib/blacklist/guard';
 
 type Tab = 'stock' | 'req';
 
@@ -111,13 +114,27 @@ function RequisitionForm() {
   const [qty, setQty]             = useState('');
   const [urgency, setUrgency]     = useState('low');
   const [remarks, setRemarks]     = useState('');
+  const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const [photoName, setPhotoName] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
+  const submittingRef = useRef(false);
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await new Promise(r => setTimeout(r, 800));
-    setSubmitted(true);
+    if (submittingRef.current) return; // double-submit guard
+    submittingRef.current = true;
+    try {
+      await new Promise(r => setTimeout(r, 800));
+      await notifyMentions(remarks, { entityLabel: `Warehouse requisition · ${item || 'item'}`, route: '/warehouse/requisition' });
+      await screenBlacklist(
+        [{ value: item, label: 'Item' }, { value: remarks, label: 'Remarks' }],
+        { workflow: 'Warehouse Requisition', source: 'entry', entityLabel: `Warehouse requisition · ${item || 'item'}` },
+      );
+      setSubmitted(true);
+    } finally {
+      submittingRef.current = false;
+    }
   }
 
   if (submitted) {
@@ -179,9 +196,9 @@ function RequisitionForm() {
         </div>
         <div>
           <label className="block text-sm font-bold text-slate-600 mb-1">Reason / Remarks</label>
-          <textarea
-            value={remarks} onChange={e => setRemarks(e.target.value)} rows={3}
-            placeholder="Belt snapped during batch 1228. Need urgent replacement."
+          <MentionTextarea
+            value={remarks} onChange={setRemarks} rows={3}
+            placeholder="Belt snapped during batch 1228. Need urgent replacement. Type @ to tag."
             className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none text-sm"
           />
         </div>

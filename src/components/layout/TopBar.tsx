@@ -6,16 +6,17 @@ import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import type { AppNotification } from '../../contexts/NotificationsContext';
 
-type NType = 'urgent' | 'warning' | 'info';
+type NType = 'critical' | 'urgent' | 'warning' | 'info';
 
-// ── Colour helpers ────────────────────────────────────────────────────────────
+// ── Colour helpers (also used as the blacklist-severity scale) ─────────────────
+// critical = deep red, urgent/high = red, warning/medium = amber, info/low = blue
 
-const DOT: Record<NType, string>   = { urgent: '#DC2626', warning: '#D97706', info: '#2563EB' };
-const ICON_BG: Record<NType, string> = { urgent: '#FEE2E2', warning: '#FEF3C7', info: '#DBEAFE' };
-const ICON_COLOR: Record<NType, string> = { urgent: '#DC2626', warning: '#D97706', info: '#2563EB' };
+const DOT: Record<NType, string>   = { critical: '#7F1D1D', urgent: '#DC2626', warning: '#D97706', info: '#2563EB' };
+const ICON_BG: Record<NType, string> = { critical: '#FECACA', urgent: '#FEE2E2', warning: '#FEF3C7', info: '#DBEAFE' };
+const ICON_COLOR: Record<NType, string> = { critical: '#7F1D1D', urgent: '#DC2626', warning: '#D97706', info: '#2563EB' };
 
 function TypeIcon({ type }: { type: NType }) {
-  if (type === 'urgent') return (
+  if (type === 'urgent' || type === 'critical') return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
       <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
     </svg>
@@ -42,7 +43,7 @@ interface TopBarProps {
 export function TopBar({ title, breadcrumb }: TopBarProps) {
   const navigate = useNavigate();
   const { activeProfile } = useRoleContext();
-  const { notifications, unreadCount, markRead, markAllRead, tableReady } = useNotifications();
+  const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady } = useNotifications();
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const btnRef   = useRef<HTMLButtonElement>(null);
@@ -147,19 +148,33 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
                     {activeProfile.roleLabel} · {activeProfile.name}
                   </div>
                 </div>
-                {unread > 0 && (
-                  <button
-                    onClick={markAllRead}
-                    style={{
-                      fontSize: 11, fontWeight: 600, color: '#F47651',
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      padding: '4px 8px', borderRadius: 8,
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    Mark all read
-                  </button>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {unread > 0 && (
+                    <button
+                      onClick={markAllRead}
+                      style={{
+                        fontSize: 11, fontWeight: 600, color: '#F47651',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        padding: '4px 8px', borderRadius: 8, fontFamily: 'inherit',
+                      }}
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                  {notifications.length > 0 && (
+                    <button
+                      onClick={clearAll}
+                      title="Remove all notifications from your view"
+                      style={{
+                        fontSize: 11, fontWeight: 600, color: '#94A3B8',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        padding: '4px 8px', borderRadius: 8, fontFamily: 'inherit',
+                      }}
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 

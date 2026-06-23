@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { insertRows } from '../../lib/db';
 import { useSalesMTD, useSalesContracts, useAnalyticsKPIs, fmtINR } from '../../hooks/useBusyData';
 import { DeltaBadge, BulletCompare } from '../../components/charts/AnalyticsViz';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
 import { exportToXlsx } from '../../lib/utils/exportXlsx';
 import { useRoleContext } from '../../contexts/RoleContext';
+import { useToast } from '../../components/ui/toast';
 
 interface NewContractForm {
   customer: string;
@@ -16,6 +18,7 @@ interface NewContractForm {
 const DENSITY_OPTIONS = ['1300', '1400', '1450', '1500'];
 
 export function Sales() {
+  const toast = useToast();
   const [showModal, setShowModal] = useState(false);
   const { activeProfile } = useRoleContext();
   const { data: salesKPIs } = useSalesMTD();
@@ -63,22 +66,22 @@ export function Sales() {
     if (!form.customer.trim() || !form.lockedPrice || !form.bookedQty) return;
     // Find or create customer
     let customerId: string | null = null;
-    const { data: existingCustomers } = await (supabase
+    const { data: existingCustomers } = await supabase
       .from('customers')
       .select('id')
       .ilike('name', form.customer.trim())
-      .limit(1) as any);
+      .limit(1)
+      .returns<{ id: string }[]>();
     if (existingCustomers && existingCustomers.length > 0) {
       customerId = existingCustomers[0].id;
     } else {
-      const { data: newCust } = await (supabase.from('customers') as any)
-        .insert({ name: form.customer.trim(), outstanding: 0, is_active: true })
+      const { data: newCust } = await insertRows('customers', { name: form.customer.trim(), outstanding: 0, is_active: true })
         .select('id')
         .single();
       if (newCust) customerId = newCust.id;
     }
-    if (!customerId) { alert('Failed to find or create customer. Please try again.'); return; }
-    const { error } = await (supabase.from('sales_contracts') as any).insert({
+    if (!customerId) { toast.error('Failed to find or create customer. Please try again.'); return; }
+    const { error } = await insertRows('sales_contracts', {
       customer_id: customerId,
       density: parseInt(form.density) || 1400,
       locked_price: parseFloat(form.lockedPrice) || 0,
@@ -86,7 +89,7 @@ export function Sales() {
       dispatched_qty: 0,
       status: 'open',
     });
-    if (error) { alert(`Save failed: ${error.message}`); return; }
+    if (error) { toast.error(`Save failed: ${error.message}`); return; }
     setFormSaved(true);
     setTimeout(() => {
       setShowModal(false);

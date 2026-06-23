@@ -75,6 +75,11 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/oil-ratio',             // Reference table
       '/dashboard/audit',                 // Audit trail
       '/dashboard/anomalies',             // Anomaly detection (ops/vendor/equipment scope)
+      '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
+      '/dashboard/cost-intelligence',     // Phase 2: Cost & Margin Intelligence
+      '/dashboard/benchmarking',          // Phase 2: Multi-Plant Benchmarking
+      '/dashboard/predictive-qc',         // Phase 2: Live Predictive QC board
+      '/dashboard/working-capital',       // Phase 2: Working Capital & Cash
       '/dashboard/blacklist',             // Blacklist registry (admin + unit head)
       // NOT /dashboard/sales            — sales team only
       // NOT /dashboard/customers        — accounts team only
@@ -192,6 +197,40 @@ export const MOCK_PROFILES: MockProfile[] = [
     accessNote: 'Maintenance store actions only · no financial or production access',
   },
 
+  // ── L2: Store Manager · Suntek Chlorides (Jharkhand / Rehla) ───────────────
+  {
+    id: 'store_manager_chlorides',
+    name: 'Suresh Kumar',
+    role: 'L2',
+    roleLabel: 'Store Manager · Chlorides',
+    roleDescription: 'Spare-parts store for the Suntek Chlorides unit',
+    initials: 'SK',
+    avatarFrom: 'from-lime-400',
+    avatarTo: 'to-lime-600',
+    plant: 'Suntek Chlorides',
+    homeRoute: '/dashboard/purchase/maint',
+    allowedDashboardRoutes: ['/dashboard/purchase/maint', '/dashboard/purchase/storereq'],
+    standaloneOnly: false,
+    accessNote: 'Suntek Chlorides store · maintenance only',
+  },
+
+  // ── L2: Store Manager · Suntek Plasticiser (Jharkhand / Rehla) ─────────────
+  {
+    id: 'store_manager_plasticiser',
+    name: 'Ravi Verma',
+    role: 'L2',
+    roleLabel: 'Store Manager · Plasticiser',
+    roleDescription: 'Spare-parts store for the Suntek Plasticiser unit',
+    initials: 'RV',
+    avatarFrom: 'from-teal-400',
+    avatarTo: 'to-teal-600',
+    plant: 'Suntek Plasticiser',
+    homeRoute: '/dashboard/purchase/maint',
+    allowedDashboardRoutes: ['/dashboard/purchase/maint', '/dashboard/purchase/storereq'],
+    standaloneOnly: false,
+    accessNote: 'Suntek Plasticiser store · maintenance only',
+  },
+
   // ── L1: Technician — maintenance ticket management ────────────────────────
   // Sees own maintenance tickets only. Closes tickets with photo proof.
   // Cannot access financial, sales, or production data.
@@ -213,6 +252,28 @@ export const MOCK_PROFILES: MockProfile[] = [
     accessNote: 'Maintenance tickets only · no financial or production access',
   },
 
+  // ── L2: Purchase Manager — procurement bill + dispatch tracking ────────────
+  // After the unit head approves external procurement and procures (BUSY ref),
+  // the ticket comes here: the purchase manager uploads the supplier bill photo
+  // and marks the part en route to the store.
+  {
+    id: 'purchase_manager',
+    name: 'Anshul',
+    role: 'L2',
+    roleLabel: 'Purchase Manager',
+    roleDescription: 'Procurement bills · dispatch tracking',
+    initials: 'AN',
+    avatarFrom: 'from-fuchsia-400',
+    avatarTo: 'to-fuchsia-600',
+    homeRoute: '/dashboard/purchase/maint',
+    allowedDashboardRoutes: [
+      '/dashboard/purchase/maint',
+      '/dashboard/purchase/purchase',
+    ],
+    standaloneOnly: false,
+    accessNote: 'Procurement bill upload + dispatch tracking · maintenance & POs',
+  },
+
   // ── L2: Accountant (Delhi) — Delhi factory financial/operational data ─────
   // Can view and process financial/operational data for the Delhi factory only.
   // Purchase sheets are read-only for all accountants (anti-tampering rule).
@@ -232,6 +293,11 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/sales',                 // Sales contracts & dispatch
       '/dashboard/customers',             // Customer history
       '/dashboard/anomalies',             // Anomaly detection (financial/customer scope)
+      '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
+      '/dashboard/cost-intelligence',     // Phase 2: Cost & Margin Intelligence
+      '/dashboard/benchmarking',          // Phase 2: Multi-Plant Benchmarking
+      '/dashboard/predictive-qc',         // Phase 2: Live Predictive QC board
+      '/dashboard/working-capital',       // Phase 2: Working Capital & Cash
       '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
       '/dashboard/purchase/marine',       // Marine insurance fund
       '/dashboard/purchase/labour',       // Labour cost tracking
@@ -259,6 +325,11 @@ export const MOCK_PROFILES: MockProfile[] = [
       '/dashboard/sales',                 // Sales contracts & dispatch
       '/dashboard/customers',             // Customer history
       '/dashboard/anomalies',             // Anomaly detection (financial/customer scope)
+      '/dashboard/anomaly-center',        // Phase 2: Anomaly Operations Center
+      '/dashboard/cost-intelligence',     // Phase 2: Cost & Margin Intelligence
+      '/dashboard/benchmarking',          // Phase 2: Multi-Plant Benchmarking
+      '/dashboard/predictive-qc',         // Phase 2: Live Predictive QC board
+      '/dashboard/working-capital',       // Phase 2: Working Capital & Cash
       '/dashboard/purchase/purchase',     // Purchase orders (read-only data)
       '/dashboard/purchase/marine',       // Marine insurance fund
       '/dashboard/purchase/labour',       // Labour cost tracking

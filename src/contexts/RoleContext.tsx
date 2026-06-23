@@ -2,6 +2,12 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { MOCK_PROFILES, DEFAULT_PROFILE } from '../lib/profiles';
 import type { MockProfile } from '../lib/profiles';
 import { supabase } from '../lib/supabase';
+import type { Database } from '../lib/database.types';
+
+type DbUser = Pick<
+  Database['public']['Tables']['user_accounts']['Row'],
+  'id' | 'name' | 'role_id' | 'role_label' | 'plant_name' | 'access_note'
+>;
 
 interface RoleContextValue {
   activeProfile: MockProfile;
@@ -19,10 +25,11 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function loadDbUsers() {
-      const { data } = await (supabase
+      const { data } = await supabase
         .from('user_accounts')
         .select('id, name, role_id, role_label, plant_name, access_note')
-        .eq('is_active', true) as any);
+        .eq('is_active', true)
+        .returns<DbUser[]>();
       if (!data?.length) return;
       const extras: MockProfile[] = [];
       for (const u of data) {

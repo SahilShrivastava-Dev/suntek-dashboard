@@ -1,7 +1,30 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import { insertRows, updateRows } from '../../lib/db';
+import { useMentionNotifier } from '../../lib/mentions';
+import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { MOCK_PROFILES } from '../../lib/profiles';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
+import { useToast } from '../../components/ui/toast';
+
+/** A user row for display — a user_accounts row (+ plants join) or a built-in system profile. */
+interface DisplayUser {
+  id: string;
+  name: string;
+  mobile: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  role_id: string | null;
+  role_label: string | null;
+  plant_id?: string | null;
+  plant_name: string | null;
+  plants?: { name: string | null } | null;
+  designation: string | null;
+  access_note: string | null;
+  is_active: boolean;
+  created_at: string | null;
+  _isSystem?: boolean;
+}
 
 // ── Role options ──────────────────────────────────────────────────────────────
 
@@ -42,32 +65,35 @@ const BLANK_FORM = {
 };
 
 // Built-in profiles derived from MOCK_PROFILES — always shown, cannot be deleted
-const SYSTEM_USERS = MOCK_PROFILES.map(p => ({
+const SYSTEM_USERS: DisplayUser[] = MOCK_PROFILES.map(p => ({
   id: p.id,
   name: p.name,
-  mobile: null as string | null,
-  whatsapp: null as string | null,
-  email: null as string | null,
+  mobile: null,
+  whatsapp: null,
+  email: null,
   role_id: p.id,
   role_label: p.roleLabel,
   plant_name: p.plant || null,
-  plants: null as null,
-  designation: null as string | null,
+  plants: null,
+  designation: null,
   access_note: p.accessNote || null,
   is_active: true,
-  created_at: null as string | null,
+  created_at: null,
   _isSystem: true,
 }));
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function UserManagement() {
-  const [users, setUsers] = useState<any[]>([]);
+  const toast = useToast();
+  const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
+  const [users, setUsers] = useState<DisplayUser[]>([]);
   const [plants, setPlants] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [showPanel, setShowPanel] = useState(false);
-  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editingUser, setEditingUser] = useState<DisplayUser | null>(null);
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM });
 
@@ -78,11 +104,11 @@ export function UserManagement() {
   const loadData = useCallback(async () => {
     setLoading(true);
     const [{ data: usersData }, { data: plantsData }] = await Promise.all([
-      (supabase.from('user_accounts').select('*, plants(name)').order('created_at', { ascending: false }) as any),
-      (supabase.from('plants').select('id, name') as any),
+      supabase.from('user_accounts').select('*, plants(name)').order('created_at', { ascending: false }).returns<DisplayUser[]>(),
+      supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
     ]);
     // Merge: built-in profiles first, then any extra DB-only users
-    const dbUsers: any[] = usersData || [];
+    const dbUsers: DisplayUser[] = usersData || [];
     const merged = [
       ...SYSTEM_USERS,
       ...dbUsers,
@@ -158,12 +184,23 @@ export function UserManagement() {
     };
 
     if (editingUser) {
-      const { error } = await (supabase.from('user_accounts') as any)
-        .update(payload).eq('id', editingUser.id);
-      if (error) { alert(`Update failed: ${error.message}`); return; }
+      const { error } = await updateRows('user_accounts', payload).eq('id', editingUser.id);
+      if (error) { toast.error(`Update failed: ${error.message}`); return; }
     } else {
-      const { error } = await (supabase.from('user_accounts') as any).insert(payload);
-      if (error) { alert(`Save failed: ${error.message}`); return; }
+      const { error } = await insertRows('user_accounts', payload);
+      if (error) { toast.error(`Save failed: ${error.message}`); return; }
+    }
+    await notifyMentions(form.access_note, {
+      entityType: 'user_account', entityId: editingUser?.id,
+      entityLabel: `User · ${form.name.trim()}`, route: '/dashboard/users',
+    });
+    const hits = await screenBlacklist(
+      [{ value: form.name, label: 'Name' }, { value: form.designation, label: 'Designation' }],
+      { workflow: 'User Management', source: 'entry', entityLabel: `User · ${form.name.trim()}` },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
     }
     setSaved(true);
     await loadData();
@@ -175,10 +212,9 @@ export function UserManagement() {
     }, 1400);
   }
 
-  async function toggleStatus(u: any) {
+  async function toggleStatus(u: DisplayUser) {
     if (u._isSystem) return;
-    await (supabase.from('user_accounts') as any)
-      .update({ is_active: !u.is_active }).eq('id', u.id);
+    await updateRows('user_accounts', { is_active: !u.is_active }).eq('id', u.id);
     await loadData();
   }
 

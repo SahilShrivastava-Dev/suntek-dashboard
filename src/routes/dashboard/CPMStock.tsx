@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { TANKS, CP_LOCATIONS, CP_DENSITIES, CP_MATRIX } from '../../data/mockData';
+import { insertRows } from '../../lib/db';
+import { useToast } from '../../components/ui/toast';
+import { SkeletonRows, ErrorState } from '../../components/ui/states';
+import type { Database } from '../../lib/database.types';
+
+type StockRow = Database['public']['Tables']['stock_levels']['Row'] & { plants?: { name: string | null } | null };
+type TankRow = Database['public']['Tables']['tanks']['Row'];
+type DrumRow = Database['public']['Tables']['cpm_drum_stock']['Row'];
 
 interface BulkRow {
   item: string;
@@ -10,34 +17,64 @@ interface BulkRow {
 }
 
 export function CPMStock() {
+  const toast = useToast();
   const [storeSearch, setStoreSearch] = useState('');
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([
     { item: '', adjustment: '', direction: 'in', note: '' },
   ]);
   const [bulkSaved, setBulkSaved] = useState(false);
-  const [stockItems, setStockItems] = useState<any[]>([]);
+  const [stockItems, setStockItems] = useState<StockRow[]>([]);
+  const [tanks, setTanks] = useState<TankRow[]>([]);
+  const [drumRows, setDrumRows] = useState<DrumRow[]>([]);
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
   const [bulkPlant, setBulkPlant] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
-    async function load() {
-      const [{ data: plantsData }, { data: stockData }] = await Promise.all([
-        (supabase.from('plants').select('id, name') as any),
-        (supabase.from('stock_levels').select('*, plants(name)').order('updated_at', { ascending: false }) as any),
+  async function load() {
+    try {
+      const [plantsRes, stockRes, tanksRes, drumsRes] = await Promise.all([
+        supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+        supabase.from('stock_levels').select('*, plants(name)').order('updated_at', { ascending: false }).returns<StockRow[]>(),
+        supabase.from('tanks').select('*').order('sort_order', { ascending: true }).returns<TankRow[]>(),
+        supabase.from('cpm_drum_stock').select('*').returns<DrumRow[]>(),
       ]);
-      if (plantsData && plantsData.length > 0) {
-        setDbPlants(plantsData);
-        setBulkPlant(plantsData[0].id);
+      if (stockRes.error) throw stockRes.error;
+      if (plantsRes.data && plantsRes.data.length > 0) {
+        setDbPlants(plantsRes.data);
+        setBulkPlant(plantsRes.data[0].id);
       }
-      setStockItems(stockData || []);
+      setStockItems(stockRes.data || []);
+      setTanks(tanksRes.data || []);
+      setDrumRows(drumsRes.data || []);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[CPMStock] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   const filteredItems = stockItems.filter(i =>
     !storeSearch || (i.product || '').toLowerCase().includes(storeSearch.toLowerCase())
   );
+
+  // Pivot the normalised drum rows back into the density×location matrix.
+  const densities = [...new Set(drumRows.map(r => r.density))].sort((a, b) => a - b);
+  const locations = [...new Set(drumRows.map(r => r.location))];
+  const drumLookup = new Map(drumRows.map(r => [`${r.location}|${r.density}`, r.drums]));
+  const matrix: Record<string, number[]> = Object.fromEntries(
+    locations.map(loc => [loc, densities.map(d => drumLookup.get(`${loc}|${d}`) ?? 0)]),
+  );
+
+  // Average tank fill — replaces the hardcoded 68% KPI.
+  const avgTankLevel = tanks.length
+    ? Math.round(tanks.reduce((s, t) => s + t.level_pct, 0) / tanks.length)
+    : 0;
 
   function addBulkRow() {
     setBulkRows(r => [...r, { item: '', adjustment: '', direction: 'in', note: '' }]);
@@ -56,7 +93,7 @@ export function CPMStock() {
     if (filled.length === 0) return;
     const today = new Date().toISOString().split('T')[0];
     const plantId = bulkPlant || dbPlants[0]?.id;
-    if (!plantId) { alert('No plant selected. Please select a plant.'); return; }
+    if (!plantId) { toast.error('No plant selected. Please select a plant.'); return; }
     const inserts = filled.map(r => ({
       product: r.item,
       quantity: parseFloat(r.adjustment) * (r.direction === 'out' ? -1 : 1),
@@ -64,9 +101,10 @@ export function CPMStock() {
       plant_id: plantId,
       date: today,
     }));
-    const { error } = await (supabase.from('stock_levels') as any).insert(inserts);
-    if (error) { alert(`Save failed: ${error.message}`); return; }
-    const { data } = await (supabase.from('stock_levels').select('*, plants(name)').order('updated_at', { ascending: false }) as any);
+    const { error } = await insertRows('stock_levels', inserts);
+    if (error) { toast.error(`Save failed: ${error.message}`); return; }
+    const { data } = await supabase.from('stock_levels').select('*, plants(name)')
+      .order('updated_at', { ascending: false }).returns<StockRow[]>();
     setStockItems(data || []);
     setBulkSaved(true);
     setTimeout(() => {
@@ -107,10 +145,20 @@ export function CPMStock() {
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Tank capacity</div>
-          <div className="text-[28px] font-extrabold mt-1 num">68%</div>
-          <div className="progress mt-2"><div style={{ width: '68%' }}></div></div>
+          <div className="text-[28px] font-extrabold mt-1 num">{avgTankLevel}%</div>
+          <div className="progress mt-2"><div style={{ width: `${avgTankLevel}%` }}></div></div>
         </div>
       </div>
+
+      {loadError && (
+        <div className="card p-4 mb-5">
+          <ErrorState
+            title="Couldn't load stock data"
+            message="Tanks, the CP matrix, and store items failed to load."
+            onRetry={() => { setLoading(true); setLoadError(false); load(); }}
+          />
+        </div>
+      )}
 
       {/* Matrix + Tanks */}
       <div className="grid grid-cols-12 gap-5 mb-5">
@@ -126,13 +174,13 @@ export function CPMStock() {
               <thead>
                 <tr>
                   <th>Location</th>
-                  {CP_DENSITIES.map(d => <th key={d} className="num">d {d}</th>)}
+                  {densities.map(d => <th key={d} className="num">d {d}</th>)}
                   <th className="num">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {CP_LOCATIONS.map(loc => {
-                  const row = CP_MATRIX[loc];
+                {locations.map(loc => {
+                  const row = matrix[loc];
                   const total = row.reduce((a, b) => a + b, 0);
                   return (
                     <tr key={loc}>
@@ -160,28 +208,31 @@ export function CPMStock() {
           <div className="text-base font-bold">Tank levels · port + factory</div>
           <div className="text-xs text-slate-500 mb-4">Pictorial only — capacity bars per tank</div>
           <div className="space-y-3">
-            {TANKS.map(tk => {
-              const color = tk.alert ? '#DC2626' : tk.level > 70 ? '#16A34A' : tk.level > 30 ? '#F47651' : '#D97706';
+            {tanks.map(tk => {
+              const color = tk.alert ? '#DC2626' : tk.level_pct > 70 ? '#16A34A' : tk.level_pct > 30 ? '#F47651' : '#D97706';
               return (
-                <div key={tk.name} className="p-3 rounded-2xl border border-slate-100 hover:bg-slate-50">
+                <div key={tk.id} className="p-3 rounded-2xl border border-slate-100 hover:bg-slate-50">
                   <div className="flex items-center justify-between mb-1.5">
                     <div>
                       <div className="font-semibold text-sm">{tk.name}</div>
-                      <div className="text-[11px] text-slate-500">{tk.loc} · cap {tk.cap} {tk.unit}</div>
+                      <div className="text-[11px] text-slate-500">{tk.location} · cap {tk.capacity} {tk.unit}</div>
                     </div>
                     <div className="text-right">
-                      <div className="font-bold num text-sm">{Math.round(tk.cap * tk.level / 100)} {tk.unit}</div>
+                      <div className="font-bold num text-sm">{Math.round((tk.capacity ?? 0) * tk.level_pct / 100)} {tk.unit}</div>
                       <div className="text-[11px] font-semibold" style={{ color }}>
-                        {tk.level}%{tk.alert ? ' · low' : ''}
+                        {tk.level_pct}%{tk.alert ? ' · low' : ''}
                       </div>
                     </div>
                   </div>
                   <div className="progress" style={{ height: '6px' }}>
-                    <div style={{ width: `${tk.level}%`, background: color }} />
+                    <div style={{ width: `${tk.level_pct}%`, background: color }} />
                   </div>
                 </div>
               );
             })}
+            {!loading && tanks.length === 0 && (
+              <div className="text-center text-slate-400 py-6 text-sm">No tanks configured</div>
+            )}
           </div>
         </div>
       </div>
@@ -211,6 +262,9 @@ export function CPMStock() {
             </button>
           </div>
         </div>
+        {loading ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -235,6 +289,7 @@ export function CPMStock() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* ── Bulk Update Modal ── */}

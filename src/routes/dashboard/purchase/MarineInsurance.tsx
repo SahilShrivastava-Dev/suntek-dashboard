@@ -1,28 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { insertRows } from '../../../lib/db';
+import { useMentionNotifier } from '../../../lib/mentions';
+import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
+import { useToast } from '../../../components/ui/toast';
+import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import type { Database } from '../../../lib/database.types';
 
 type Panel = 'topup' | 'ledger' | null;
+type LedgerRow = Database['public']['Tables']['marine_insurance']['Row'];
 
 export function MarineInsurance() {
+  const toast = useToast();
+  const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const [panel, setPanel] = useState<Panel>(null);
   const [saved, setSaved] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState<'all' | 'top-up' | 'deduct'>('all');
-  const [ledger, setLedger] = useState<any[]>([]);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({ amount: '', reference: '', date: today, mode: 'NEFT', notes: '' });
 
-  useEffect(() => {
-    async function load() {
-      const { data } = await (supabase
+  async function load() {
+    try {
+      const { data, error } = await supabase
         .from('marine_insurance')
         .select('*')
-        .order('date', { ascending: false }) as any);
+        .order('date', { ascending: false })
+        .returns<LedgerRow[]>();
+      if (error) throw error;
       setLedger(data || []);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[MarineInsurance] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   const currentBalance = ledger.length > 0 ? ledger[0].balance : 0;
 
@@ -32,7 +53,7 @@ export function MarineInsurance() {
     if (!form.amount.trim()) return;
     const topUpAmt = parseFloat(form.amount) || 0;
     const newBal = currentBalance + topUpAmt;
-    const { data, error } = await (supabase.from('marine_insurance') as any).insert({
+    const { data, error } = await insertRows('marine_insurance', {
       date: form.date,
       type: 'top_up',
       reference: form.reference || null,
@@ -41,10 +62,22 @@ export function MarineInsurance() {
     }).select('*').single();
 
     if (error) {
-      alert(`Save failed: ${error.message}`);
+      toast.error(`Save failed: ${error.message}`);
       return;
     }
-    if (data) setLedger(prev => [data, ...prev]);
+    if (data) setLedger(prev => [data as LedgerRow, ...prev]);
+    await notifyMentions(form.notes, {
+      entityType: 'marine_insurance', entityId: (data as LedgerRow | undefined)?.id,
+      entityLabel: 'Marine insurance top-up', route: '/dashboard/purchase/marine',
+    });
+    const hits = await screenBlacklist(
+      [{ value: form.reference, label: 'Reference' }, { value: form.notes, label: 'Notes' }],
+      { workflow: 'Marine Insurance', source: 'entry', entityLabel: 'Marine insurance top-up' },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+    }
     setSaved(true);
     setTimeout(() => { setPanel(null); setSaved(false); setForm({ amount: '', reference: '', date: today, mode: 'NEFT', notes: '' }); }, 1600);
   }
@@ -113,6 +146,12 @@ export function MarineInsurance() {
       <div className="card p-6" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Marine Insurance Ledger', what: 'Transaction history of the marine insurance prepaid balance — all top-ups (credits) and dispatch deductions (debits). Running balance is shown per row. New top-ups entered via the "Top up" slide panel; deductions are auto-logged per supplier dispatch.', source: 'Form entry', formLabel: 'Top-up / View ledger panel', formPath: '/dashboard/purchase/marine', note: 'Data from MARINE_LEDGER mock (mockData.ts). Future: Supabase marine_ledger table.' }} />
         <div className="text-base font-bold mb-3">Recent ledger</div>
+        {loadError ? (
+          <ErrorState title="Couldn't load the ledger" message="The marine insurance ledger failed to load."
+            onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
+        ) : loading ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -144,6 +183,7 @@ export function MarineInsurance() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* Top-up panel */}

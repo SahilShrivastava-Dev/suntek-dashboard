@@ -156,6 +156,13 @@ function IconClipboard() {
     </svg>
   );
 }
+function IconActivity() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+    </svg>
+  );
+}
 
 // ── Section header ─────────────────────────────────────────────────────────────
 
@@ -177,6 +184,20 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
 
   const [purchaseOpen, setPurchaseOpen] = useState(
     location.pathname.startsWith('/dashboard/purchase')
+  );
+
+  // Monitoring "Intelligence" accordion holds the analytical pages; Anomaly
+  // Detection sits outside it as a peer. Open by default when on any of them.
+  const MONITORING_PATHS = [
+    '/dashboard/predictive-qc',
+    '/dashboard/cost-intelligence',
+    '/dashboard/working-capital',
+    '/dashboard/benchmarking',
+    '/dashboard/owner',
+    '/dashboard/anomaly-center',
+  ];
+  const [monitoringOpen, setMonitoringOpen] = useState(
+    MONITORING_PATHS.some((p) => location.pathname.startsWith(p))
   );
 
   /** True if the active profile can access this exact route (or its children). */
@@ -232,6 +253,21 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
 
   // Monitoring items
   const showAnomalies = canSee('/dashboard/anomalies');
+  const showOwner = activeProfile.id === 'admin';
+
+  // Intelligence accordion sub-tabs — order matters (first visible is the
+  // accordion default target). Anomaly Detection is intentionally NOT here;
+  // it stays a peer of the accordion below.
+  const INTELLIGENCE_TABS = [
+    { label: 'Predictive QC',     path: '/dashboard/predictive-qc',     show: canSee('/dashboard/predictive-qc')     },
+    { label: 'Cost & Margin',     path: '/dashboard/cost-intelligence', show: canSee('/dashboard/cost-intelligence') },
+    { label: 'Working Capital',   path: '/dashboard/working-capital',   show: canSee('/dashboard/working-capital')   },
+    { label: 'Benchmarking',      path: '/dashboard/benchmarking',      show: canSee('/dashboard/benchmarking')      },
+    { label: 'Owner Intelligence',path: '/dashboard/owner',             show: showOwner                              },
+    { label: 'Anomaly Center',    path: '/dashboard/anomaly-center',    show: canSee('/dashboard/anomaly-center')    },
+  ].filter((t) => t.show);
+
+  const showIntelligence = INTELLIGENCE_TABS.length > 0;
 
   // Admin section — user management + blacklist
   const showAdmin = activeProfile.id === 'admin';
@@ -470,21 +506,63 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       </nav>
 
       {/* ── MONITORING ────────────────────────────────────────────────────── */}
-      {showAnomalies && <SectionHeader label="Monitoring" />}
-      {showAnomalies && (
+      {(showIntelligence || showAnomalies) && <SectionHeader label="Monitoring" />}
+      {(showIntelligence || showAnomalies) && (
         <nav className="flex flex-col gap-1">
-          <a
-            className={`nav-link${isActive('/dashboard/anomalies') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/anomalies')}
-          >
-            <IconAlert />
-            <span>Anomaly Detection</span>
-            {criticalCount > 0 && (
-              <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>
-                {criticalCount > 9 ? '9+' : criticalCount}
-              </span>
-            )}
-          </a>
+
+          {/* Intelligence accordion — analytical pages, collapsed like Purchase */}
+          {showIntelligence && (
+            <>
+              <a
+                className={`nav-link${MONITORING_PATHS.some((p) => location.pathname.startsWith(p)) ? ' active' : ''}`}
+                onClick={() => {
+                  setMonitoringOpen((o) => !o);
+                  if (!monitoringOpen) navTo(INTELLIGENCE_TABS[0].path);
+                }}
+              >
+                <IconActivity />
+                <span>Intelligence</span>
+                <svg
+                  className="ml-auto transition-transform duration-200"
+                  style={{ transform: monitoringOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                  width="11" height="11" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2.4"
+                >
+                  <path d="m9 6 6 6-6 6"/>
+                </svg>
+              </a>
+
+              {monitoringOpen && (
+                <div className="nav-sub">
+                  {INTELLIGENCE_TABS.map((t) => (
+                    <a
+                      key={t.path}
+                      className={`nav-link${isActive(t.path) ? ' active' : ''}`}
+                      onClick={() => navTo(t.path)}
+                    >
+                      {t.label}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Anomaly Detection — peer of the accordion, never inside it */}
+          {showAnomalies && (
+            <a
+              className={`nav-link${isActive('/dashboard/anomalies') ? ' active' : ''}`}
+              onClick={() => navTo('/dashboard/anomalies')}
+            >
+              <IconAlert />
+              <span>Anomaly Detection</span>
+              {criticalCount > 0 && (
+                <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>
+                  {criticalCount > 9 ? '9+' : criticalCount}
+                </span>
+              )}
+            </a>
+          )}
         </nav>
       )}
 

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { RestrictedAccess } from './RestrictedAccess';
@@ -8,6 +8,7 @@ import { useRoleContext } from '../../contexts/RoleContext';
 import { profileCanAccess } from '../../lib/profiles';
 import { useBlacklist } from '../../contexts/BlacklistContext';
 import type { BlacklistEntry } from '../../contexts/BlacklistContext';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 // ── Blacklisted overlay ───────────────────────────────────────────────────────
 
@@ -69,6 +70,12 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard/oil-ratio': 'Oil Ratio Table · the brain',
   '/dashboard/audit': 'Audit log · security logs',
   '/dashboard/anomalies': 'Anomaly Detection · live risk radar',
+  '/dashboard/anomaly-center': 'Anomaly Operations Center',
+  '/dashboard/cost-intelligence': 'Cost & Margin Intelligence',
+  '/dashboard/benchmarking': 'Multi-Plant Benchmarking',
+  '/dashboard/predictive-qc': 'Live Predictive QC Board',
+  '/dashboard/working-capital': 'Working Capital & Cash',
+  '/dashboard/owner': 'Owner Intelligence',
   '/dashboard/night-entry':     'Night Check-in',
   '/dashboard/batch-entry':     'Batch Logger',
   '/dashboard/warehouse-entry': 'Warehouse Console',
@@ -102,7 +109,7 @@ const PURCHASE_TAB_PATHS = [
 ];
 
 export function DashboardLayout() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, session, loading: authLoading } = useAuth();
   const { isViewingAs, activeProfile, switchProfile } = useRoleContext();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const location = useLocation();
@@ -110,6 +117,9 @@ export function DashboardLayout() {
 
   // Detect if the currently previewed profile is blacklisted
   const blacklistEntry = blacklistReady ? isPersonBlacklisted(activeProfile.name) : null;
+  // Severity policy: LOW = monitor only (no access block, admin just gets alerts);
+  // MEDIUM / HIGH / CRITICAL = restrict dashboard access.
+  const restrictsAccess = !!blacklistEntry && blacklistEntry.severity !== 'low';
 
   // Fire a one-time notification when admin switches to a blacklisted profile
   const notifiedRef = useRef<string | null>(null);
@@ -119,6 +129,18 @@ export function DashboardLayout() {
       notifyActivity(blacklistEntry, `Dashboard accessed via role preview as ${activeProfile.roleLabel}`);
     }
   }, [blacklistEntry?.id]);
+
+  // Production auth gate: a real Supabase session is required to reach the
+  // management dashboard. In development we leave it open so the role/profile
+  // switcher ("view-as") demo works without standing up auth.
+  //
+  // IMPORTANT: this guard must run AFTER every hook above — returning early
+  // before a hook call changes the hook count between renders and crashes React
+  // (Minified React error #300). All hooks are unconditional; only the render
+  // output below is gated.
+  if (import.meta.env.PROD && !authLoading && !session) {
+    return <Navigate to="/login" replace />;
+  }
 
   const path = location.pathname;
 
@@ -198,11 +220,18 @@ export function DashboardLayout() {
             </div>
           )}
 
-          {/* Route guard: blacklist check → access check → content */}
+          {/* Route guard: blacklist (severity ≥ medium) → access check → content */}
           {canAccessRoute
-            ? blacklistEntry
+            ? restrictsAccess && blacklistEntry
               ? <BlacklistedOverlay entry={blacklistEntry} onBack={() => { switchProfile('admin'); navigate('/dashboard'); }} />
-              : <Outlet />
+              : (
+                // Per-page boundary keyed on path: a crash in one page shows a
+                // localised fallback and resets when the user navigates away,
+                // rather than blanking the whole shell.
+                <ErrorBoundary key={path} label={title}>
+                  <Outlet />
+                </ErrorBoundary>
+              )
             : <RestrictedAccess />
           }
         </div>

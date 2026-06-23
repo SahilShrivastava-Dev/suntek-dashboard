@@ -21,6 +21,8 @@ export interface BatchReadingExtracted {
 
 export interface ExtractedBatchSheet {
   batchNo: string;
+  /** Printed company/firm name in the sheet header (used for blacklist screening). */
+  companyName?: string | null;
   finalGravity: number | null;
   readings: BatchReadingExtracted[];
   processInfo: {

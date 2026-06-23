@@ -1,7 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { MentionTextarea } from '../../components/mentions';
 import { validateGeofence } from '../../lib/algorithms/geofencing';
 import { uploadCheckinPhoto } from '../../lib/cloudinary';
-import { supabase } from '../../lib/supabase';
+import { insertRows } from '../../lib/db';
+import { useMentionNotifier } from '../../lib/mentions';
+import { useBlacklistGuard } from '../../lib/blacklist/guard';
+import { useRoleContext } from '../../contexts/RoleContext';
 
 // ── Plant config ── Replace with real coordinates before production ──────────
 const PLANT_LAT      = 24.1856;
@@ -51,6 +55,9 @@ export function CheckIn({ embedded = false }: CheckInProps) {
 
   // Form
   const [note,        setNote]        = useState('');
+  const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
+  const { activeProfile } = useRoleContext();
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -87,11 +94,11 @@ export function CheckIn({ embedded = false }: CheckInProps) {
       });
       streamRef.current = stream;
       setCameraState('live');         // triggers useEffect to bind to <video>
-    } catch (err: any) {
+    } catch (err) {
       console.warn('getUserMedia failed, falling back to file input:', err);
       setCameraState('cam_error');
       setCameraError(
-        err.name === 'NotAllowedError'
+        (err instanceof Error && err.name === 'NotAllowedError')
           ? 'Camera permission denied. Please allow camera access and try again.'
           : 'Could not access camera. Using file picker instead.'
       );
@@ -186,6 +193,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
   // ── Submit: upload → Supabase ──────────────────────────────────────────────
   async function handleSubmit() {
     if (!photoBlob || !gpsData) return;
+    if (submitState !== 'idle') return; // double-submit guard
 
     // Warn if out of zone, but allow override
     if (!gpsData.isOnSite) {
@@ -207,20 +215,21 @@ export function CheckIn({ embedded = false }: CheckInProps) {
         lat:        gpsData.lat,
         lng:        gpsData.lng,
         isOnSite:   gpsData.isOnSite,
+        creator:    activeProfile.name,
         onProgress: setUploadProgress,
       });
       finalPhotoUrl = result.secure_url;
       setCloudinaryUrl(finalPhotoUrl);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Cloudinary upload failed:', err);
-      setSubmitError(`Photo upload failed: ${err.message}`);
+      setSubmitError(`Photo upload failed: ${err instanceof Error ? err.message : String(err)}`);
       setSubmitState('error');
       return;
     }
 
     // 2 ── Save record to Supabase ─────────────────────────────────────────
     setSubmitState('saving');
-    const { error: dbError } = await (supabase.from('shift_logs') as any).insert({
+    const { error: dbError } = await insertRows('shift_logs', {
       photo_url:  finalPhotoUrl,
       lat:        gpsData.lat,
       lng:        gpsData.lng,
@@ -236,7 +245,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
 
     // 3 ── Notify admin/unit-head ──────────────────────────────────────────
     const zoneLabel = gpsData.isOnSite ? 'On-site ✓' : 'Out-of-zone ⚠️';
-    await (supabase.from('notifications') as any).insert({
+    insertRows('notifications', {
       target_roles: ['admin', 'unit_head'],
       title: `Night Manager check-in: ${PLANT_NAME}`,
       body: `${zoneLabel} · ${gpsData.lat.toFixed(4)}, ${gpsData.lng.toFixed(4)}`,
@@ -244,7 +253,16 @@ export function CheckIn({ embedded = false }: CheckInProps) {
       route: '/dashboard/night-manager',
       actor_name: PLANT_NAME,
       actor_role: 'night_manager',
-    }).then(() => {}).catch(() => {}); // non-blocking
+    }).then(() => {}, () => {}); // non-blocking
+
+    // Tag anyone @-mentioned in the shift note.
+    notifyMentions(note, { entityLabel: `Night check-in · ${PLANT_NAME}`, route: '/dashboard/night-manager' });
+
+    // If the person checking in is themselves on the blacklist, alert admin.
+    await screenBlacklist(
+      [{ value: activeProfile.name, label: 'Night Manager' }],
+      { workflow: 'Night Check-in', source: 'image', entityLabel: PLANT_NAME, imageUrl: finalPhotoUrl || null },
+    );
 
     setSubmitState('done');
   }
@@ -598,11 +616,11 @@ export function CheckIn({ embedded = false }: CheckInProps) {
           <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wide">
             Note (optional)
           </label>
-          <textarea
+          <MentionTextarea
             value={note}
-            onChange={e => setNote(e.target.value)}
+            onChange={setNote}
             rows={2}
-            placeholder="Any observations for this shift…"
+            placeholder="Any observations for this shift… type @ to tag"
             className="w-full p-3 text-sm border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
           />
         </div>

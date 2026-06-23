@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { insertRows } from '../lib/db';
 
 export interface BlacklistEntry {
   id: string;
@@ -52,10 +53,11 @@ export function BlacklistProvider({ children }: { children: React.ReactNode }) {
 
   const load = useCallback(async () => {
     try {
-      const { data, error } = await (supabase
+      const { data, error } = await supabase
         .from('blacklist')
         .select('*')
-        .order('created_at', { ascending: false }) as any);
+        .order('created_at', { ascending: false })
+        .returns<BlacklistEntry[]>();
       if (error) {
         if (error.code === '42P01' || error.message?.includes('blacklist')) {
           setTableReady(false);
@@ -70,6 +72,17 @@ export function BlacklistProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Keep the blacklist live so screening/guards see new entries immediately
+  // (without needing a page reload). Best-effort; degrades if realtime is off.
+  useEffect(() => {
+    if (!tableReady) return;
+    const channel = supabase
+      .channel('blacklist:all')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'blacklist' }, () => { load(); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [tableReady, load]);
 
   const activeEntries = entries.filter(e => e.is_active);
 
@@ -87,7 +100,7 @@ export function BlacklistProvider({ children }: { children: React.ReactNode }) {
   }
 
   function notifyActivity(entry: BlacklistEntry, activity: string) {
-    (supabase.from('notifications') as any).insert({
+    insertRows('notifications', {
       target_roles: ['admin', 'unit_head'],
       title: `Blacklisted ${entry.type}: activity detected`,
       body: `${entry.name} — ${activity}`,
@@ -96,7 +109,7 @@ export function BlacklistProvider({ children }: { children: React.ReactNode }) {
       actor_name: entry.name,
       actor_role: entry.type,
       read_by: [],
-    }).then(() => {}).catch(() => {});
+    }).then(() => {}, () => {});
   }
 
   return (

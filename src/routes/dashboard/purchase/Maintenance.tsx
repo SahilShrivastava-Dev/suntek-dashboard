@@ -1,200 +1,174 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
+import { insertRows, updateRows } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
+import { MOCK_PROFILES } from '../../../lib/profiles';
+import { useBlacklist } from '../../../contexts/BlacklistContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
+import { MentionText, NotesButton } from '../../../components/mentions';
+import { useToast } from '../../../components/ui/toast';
+import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { useDirectory, useMentionNotifier, extractMentionIds, addWatchers, notifyWatchers, truncate } from '../../../lib/mentions';
+import { useBlacklistGuard } from '../../../lib/blacklist/guard';
+import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
+import type { AppNotification } from '../../../contexts/NotificationsContext';
+import type { Database } from '../../../lib/database.types';
+import {
+  FREQ_OPTIONS, FREQ_LABEL, STATUS_CFG, STAGE_LABELS,
+  statusBadge, formatDate, daysFromNow, dueDateLabel, calculateNextDue,
+  PhotoUploader, StageStrip,
+} from './maintenance/shared';
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
 
-const FREQ_OPTIONS = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'triannual'];
-const FREQ_LABEL: Record<string, string> = {
-  daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly',
-  quarterly: 'Quarterly (3-mo)', biannual: 'Bi-annual (6-mo)', triannual: '9-monthly',
-};
+// Full date+time for report cells (locale, IST).
+function fmtDT(d: string | null | undefined): string {
+  return d ? new Date(d).toLocaleString('en-IN') : '';
+}
+// Map a stored role id (e.g. 'technician_shd') to its human label.
+function roleLabelFor(roleId: string | null | undefined): string {
+  if (!roleId) return '';
+  return MOCK_PROFILES.find((p) => p.id === roleId)?.roleLabel || roleId;
+}
 
-const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> = {
-  open:                     { label: 'Open',              bg: '#DBEAFE', color: '#2563EB' },
-  in_progress:              { label: 'In Progress',       bg: '#FEF3C7', color: '#D97706' },
-  pending_store:            { label: 'Pending Store',     bg: '#FEF3C7', color: '#D97706' },
-  pending_unit_head:        { label: 'Pending Approval',  bg: '#EDE9FE', color: '#7C3AED' },
-  pending_purchase:         { label: 'Purchasing',        bg: '#EDE9FE', color: '#7C3AED' },
-  pending_handover:         { label: 'Handover',          bg: '#F3E8FF', color: '#9333EA' },
-  pending_defective_return: { label: 'Defective Return',  bg: '#FEF3C7', color: '#D97706' },
-  closed:                   { label: 'Closed',            bg: '#DCFCE7', color: '#16A34A' },
-};
-
-// pending_purchase is shown in strip but may be skipped (available-in-store path)
-const EMERGENCY_STAGES = [
-  'open', 'in_progress', 'pending_store', 'pending_unit_head',
-  'pending_purchase', 'pending_handover', 'pending_defective_return', 'closed',
+// CSV layout for the maintenance report — the full life of each ticket.
+const REPORT_COLUMNS: CsvColumn[] = [
+  { header: 'Maintenance ID', key: 'id' },
+  { header: 'Ref #', key: 'shortId' },
+  { header: 'Type', key: 'type' },
+  { header: 'Equipment', key: 'equipment' },
+  { header: 'Plant', key: 'plant' },
+  { header: 'Issue / description', key: 'issue' },
+  { header: 'Current status', key: 'status' },
+  { header: 'Stage reached', key: 'stage' },
+  { header: 'Raised by', key: 'raised_by' },
+  { header: 'Raised by role', key: 'raised_role' },
+  { header: 'Assigned to', key: 'assigned_to' },
+  { header: 'Created at', key: 'created' },
+  { header: 'Closed at', key: 'closed' },
+  { header: 'Days open', key: 'days' },
+  { header: 'How resolved', key: 'how' },
+  { header: 'Defective part decision', key: 'defective' },
+  { header: 'Part requested', key: 'part' },
+  { header: 'Qty requested', key: 'qty' },
+  { header: 'Specification', key: 'spec' },
+  { header: 'Store decision', key: 'store_decision' },
+  { header: 'Qty in store', key: 'qty_in_store' },
+  { header: 'Shelf location', key: 'shelf' },
+  { header: 'Part condition', key: 'condition' },
+  { header: 'Unit head approval', key: 'approval' },
+  { header: 'BUSY ref', key: 'busy' },
+  { header: 'Handover at', key: 'handover' },
+  { header: 'Handover notes', key: 'handover_notes' },
+  { header: 'Tagged / watchers', key: 'tagged' },
+  { header: 'Notes count', key: 'notes_count' },
+];
+const NOTE_COLUMNS: CsvColumn[] = [
+  { header: 'Maintenance ID', key: 'id' },
+  { header: 'Ref #', key: 'shortId' },
+  { header: 'Equipment', key: 'equipment' },
+  { header: 'Note / activity', key: 'note' },
+  { header: 'Author', key: 'author' },
+  { header: 'Tagged', key: 'tagged' },
+  { header: 'At', key: 'at' },
 ];
 
-const STAGE_LABELS: Record<string, string> = {
-  open: 'Raised', in_progress: 'Assessed', pending_store: 'Store Check',
-  pending_unit_head: 'Unit Head', pending_purchase: 'Purchase',
-  pending_handover: 'Handover', pending_defective_return: 'Defective', closed: 'Closed',
-};
+// ── Row types (base table rows + the joined plants(name) relation) ─────────────
+type Tables = Database['public']['Tables'];
+type PlantRel = { plants?: { name: string | null } | null };
+type TicketRow = Tables['maintenance_tickets']['Row'] & PlantRel;
+type ScheduleRow = Tables['maintenance_schedules']['Row'] & PlantRel;
+type StoreReqRow = Tables['maintenance_store_requests']['Row'];
+type NotificationInsert = Tables['notifications']['Insert'];
+type TicketUpdate = Tables['maintenance_tickets']['Update'];
+type TicketStatus = Tables['maintenance_tickets']['Row']['status'];
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Domain write helpers (use Supabase; kept local) ────────────────────────────
 
-function statusBadge(status: string) {
-  const cfg = STATUS_CFG[status] || { label: status, bg: '#F1F5F9', color: '#475569' };
-  return <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{cfg.label}</span>;
+function notify(payload: NotificationInsert) {
+  insertRows('notifications', payload).then(() => {}, () => {});
 }
 
-function formatDate(d: string | null | undefined) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function daysFromNow(d: string | null | undefined): number | null {
-  if (!d) return null;
-  return Math.floor((new Date(d).getTime() - Date.now()) / 86400000);
-}
-
-function dueDateLabel(days: number | null): { text: string; color: string } {
-  if (days === null) return { text: '—', color: '#94A3B8' };
-  if (days < 0) return { text: `${Math.abs(days)}d overdue`, color: '#DC2626' };
-  if (days === 0) return { text: 'Due today', color: '#D97706' };
-  if (days <= 3) return { text: `In ${days}d`, color: '#D97706' };
-  return { text: `In ${days}d`, color: '#16A34A' };
-}
-
-function calculateNextDue(frequency: string): string {
-  const d = new Date();
-  switch (frequency) {
-    case 'daily':     d.setDate(d.getDate() + 1); break;
-    case 'weekly':    d.setDate(d.getDate() + 7); break;
-    case 'monthly':   d.setMonth(d.getMonth() + 1); break;
-    case 'quarterly': d.setMonth(d.getMonth() + 3); break;
-    case 'biannual':  d.setMonth(d.getMonth() + 6); break;
-    case 'triannual': d.setMonth(d.getMonth() + 9); break;
-    default:          d.setDate(d.getDate() + 7);
-  }
-  return d.toISOString();
-}
-
-function notify(payload: object) {
-  (supabase.from('notifications') as any).insert(payload).then(() => {}).catch(() => {});
-}
-
-async function updateTicketStatus(ticketId: string, status: string, extra?: object) {
-  await (supabase.from('maintenance_tickets') as any)
-    .update({ status, ...extra })
+async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?: TicketUpdate) {
+  await updateRows('maintenance_tickets', { status, ...extra })
     .eq('id', ticketId);
 }
 
-// ── PhotoUploader ─────────────────────────────────────────────────────────────
+// People/teams an admin can assign a maintenance task to. Name-based so the
+// blacklist guard (which matches on person name) can flag a restricted assignee.
+const ASSIGNABLE_ROLE_IDS = ['technician_shd', 'store_manager_maint', 'factory_operator', 'unit_head'];
+const ASSIGNABLE_STAFF = MOCK_PROFILES
+  .filter((p) => ASSIGNABLE_ROLE_IDS.includes(p.id))
+  .map((p) => ({ name: p.name, label: `${p.name} · ${p.roleLabel}` }));
 
-function PhotoUploader({ onBlobReady, label = 'Attach photo proof', hint = 'Take or upload a photo' }: {
-  onBlobReady: (blob: Blob | null) => void;
-  label?: string;
-  hint?: string;
-}) {
-  const [preview, setPreview] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPreview(URL.createObjectURL(file));
-    onBlobReady(file);
-  }
-
-  function clear() {
-    setPreview(null);
-    onBlobReady(null);
-    if (inputRef.current) inputRef.current.value = '';
-  }
-
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 10 }}>{hint}</div>
-      {preview ? (
-        <div style={{ position: 'relative' }}>
-          <img src={preview} alt="Preview" style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 12 }} />
-          <button onClick={clear} style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
-        </div>
-      ) : (
-        <div onClick={() => inputRef.current?.click()} style={{ border: '2px dashed #CBD5E1', borderRadius: 12, padding: '20px 16px', textAlign: 'center', cursor: 'pointer', background: '#F8FAFC' }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="1.5" style={{ margin: '0 auto 6px' }}>
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-            <circle cx="12" cy="13" r="4"/>
-          </svg>
-          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>Tap to upload a photo</div>
-          <div style={{ fontSize: 11, color: '#CBD5E1', marginTop: 2 }}>JPG / PNG · opens camera on mobile</div>
-        </div>
-      )}
-      <input ref={inputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleFile} />
-    </div>
-  );
-}
-
-// ── Stage progress strip ──────────────────────────────────────────────────────
-
-function StageStrip({ status, skippedStages = [] }: { status: string; skippedStages?: string[] }) {
-  const idx = EMERGENCY_STAGES.indexOf(status);
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, marginBottom: 20, overflowX: 'auto', paddingBottom: 2 }}>
-      {EMERGENCY_STAGES.map((s, i) => {
-        const isPast = i < idx;
-        const isCurrent = i === idx;
-        const isSkipped = skippedStages.includes(s);
-        const isLast = i === EMERGENCY_STAGES.length - 1;
-        return (
-          <React.Fragment key={s}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-              <div style={{
-                width: 22, height: 22, borderRadius: '50%',
-                background: isSkipped ? '#E2E8F0' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#E2E8F0',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: isCurrent ? '2px solid #F47651' : 'none',
-                opacity: isSkipped ? 0.4 : 1,
-              }}>
-                {isPast && !isSkipped && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M20 6 9 17l-5-5"/></svg>}
-                {isSkipped && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="3"><path d="M5 12h14"/></svg>}
-                {isCurrent && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
-              </div>
-              <div style={{ fontSize: 8.5, fontWeight: isCurrent ? 700 : 500, color: isSkipped ? '#CBD5E1' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#94A3B8', marginTop: 3, whiteSpace: 'nowrap' }}>
-                {STAGE_LABELS[s]}{isSkipped ? ' (skipped)' : ''}
-              </div>
-            </div>
-            {!isLast && <div style={{ height: 2, flex: 1, minWidth: 12, background: (isPast && !isSkipped) ? '#16A34A' : '#E2E8F0', marginTop: 10, flexShrink: 0 }} />}
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
+// ── Jharkhand procurement units — store requests route to the matching store manager.
+type Unit = 'chlorides' | 'plasticiser';
+const UNIT_LABELS: Record<Unit, string> = { chlorides: 'Suntek Chlorides', plasticiser: 'Suntek Plasticiser' };
+const UNIT_STORE_MANAGER: Record<Unit, string> = { chlorides: 'store_manager_chlorides', plasticiser: 'store_manager_plasticiser' };
+const ALL_STORE_MANAGER_IDS = ['store_manager_maint', 'store_manager_chlorides', 'store_manager_plasticiser', 'warehouse_manager'];
+/** Derive a unit from a profile's plant string. */
+function unitOf(plant?: string | null): Unit | null {
+  const p = (plant || '').toLowerCase();
+  if (p.includes('chlorid')) return 'chlorides';
+  if (p.includes('plastic')) return 'plasticiser';
+  return null;
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function Maintenance() {
   const { activeProfile } = useRoleContext();
+  const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
+  const toast = useToast();
+  const people = useDirectory();
+  const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
+  const actionBusyRef = useRef(false); // guards one-shot workflow actions from double-clicks
   const role = activeProfile.id;
+
+  // ── @-mention / watcher plumbing for tickets ────────────────────────────────
+  const ticketRef = (t: TicketRow) => ({
+    entityType: 'maintenance_ticket', entityId: t.id,
+    entityLabel: t.equipment || t.title || 'Maintenance ticket',
+    route: `/dashboard/purchase/maint?ticket=${t.id}`,
+  });
+  const actorObj = () => ({ id: activeProfile.id, name: activeProfile.name, role: activeProfile.roleLabel });
+  // Insert directly (mirrors the module's role-based notify) so it doesn't depend on context tableReady.
+  const addNote = async (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => {
+    await insertRows('notifications', { ...n, read_by: [] }).then(() => {}, () => {});
+  };
+  // Ping everyone tagged / CC'd on a ticket that its workflow moved.
+  async function notifyTicketWatchers(t: TicketRow, title: string, body: string, type: AppNotification['type'] = 'info') {
+    await notifyWatchers({ ref: ticketRef(t), actor: actorObj(), title, body, type, addNotification: addNote });
+  }
   const isTechnician = role === 'technician_shd';
   const isAdmin = role === 'admin';
   const isUnitHead = role === 'unit_head';
-  const isStoreManager = role === 'store_manager_maint' || role === 'warehouse_manager';
+  const isStoreManager = ALL_STORE_MANAGER_IDS.includes(role);
+  const isPurchaseManager = role === 'purchase_manager';
+  const myStoreUnit = unitOf(activeProfile.plant); // for unit-specific store managers
 
   // Data
   const [tab, setTab] = useState<'periodic' | 'emergency' | 'schedule'>('periodic');
-  const [tickets, setTickets] = useState<any[]>([]);
-  const [schedules, setSchedules] = useState<any[]>([]);
+  const [tickets, setTickets] = useState<TicketRow[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   // Panel state
-  const [completingSchedule, setCompletingSchedule] = useState<any | null>(null);
-  const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
-  const [selectedStoreReq, setSelectedStoreReq] = useState<any | null>(null);
+  const [completingSchedule, setCompletingSchedule] = useState<ScheduleRow | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<TicketRow | null>(null);
+  const [selectedStoreReq, setSelectedStoreReq] = useState<StoreReqRow | null>(null);
   const [showRaisePanel, setShowRaisePanel] = useState(false);
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
 
   // Form state
   const today = new Date().toISOString().split('T')[0];
-  const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable' });
-  const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today });
+  const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
+  const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
   const [storeForm, setStoreForm] = useState({ partName: '', quantity: '', specification: '' });
   const [showStoreForm, setShowStoreForm] = useState(false);
 
@@ -209,10 +183,12 @@ export function Maintenance() {
   // Handover form (store manager uploads invoice + product photo)
   const [handoverInvoiceBlob, setHandoverInvoiceBlob] = useState<Blob | null>(null);
   const [handoverPhotoBlob, setHandoverPhotoBlob] = useState<Blob | null>(null);
+  const [dispatchBlob, setDispatchBlob] = useState<Blob | null>(null); // purchase manager bill photo
   const [handoverNotes, setHandoverNotes] = useState('');
 
   // Other action state
   const [busyRef, setBusyRef] = useState('');
+  const [unitPrice, setUnitPrice] = useState(''); // procurement unit price (₹) → feeds FAR cost
   const [defectiveDecision, setDefectiveDecision] = useState<'repair' | 'scrap' | ''>('');
 
   // Upload
@@ -224,30 +200,56 @@ export function Maintenance() {
   // Save states
   const [raiseSaved, setRaiseSaved] = useState(false);
   const [scheduleSaved, setScheduleSaved] = useState(false);
+  const [raising, setRaising] = useState(false);          // double-submit guard
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  // Admin edit + report
+  const [editingTicket, setEditingTicket] = useState(false);
+  const [editForm, setEditForm] = useState({ equipment: '', description: '', plant: '', status: '' });
+  const [viewStage, setViewStage] = useState<string | null>(null); // clicked stage in the timeline
+  const [showReport, setShowReport] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [reportForm, setReportForm] = useState({ emergency: true, periodic: true, status: 'all', from: '', to: '', includeNotes: true });
 
   // ── Data loading ──────────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
-    const [{ data: ticketsData }, { data: schedulesData }, { data: plantsData }] = await Promise.all([
-      (supabase.from('maintenance_tickets').select('*, plants(name)').order('created_at', { ascending: false }) as any),
-      (supabase.from('maintenance_schedules').select('*, plants(name)').order('next_due_at', { ascending: true }) as any),
-      (supabase.from('plants').select('id, name') as any),
-    ]);
-    setTickets(ticketsData || []);
-    setSchedules(schedulesData || []);
-    if (plantsData?.length) setDbPlants(plantsData);
+    let ticketsData: TicketRow[] | null = null;
+    let schedulesData: ScheduleRow[] | null = null;
+    try {
+      const [tRes, sRes, pRes] = await Promise.all([
+        supabase.from('maintenance_tickets').select('*, plants(name)').order('created_at', { ascending: false }).returns<TicketRow[]>(),
+        supabase.from('maintenance_schedules').select('*, plants(name)').order('next_due_at', { ascending: true }).returns<ScheduleRow[]>(),
+        supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+      ]);
+      if (tRes.error) throw tRes.error;
+      if (sRes.error) throw sRes.error;
+      ticketsData = tRes.data;
+      schedulesData = sRes.data;
+      setTickets(ticketsData || []);
+      setSchedules(schedulesData || []);
+      if (pRes.data?.length) setDbPlants(pRes.data);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[Maintenance] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
 
     if (schedulesData) {
       for (const s of schedulesData) {
         if (!s.is_active || !s.next_due_at) continue;
         if (new Date(s.next_due_at) > new Date()) continue;
-        const hasOpen = (ticketsData || []).some((t: any) => t.schedule_id === s.id && t.status !== 'closed');
+        const hasOpen = (ticketsData || []).some((t) => t.schedule_id === s.id && t.status !== 'closed');
         if (hasOpen) continue;
-        const { data: newT } = await (supabase.from('maintenance_tickets') as any).insert({
+        const { data: newT } = await insertRows('maintenance_tickets', {
           type: 'periodic', status: 'open', title: s.title,
           equipment: s.equipment, plant_id: s.plant_id || null,
           schedule_id: s.id, description: s.description || null,
-          due_date: s.next_due_at?.split('T')[0],
+          assigned_to: s.assigned_to || null,
+          due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
         }).select('*, plants(name)').single();
         if (newT) {
           notify({
@@ -264,10 +266,24 @@ export function Maintenance() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Deep-link: a notification's "?ticket=<id>" opens that ticket directly.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const tid = searchParams.get('ticket');
+    if (!tid) return;
+    const t = tickets.find((x) => x.id === tid);
+    if (!t) return; // tickets may still be loading; this effect re-runs when they arrive
+    setSelectedTicket(t);
+    setTab(t.type === 'periodic' ? 'periodic' : 'emergency');
+    const next = new URLSearchParams(searchParams);
+    next.delete('ticket');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, tickets, setSearchParams]);
+
   useEffect(() => {
     if (!selectedTicket) { setSelectedStoreReq(null); return; }
-    (supabase.from('maintenance_store_requests').select('*').eq('ticket_id', selectedTicket.id).limit(1) as any)
-      .then(({ data }: any) => setSelectedStoreReq(data?.[0] || null));
+    supabase.from('maintenance_store_requests').select('*').eq('ticket_id', selectedTicket.id).limit(1).returns<StoreReqRow[]>()
+      .then(({ data }) => setSelectedStoreReq(data?.[0] || null));
   }, [selectedTicket?.id]);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : ['SHD', 'Rehla', 'Ganjam', 'HQ'];
@@ -281,28 +297,33 @@ export function Maintenance() {
 
   const openEmergency = emergencyTickets.filter(t => t.status !== 'closed').length;
   const pendingStore = emergencyTickets.filter(t => ['pending_store', 'pending_unit_head'].includes(t.status)).length;
-  const pendingPurchase = emergencyTickets.filter(t => ['pending_purchase', 'pending_handover'].includes(t.status)).length;
-  const closedMTD = emergencyTickets.filter(t => t.status === 'closed' && t.closed_at >= monthStart).length;
+  const pendingPurchase = emergencyTickets.filter(t => ['pending_purchase', 'pending_purchase_manager', 'pending_handover'].includes(t.status)).length;
+  const closedMTD = emergencyTickets.filter(t => t.status === 'closed' && !!t.closed_at && t.closed_at >= monthStart).length;
 
   const dueToday = periodicTickets.filter(t => t.status === 'open' && t.due_date === today).length;
   const dueWeek = periodicTickets.filter(t => { const d = daysFromNow(t.due_date); return t.status === 'open' && d !== null && d >= 0 && d <= 7; }).length;
   const overdue = periodicTickets.filter(t => { const d = daysFromNow(t.due_date); return t.status === 'open' && d !== null && d < 0; }).length;
-  const closedPeriodicMTD = periodicTickets.filter(t => t.status === 'closed' && t.closed_at >= monthStart).length;
+  const closedPeriodicMTD = periodicTickets.filter(t => t.status === 'closed' && !!t.closed_at && t.closed_at >= monthStart).length;
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
   async function handleRaiseTicket() {
-    if (!raiseForm.equipment.trim()) return;
+    if (!raiseForm.equipment.trim() || raising) return;
+    setRaising(true);
+    try {
     const plant = dbPlants.find(p => p.name === raiseForm.plant);
-    const { data: newTicket, error } = await (supabase.from('maintenance_tickets') as any).insert({
+    const { data: newTicket, error } = await insertRows('maintenance_tickets', {
       type: 'emergency', status: 'open',
       title: `${raiseForm.equipment} — ${raiseForm.assessment === 'repairable' ? 'Repairable' : 'Needs part'}`,
       equipment: raiseForm.equipment,
       plant_id: plant?.id || null,
+      unit: raiseForm.unit || null,
       description: raiseForm.description || null,
       raised_by: activeProfile.name, raised_role: role,
+      // A technician raising their own job is implicitly assigned to themselves.
+      assigned_to: isTechnician ? activeProfile.name : null,
     }).select('*, plants(name)').single();
-    if (error) { alert(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(`Failed: ${error.message}`); return; }
     notify({
       target_roles: ['admin', 'unit_head', 'store_manager_maint'],
       title: `Maintenance ticket raised: ${raiseForm.equipment}`,
@@ -310,15 +331,237 @@ export function Maintenance() {
       type: 'urgent', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
+
+    // Notify anyone @-tagged in the description and make them watchers of this
+    // ticket, so they also get pinged as it moves through the workflow.
+    if (newTicket) {
+      const mentionIds = extractMentionIds(raiseForm.description || '', people).filter(id => id !== activeProfile.id);
+      if (mentionIds.length) {
+        const tagged = people.filter(p => mentionIds.includes(p.id));
+        await addWatchers(ticketRef(newTicket), tagged.map(p => ({ id: p.id, name: p.name })), 'mention', activeProfile.id);
+        notify({
+          target_roles: mentionIds,
+          title: `${activeProfile.name} tagged you in a maintenance ticket`,
+          body: `${raiseForm.equipment}: “${truncate(raiseForm.description || '')}”`,
+          type: 'urgent', route: `/dashboard/purchase/maint?ticket=${newTicket.id}`,
+          actor_name: activeProfile.name, actor_role: role, read_by: [],
+        });
+      }
+    }
+
+    // Screen the equipment/description against the blacklist.
+    const hits = await screenBlacklist(
+      [{ value: raiseForm.equipment, label: 'Equipment' }, { value: raiseForm.description, label: 'Description' }],
+      { workflow: 'Maintenance', source: 'entry', entityLabel: raiseForm.equipment },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+    }
+
     setRaiseSaved(true);
     await loadData();
     setTimeout(() => {
       setShowRaisePanel(false); setRaiseSaved(false);
-      setRaiseForm({ equipment: '', plant: '', description: '', assessment: 'repairable' });
+      setRaiseForm({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
       if (newTicket && raiseForm.assessment === 'needs_part') {
         setSelectedTicket(newTicket); setShowStoreForm(true);
       }
     }, 1400);
+    } finally { setRaising(false); }
+  }
+
+  // ── Admin: edit / delete a ticket ───────────────────────────────────────────
+  function startEdit(t: TicketRow) {
+    setEditForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plants?.name || '', status: t.status });
+    setEditingTicket(true);
+  }
+
+  async function saveEdit() {
+    if (!selectedTicket) return;
+    const plant = dbPlants.find(p => p.name === editForm.plant);
+    await updateRows('maintenance_tickets', {
+      equipment: editForm.equipment,
+      description: editForm.description || null,
+      plant_id: plant?.id ?? selectedTicket.plant_id ?? null,
+      status: editForm.status as TicketStatus,
+    }).eq('id', selectedTicket.id);
+    setSelectedTicket((t) => t ? { ...t, equipment: editForm.equipment, description: editForm.description || null, status: editForm.status as TicketStatus, plants: plant ? { name: plant.name } : t.plants } : t);
+    await notifyMentions(editForm.description, {
+      entityType: 'maintenance_ticket', entityId: selectedTicket.id,
+      entityLabel: editForm.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
+    });
+    setEditingTicket(false);
+    toast.success('Ticket updated');
+    await loadData();
+  }
+
+  async function handleDeleteTicket(t: TicketRow) {
+    if (!isAdmin) return;
+    if (!window.confirm(`Delete ticket "${t.equipment || t.title}"? This permanently removes it and cannot be undone.`)) return;
+    // Remove dependent store-request rows first (FK: maintenance_store_requests.ticket_id).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().eq('ticket_id', t.id);
+    if (srErr) { toast.error(`Delete failed: ${srErr.message}`); return; }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from('maintenance_tickets') as any).delete().eq('id', t.id);
+    if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+    setTickets((prev) => prev.filter((x) => x.id !== t.id));
+    if (selectedTicket?.id === t.id) { setSelectedTicket(null); setEditingTicket(false); }
+    toast.success('Ticket deleted');
+  }
+
+  // Bulk-delete every emergency ticket currently shown (admin cleanup tool).
+  async function handleDeleteAllEmergency() {
+    if (!isAdmin) return;
+    const ids = emergencyTickets.map((t) => t.id);
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ALL ${ids.length} emergency tickets? This permanently removes every emergency ticket and cannot be undone.`)) return;
+    setDeletingAll(true);
+    try {
+      // Delete in chunks so a long id list doesn't blow the URL length limit.
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        // Remove dependent store-request rows first (FK: maintenance_store_requests.ticket_id).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().in('ticket_id', chunk);
+        if (srErr) { toast.error(`Delete failed: ${srErr.message}`); return; }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase.from('maintenance_tickets') as any).delete().in('id', chunk);
+        if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+      }
+      setTickets((prev) => prev.filter((t) => !ids.includes(t.id)));
+      setSelectedTicket(null); setEditingTicket(false);
+      toast.success(`Deleted ${ids.length} emergency tickets`);
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
+  // ── Admin: generate CSV maintenance report ──────────────────────────────────
+  function reportTickets(): TicketRow[] {
+    return tickets.filter((t) => {
+      if (t.type === 'emergency' && !reportForm.emergency) return false;
+      if (t.type === 'periodic' && !reportForm.periodic) return false;
+      if (t.type !== 'emergency' && t.type !== 'periodic') return false;
+      if (reportForm.status === 'open' && t.status === 'closed') return false;
+      if (reportForm.status === 'closed' && t.status !== 'closed') return false;
+      const created = (t.created_at || '').slice(0, 10);
+      if (reportForm.from && created < reportForm.from) return false;
+      if (reportForm.to && created > reportForm.to) return false;
+      return true;
+    });
+  }
+
+  async function generateReport() {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const rows = reportTickets();
+      if (!rows.length) { toast.error('No tickets match these filters'); return; }
+      const ids = rows.map((t) => t.id);
+
+      // Enrich each ticket with its full trail: store-request lifecycle,
+      // watchers (who's tagged/following), and the notes/@-mention thread.
+      const [srRes, wRes, nRes] = await Promise.all([
+        supabase.from('maintenance_store_requests').select('*').in('ticket_id', ids).returns<StoreReqRow[]>(),
+        supabase.from('entity_watchers').select('entity_id, profile_name, kind').eq('entity_type', 'maintenance_ticket').in('entity_id', ids).returns<{ entity_id: string; profile_name: string; kind: string }[]>(),
+        supabase.from('entity_notes').select('*').eq('entity_type', 'maintenance_ticket').in('entity_id', ids).order('created_at', { ascending: true }).returns<EntityNoteRow[]>(),
+      ]);
+
+      const srBy = new Map<string, StoreReqRow>();
+      (srRes.data ?? []).forEach((s) => { if (s.ticket_id && !srBy.has(s.ticket_id)) srBy.set(s.ticket_id, s); });
+
+      const watchersBy = new Map<string, Set<string>>();
+      (wRes.data ?? []).forEach((w) => {
+        if (!watchersBy.has(w.entity_id)) watchersBy.set(w.entity_id, new Set());
+        watchersBy.get(w.entity_id)!.add(w.profile_name);
+      });
+
+      const notes = nRes.data ?? [];
+      const notesBy = new Map<string, EntityNoteRow[]>();
+      notes.forEach((n) => {
+        if (!notesBy.has(n.entity_id)) notesBy.set(n.entity_id, []);
+        notesBy.get(n.entity_id)!.push(n);
+      });
+
+      const csvRows = rows.map((t) => {
+        const sr = srBy.get(t.id);
+        const created = t.created_at ? new Date(t.created_at).getTime() : null;
+        const closedT = t.closed_at ? new Date(t.closed_at).getTime() : null;
+        const days = created != null ? Math.max(0, Math.round(((closedT ?? Date.now()) - created) / 86400000)) : '';
+        const how = t.status === 'closed'
+          ? (t.defective_part_decision ? `Part replaced · old part ${t.defective_part_decision}` : sr ? 'Part from store' : 'Fixed in-house')
+          : (sr ? 'Awaiting part / approval' : 'In progress');
+        return {
+          id: t.id,
+          shortId: t.id.slice(0, 8),
+          type: t.type,
+          equipment: t.equipment || '',
+          plant: t.plants?.name || '',
+          issue: t.description || t.title || '',
+          status: STATUS_CFG[t.status]?.label || t.status,
+          stage: STAGE_LABELS[t.status] || '',
+          raised_by: t.raised_by || '',
+          raised_role: roleLabelFor(t.raised_role),
+          assigned_to: t.assigned_to || '',
+          created: fmtDT(t.created_at),
+          closed: fmtDT(t.closed_at),
+          days,
+          how,
+          defective: t.defective_part_decision || '',
+          part: sr?.part_name || '',
+          qty: sr?.quantity ?? '',
+          spec: sr?.specification || '',
+          store_decision: sr?.store_decision || '',
+          qty_in_store: sr?.qty_in_store ?? '',
+          shelf: sr?.shelf_location || '',
+          condition: sr?.part_condition || '',
+          approval: sr?.unit_head_approval || '',
+          busy: sr?.busy_transaction_ref || '',
+          handover: fmtDT(sr?.handover_confirmed_at),
+          handover_notes: sr?.handover_notes || '',
+          tagged: [...(watchersBy.get(t.id) ?? new Set<string>())].join('; '),
+          notes_count: (notesBy.get(t.id) ?? []).length,
+        };
+      });
+
+      // Report metadata header (who generated it, when, and the filters used).
+      const typeSel = [reportForm.emergency && 'Emergency', reportForm.periodic && 'Periodic'].filter(Boolean).join(' + ') || 'None';
+      const statusSel = reportForm.status === 'all' ? 'All statuses' : reportForm.status === 'open' ? 'Open / in progress' : 'Closed only';
+      const dateSel = (reportForm.from || reportForm.to) ? `${reportForm.from || '…'} → ${reportForm.to || '…'}` : 'All dates';
+      const preamble: (string | number)[][] = [
+        ['Suntek — Maintenance Report'],
+        ['Generated by', `${activeProfile.name} (${activeProfile.roleLabel})`],
+        ['Generated at', new Date().toLocaleString('en-IN')],
+        ['Scope', `${typeSel} · ${statusSel} · ${dateSel}`],
+        ['Total tickets', rows.length],
+      ];
+
+      exportToCsv(`maintenance-report-${today}`, REPORT_COLUMNS, csvRows, preamble);
+
+      // Optional second CSV: the notes / @-mention activity timeline.
+      if (reportForm.includeNotes && notes.length) {
+        const eqById = new Map(rows.map((t) => [t.id, t.equipment || '']));
+        const noteRows = notes.map((n) => ({
+          id: n.entity_id,
+          shortId: n.entity_id.slice(0, 8),
+          equipment: eqById.get(n.entity_id) || '',
+          note: n.body,
+          author: n.author_name,
+          tagged: people.filter((p) => (n.mentions || []).includes(p.id)).map((p) => p.name).join('; '),
+          at: fmtDT(n.created_at),
+        }));
+        exportToCsv(`maintenance-activity-${today}`, NOTE_COLUMNS, noteRows, preamble);
+      }
+
+      toast.success(`Report ready · ${csvRows.length} tickets exported`);
+      setShowReport(false);
+    } catch (err) {
+      toast.error(`Report failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function handleCompletePeriodicTicket() {
@@ -327,25 +570,25 @@ export function Maintenance() {
     try {
       let ticket = tickets.find(t => t.schedule_id === completingSchedule.id && t.status === 'open');
       if (!ticket) {
-        const { data } = await (supabase.from('maintenance_tickets') as any).insert({
+        const { data } = await insertRows('maintenance_tickets', {
           type: 'periodic', status: 'open', title: completingSchedule.title,
           equipment: completingSchedule.equipment, plant_id: completingSchedule.plant_id || null,
-          schedule_id: completingSchedule.id, due_date: completingSchedule.next_due_at?.split('T')[0],
+          schedule_id: completingSchedule.id,
+          due_date: completingSchedule.next_due_at ? completingSchedule.next_due_at.split('T')[0] : null,
           raised_by: activeProfile.name, raised_role: role,
+          assigned_to: completingSchedule.assigned_to || null,
         }).select('*, plants(name)').single();
-        ticket = data;
+        ticket = data ?? undefined;
       }
       if (!ticket) throw new Error('Could not create ticket');
       const result = await uploadMaintenancePhoto(completionBlob, {
         ticketId: ticket.id, plantName: ticket.plants?.name || completingSchedule.plants?.name || 'Plant',
-        photoType: 'completion', onProgress: setUploadPct,
+        photoType: 'completion', creator: activeProfile.name, onProgress: setUploadPct,
       });
-      await (supabase.from('maintenance_tickets') as any)
-        .update({ status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: activeProfile.name })
+      await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: completingSchedule.assigned_to || activeProfile.name })
         .eq('id', ticket.id);
       const nextDue = calculateNextDue(completingSchedule.frequency);
-      await (supabase.from('maintenance_schedules') as any)
-        .update({ last_completed_at: new Date().toISOString(), next_due_at: nextDue })
+      await updateRows('maintenance_schedules', { last_completed_at: new Date().toISOString(), next_due_at: nextDue })
         .eq('id', completingSchedule.id);
       notify({
         target_roles: ['admin', 'unit_head'],
@@ -356,14 +599,16 @@ export function Maintenance() {
       });
       setCompletingSchedule(null); setCompletionBlob(null); setUploadPct(0);
       await loadData();
-    } catch (err: any) { alert(`Upload failed: ${err.message}`); }
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
   async function handleRaiseStoreReq() {
-    if (!storeForm.partName.trim() || !selectedTicket) return;
+    if (!storeForm.partName.trim() || !selectedTicket || actionBusyRef.current) return;
+    actionBusyRef.current = true;
+    try {
     const plant = dbPlants.find(p => p.name === selectedTicket.plants?.name);
-    const { data: sr } = await (supabase.from('maintenance_store_requests') as any).insert({
+    const { data: sr } = await insertRows('maintenance_store_requests', {
       ticket_id: selectedTicket.id, part_name: storeForm.partName,
       quantity: parseFloat(storeForm.quantity) || null,
       specification: storeForm.specification || null,
@@ -371,23 +616,52 @@ export function Maintenance() {
     }).select('*').single();
     setSelectedStoreReq(sr);
     await updateTicketStatus(selectedTicket.id, 'pending_store');
-    setSelectedTicket((t: any) => t ? { ...t, status: 'pending_store' } : t);
+    setSelectedTicket((t) => t ? { ...t, status: 'pending_store' } : t);
+    // Route to the store manager of the ticket's Jharkhand unit (Chlorides /
+    // Plasticiser); fall back to the generic store manager if no unit is set.
+    const unit = (selectedTicket.unit as Unit | null) || null;
+    const storeTargets = unit
+      ? [UNIT_STORE_MANAGER[unit], 'admin']
+      : ['admin', 'store_manager_maint', 'warehouse_manager'];
     notify({
-      target_roles: ['admin', 'store_manager_maint', 'warehouse_manager'],
-      title: `Store part needed: ${storeForm.partName}`,
+      target_roles: storeTargets,
+      title: `Store part needed${unit ? ` · ${UNIT_LABELS[unit]}` : ''}: ${storeForm.partName}`,
       body: `${selectedTicket.equipment} · Qty: ${storeForm.quantity || '—'} · Check availability`,
       type: 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
+    await notifyMentions(storeForm.specification, {
+      entityType: 'maintenance_ticket', entityId: selectedTicket.id,
+      entityLabel: selectedTicket.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
+    });
     setShowStoreForm(false);
     setStoreForm({ partName: '', quantity: '', specification: '' });
+    await loadData();
+    } finally { actionBusyRef.current = false; }
+  }
+
+  // Unit head override: reroute the store request to the other unit's store manager.
+  async function rerouteStoreUnit() {
+    if (!selectedTicket) return;
+    const cur = (selectedTicket.unit as Unit | null) || 'chlorides';
+    const other: Unit = cur === 'chlorides' ? 'plasticiser' : 'chlorides';
+    await updateRows('maintenance_tickets', { unit: other }).eq('id', selectedTicket.id);
+    setSelectedTicket((t) => t ? { ...t, unit: other } : t);
+    notify({
+      target_roles: [UNIT_STORE_MANAGER[other], 'admin'],
+      title: `Rerouted to ${UNIT_LABELS[other]} store`,
+      body: `${activeProfile.name} rerouted "${selectedTicket.equipment}" to the ${UNIT_LABELS[other]} store manager.`,
+      type: 'warning', route: '/dashboard/purchase/maint',
+      actor_name: activeProfile.name, actor_role: role, read_by: [],
+    });
     await loadData();
   }
 
   async function startRepair() {
     if (!selectedTicket) return;
     await updateTicketStatus(selectedTicket.id, 'in_progress', { assigned_to: activeProfile.name });
-    setSelectedTicket((t: any) => t ? { ...t, status: 'in_progress' } : t);
+    setSelectedTicket((t) => t ? { ...t, status: 'in_progress' } : t);
+    await notifyTicketWatchers(selectedTicket, `Repair started: ${selectedTicket.equipment}`, `${activeProfile.name} started fixing it in-house.`);
     await loadData();
   }
 
@@ -397,7 +671,7 @@ export function Maintenance() {
     try {
       const result = await uploadMaintenancePhoto(completionBlob, {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
-        photoType: 'completion', onProgress: setUploadPct,
+        photoType: 'completion', creator: activeProfile.name, onProgress: setUploadPct,
       });
       await updateTicketStatus(selectedTicket.id, 'closed', {
         completion_photo_url: result.secure_url, closed_at: new Date().toISOString(),
@@ -409,9 +683,10 @@ export function Maintenance() {
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
+      await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Fixed in-house by ${activeProfile.name}.`);
       setSelectedTicket(null); setCompletionBlob(null); setUploadPct(0);
       await loadData();
-    } catch (err: any) { alert(`Upload failed: ${err.message}`); }
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
@@ -419,8 +694,7 @@ export function Maintenance() {
   async function submitStoreDecision() {
     if (!selectedTicket || !selectedStoreReq || storeDecisionForm.available === null) return;
     const available = storeDecisionForm.available;
-    await (supabase.from('maintenance_store_requests') as any)
-      .update({
+    await updateRows('maintenance_store_requests', {
         store_decision: available ? 'available' : 'unavailable',
         purchase_required: !available,
         qty_in_store: available ? (parseFloat(storeDecisionForm.qtyInStore) || null) : null,
@@ -429,8 +703,8 @@ export function Maintenance() {
       })
       .eq('id', selectedStoreReq.id);
     await updateTicketStatus(selectedTicket.id, 'pending_unit_head');
-    setSelectedTicket((t: any) => t ? { ...t, status: 'pending_unit_head' } : t);
-    setSelectedStoreReq((sr: any) => sr ? {
+    setSelectedTicket((t) => t ? { ...t, status: 'pending_unit_head' } : t);
+    setSelectedStoreReq((sr) => sr ? {
       ...sr,
       store_decision: available ? 'available' : 'unavailable',
       purchase_required: !available,
@@ -458,11 +732,10 @@ export function Maintenance() {
     // If part unavailable + approved → pending_purchase (Vijay procures)
     // If rejected → open (tech re-assesses)
     const nextStatus = !approved ? 'open' : partAvailable ? 'pending_handover' : 'pending_purchase';
-    await (supabase.from('maintenance_store_requests') as any)
-      .update({ unit_head_approval: approved ? 'approved' : 'rejected' })
+    await updateRows('maintenance_store_requests', { unit_head_approval: approved ? 'approved' : 'rejected' })
       .eq('id', selectedStoreReq.id);
     await updateTicketStatus(selectedTicket.id, nextStatus);
-    setSelectedTicket((t: any) => t ? { ...t, status: nextStatus } : t);
+    setSelectedTicket((t) => t ? { ...t, status: nextStatus } : t);
     if (approved && partAvailable) {
       notify({
         target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'],
@@ -488,30 +761,71 @@ export function Maintenance() {
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
     }
+    await notifyTicketWatchers(
+      selectedTicket,
+      approved ? `Approved: ${selectedTicket.equipment}` : `Sent back: ${selectedTicket.equipment}`,
+      approved ? `${activeProfile.name} approved the store request.` : `${activeProfile.name} sent the ticket back to the technician.`,
+    );
     await loadData();
   }
 
   async function markPurchased() {
     if (!selectedTicket || !selectedStoreReq || !busyRef.trim()) return;
-    await (supabase.from('maintenance_store_requests') as any)
-      .update({ busy_transaction_ref: busyRef })
+    const qty = selectedStoreReq.quantity || 1;
+    const up = unitPrice.trim() ? parseFloat(unitPrice.replace(/[^0-9.]/g, '')) : null;
+    const total = up != null ? up * qty : null;
+    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, unit_price: up, total_price: total })
       .eq('id', selectedStoreReq.id);
-    await updateTicketStatus(selectedTicket.id, 'pending_handover');
-    setSelectedTicket((t: any) => t ? { ...t, status: 'pending_handover' } : t);
+    setSelectedStoreReq((sr) => sr ? { ...sr, busy_transaction_ref: busyRef, unit_price: up, total_price: total } : sr);
+    // Procured by unit head → hand to the Purchase Manager (bill + dispatch).
+    await updateTicketStatus(selectedTicket.id, 'pending_purchase_manager');
+    setSelectedTicket((t) => t ? { ...t, status: 'pending_purchase_manager' } : t);
     notify({
-      target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'],
-      title: `Part procured: ${selectedStoreReq.part_name}`,
-      body: `BUSY ref: ${busyRef} — store manager to receive, upload invoice + photo, hand over to technician`,
+      target_roles: ['purchase_manager', 'admin'],
+      title: `Procured — upload bill: ${selectedStoreReq.part_name}`,
+      body: `BUSY ref: ${busyRef}${total != null ? ` · ₹${total.toLocaleString('en-IN')}` : ''} — Purchase Manager to upload the supplier bill and mark the part en route to store.`,
       type: 'info', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
-    setBusyRef(''); await loadData();
+    setBusyRef(''); setUnitPrice(''); await loadData();
+  }
+
+  // Purchase Manager: upload the supplier bill photo + mark the part en route.
+  async function confirmDispatch() {
+    if (!selectedTicket || !selectedStoreReq || !dispatchBlob) return;
+    setUploading(true);
+    try {
+      const r = await uploadMaintenancePhoto(dispatchBlob, {
+        ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
+        photoType: 'bill', creator: activeProfile.name, onProgress: setUploadPct,
+      });
+      // Purchase manager can confirm/correct the price from the actual bill.
+      const qty = selectedStoreReq.quantity || 1;
+      const up = unitPrice.trim() ? parseFloat(unitPrice.replace(/[^0-9.]/g, '')) : selectedStoreReq.unit_price ?? null;
+      const total = up != null ? up * qty : selectedStoreReq.total_price ?? null;
+      await updateRows('maintenance_store_requests', { handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total })
+        .eq('id', selectedStoreReq.id);
+      setSelectedStoreReq((sr) => sr ? { ...sr, handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total } : sr);
+      await updateTicketStatus(selectedTicket.id, 'pending_handover');
+      setSelectedTicket((t) => t ? { ...t, status: 'pending_handover' } : t);
+      notify({
+        target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'],
+        title: `Part en route: ${selectedStoreReq.part_name}`,
+        body: `${activeProfile.name} uploaded the supplier bill — part dispatched to store. Confirm receipt on arrival.`,
+        type: 'info', route: '/dashboard/purchase/maint',
+        actor_name: activeProfile.name, actor_role: role, read_by: [],
+      });
+      await notifyTicketWatchers(selectedTicket, `Part dispatched: ${selectedTicket.equipment}`, `${activeProfile.name} uploaded the bill — en route to store.`);
+      setDispatchBlob(null); setUploadPct(0);
+      await loadData();
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
+    finally { setUploading(false); }
   }
 
   // Store manager: upload invoice + product photo, confirm physical handover to technician
   async function confirmHandover() {
     if (!selectedTicket || !selectedStoreReq) return;
-    if (!handoverInvoiceBlob && !handoverPhotoBlob) { alert('Please upload at least the invoice or product photo before confirming handover.'); return; }
+    if (!handoverInvoiceBlob && !handoverPhotoBlob) { toast.error('Please upload at least the invoice or product photo before confirming handover.'); return; }
     setUploading(true);
     try {
       let invoiceUrl: string | null = null;
@@ -519,19 +833,18 @@ export function Maintenance() {
       if (handoverInvoiceBlob) {
         const r = await uploadMaintenancePhoto(handoverInvoiceBlob, {
           ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
-          photoType: 'bill', onProgress: pct => setUploadPct(Math.round(pct / 2)),
+          photoType: 'bill', creator: activeProfile.name, onProgress: pct => setUploadPct(Math.round(pct / 2)),
         });
         invoiceUrl = r.secure_url;
       }
       if (handoverPhotoBlob) {
         const r = await uploadMaintenancePhoto(handoverPhotoBlob, {
           ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
-          photoType: 'completion', onProgress: pct => setUploadPct(50 + Math.round(pct / 2)),
+          photoType: 'completion', creator: activeProfile.name, onProgress: pct => setUploadPct(50 + Math.round(pct / 2)),
         });
         photoUrl = r.secure_url;
       }
-      await (supabase.from('maintenance_store_requests') as any)
-        .update({
+      await updateRows('maintenance_store_requests', {
           ...(invoiceUrl ? { handover_invoice_url: invoiceUrl } : {}),
           ...(photoUrl ? { handover_photo_url: photoUrl } : {}),
           ...(handoverNotes.trim() ? { handover_notes: handoverNotes } : {}),
@@ -540,7 +853,7 @@ export function Maintenance() {
         })
         .eq('id', selectedStoreReq.id);
       await updateTicketStatus(selectedTicket.id, 'pending_defective_return');
-      setSelectedTicket((t: any) => t ? { ...t, status: 'pending_defective_return' } : t);
+      setSelectedTicket((t) => t ? { ...t, status: 'pending_defective_return' } : t);
       notify({
         target_roles: ['technician_shd', 'admin', 'unit_head'],
         title: `Part handed over: ${selectedStoreReq.part_name}`,
@@ -548,9 +861,14 @@ export function Maintenance() {
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
+      await notifyTicketWatchers(selectedTicket, `Part handed over: ${selectedTicket.equipment}`, `${activeProfile.name} confirmed handover — repair can proceed.`);
+      await notifyMentions(handoverNotes, {
+        entityType: 'maintenance_ticket', entityId: selectedTicket.id,
+        entityLabel: selectedTicket.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
+      });
       setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); setUploadPct(0);
       await loadData();
-    } catch (err: any) { alert(`Upload failed: ${err.message}`); }
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
@@ -560,7 +878,7 @@ export function Maintenance() {
     try {
       const result = await uploadMaintenancePhoto(defectiveBlob, {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
-        photoType: 'defective', onProgress: setUploadPct,
+        photoType: 'defective', creator: activeProfile.name, onProgress: setUploadPct,
       });
       await updateTicketStatus(selectedTicket.id, 'closed', {
         defective_part_photo_url: result.secure_url,
@@ -575,28 +893,101 @@ export function Maintenance() {
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
+      await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Defective part → ${defectiveDecision} · closed by ${activeProfile.name}.`);
       setSelectedTicket(null); setDefectiveBlob(null); setDefectiveDecision(''); setUploadPct(0);
       await loadData();
-    } catch (err: any) { alert(`Upload failed: ${err.message}`); }
+    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
   async function handleAddSchedule() {
-    if (!scheduleForm.title.trim() || !scheduleForm.equipment.trim()) return;
+    if (!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule) return;
+    setSavingSchedule(true);
+    try {
     const plant = dbPlants.find(p => p.name === scheduleForm.plant);
-    const { error } = await (supabase.from('maintenance_schedules') as any).insert({
+    const { error } = await insertRows('maintenance_schedules', {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
-      plant_id: plant?.id || null, frequency: scheduleForm.frequency,
+      plant_id: plant?.id || null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
       description: scheduleForm.description || null, is_active: true,
+      assigned_to: scheduleForm.assignedTo || null,
       next_due_at: scheduleForm.firstDue ? new Date(scheduleForm.firstDue).toISOString() : null,
     });
-    if (error) { alert(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(`Failed: ${error.message}`); return; }
+    // If the assignee is restricted, alert admin + unit head immediately.
+    if (scheduleForm.assignedTo) {
+      const entry = isPersonBlacklisted(scheduleForm.assignedTo);
+      if (entry) notifyActivity(entry, `assigned the recurring task "${scheduleForm.title}" (${FREQ_LABEL[scheduleForm.frequency] || scheduleForm.frequency})`);
+    }
+    await notifyMentions(scheduleForm.description, {
+      entityLabel: scheduleForm.title || 'Maintenance schedule', route: '/dashboard/purchase/maint',
+    });
     setScheduleSaved(true);
     await loadData();
     setTimeout(() => {
       setShowSchedulePanel(false); setScheduleSaved(false);
-      setScheduleForm({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today });
+      setScheduleForm({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
     }, 1400);
+    } finally { setSavingSchedule(false); }
+  }
+
+  // ── Read-only stage history (click a stage in the strip) ────────────────────
+  function renderStageDetail(stage: string) {
+    const t = selectedTicket;
+    if (!t) return null;
+    const sr = selectedStoreReq;
+    const label = STAGE_LABELS[stage] || stage;
+
+    const photo = (url: string | null | undefined, cap: string) => url ? (
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>{cap}</div>
+        <img src={url} alt={cap} style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 10, border: '1px solid #E2E8F0' }} />
+        <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 4 }}>Open full image ↗</a>
+      </div>
+    ) : null;
+    const line = (k: string, v: React.ReactNode) => (v || v === 0) ? (
+      <div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}><span style={{ color: '#94A3B8' }}>{k}: </span><strong>{v}</strong></div>
+    ) : null;
+
+    let body: React.ReactNode = <div style={{ fontSize: 12.5, color: '#94A3B8' }}>No details captured for this step.</div>;
+    switch (stage) {
+      case 'open':
+        body = <>{line('Raised by', t.raised_by)}{line('Role', roleLabelFor(t.raised_role))}{line('When', formatDate(t.created_at))}{t.description && <div style={{ fontSize: 12.5, color: '#334155', marginTop: 6 }}><MentionText text={t.description} /></div>}</>;
+        break;
+      case 'in_progress':
+        body = <>{line('Handled by', t.assigned_to || t.raised_by)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>{sr ? 'Needs a part — store request raised.' : 'Decided to fix in-house.'}</div></>;
+        break;
+      case 'pending_store':
+        if (sr) body = <>{line('Part requested', sr.part_name)}{line('Qty', sr.quantity)}{line('Specification', sr.specification)}{line('Store decision', sr.store_decision)}{line('Qty in store', sr.qty_in_store)}{line('Shelf', sr.shelf_location)}{line('Condition', sr.part_condition)}</>;
+        break;
+      case 'pending_unit_head':
+        if (sr) body = <>{line('Unit head decision', sr.unit_head_approval)}{line('Part availability', sr.store_decision)}</>;
+        break;
+      case 'pending_purchase':
+        if (sr) body = <>{line('BUSY transaction ref', sr.busy_transaction_ref)}{line('Unit price', sr.unit_price != null ? `₹ ${Number(sr.unit_price).toLocaleString('en-IN')}` : null)}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement by unit head.</div></>;
+        break;
+      case 'pending_purchase_manager':
+        if (sr) body = <>{line('Bill uploaded', sr.bill_verified ? 'Yes' : '—')}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}{photo(sr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
+        break;
+      case 'pending_handover':
+        if (sr) body = <>{line('Receipt confirmed', sr.handover_confirmed_at ? formatDate(sr.handover_confirmed_at) : '—')}{line('Notes', sr.handover_notes)}{photo(sr.handover_invoice_url, 'Bill / invoice')}{photo(sr.handover_photo_url, 'Part received photo')}</>;
+        break;
+      case 'pending_defective_return':
+        body = <>{line('Defective part decision', t.defective_part_decision)}{photo(t.defective_part_photo_url, 'Defective part photo')}</>;
+        break;
+      case 'closed':
+        body = <>{line('Closed at', t.closed_at ? formatDate(t.closed_at) : '—')}{line('Defective part', t.defective_part_decision)}{photo(t.completion_photo_url, 'Completion photo')}</>;
+        break;
+    }
+
+    return (
+      <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16, marginBottom: 16, background: '#FCFCFD' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: '#0F172A' }}>{label} — what happened <span style={{ fontWeight: 500, color: '#94A3B8' }}>(read-only)</span></div>
+          <button onClick={() => setViewStage(null)} style={{ border: 'none', background: 'transparent', color: '#94A3B8', cursor: 'pointer', fontSize: 16, lineHeight: 1, fontFamily: 'inherit' }}>×</button>
+        </div>
+        {body}
+      </div>
+    );
   }
 
   // ── Ticket action panel ───────────────────────────────────────────────────
@@ -680,9 +1071,21 @@ export function Maintenance() {
     // ── pending_store: store manager checks availability ──
     if (status === 'pending_store') {
       if (!selectedStoreReq) return <div style={{ fontSize: 12, color: '#94A3B8' }}>Loading store request…</div>;
-      if (isStoreManager || isAdmin) {
+      const ticketUnit = (selectedTicket.unit as Unit | null) || null;
+      // The matching unit's store manager (or generic/warehouse, or admin) can act.
+      const storeManagerCanAct = isAdmin || (isStoreManager && (
+        role === 'store_manager_maint' || role === 'warehouse_manager' || !ticketUnit || myStoreUnit === ticketUnit
+      ));
+      // Unit head can override the routing to the other unit's store.
+      const overrideBtn = (isUnitHead || isAdmin) ? (
+        <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', marginTop: 10 }}>
+          ⇄ Override · reroute to {UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser']} store
+        </button>
+      ) : null;
+      if (storeManagerCanAct) {
         return (
           <div>
+            {ticketUnit && <div style={{ fontSize: 11, color: '#A21CAF', fontWeight: 700, marginBottom: 8 }}>Routed to {UNIT_LABELS[ticketUnit]} store</div>}
             {/* Part request info */}
             <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: '#EA580C', textTransform: 'uppercase', marginBottom: 6 }}>Store request — check availability</div>
@@ -736,10 +1139,16 @@ export function Maintenance() {
               style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: storeDecisionForm.available === null ? 0.4 : 1 }}>
               Submit to unit head for approval
             </button>
+            {overrideBtn}
           </div>
         );
       }
-      return <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Awaiting store manager decision…</div>;
+      return (
+        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+          <div style={{ fontSize: 12, color: '#94A3B8' }}>Awaiting {ticketUnit ? `${UNIT_LABELS[ticketUnit]} ` : ''}store manager decision…</div>
+          {overrideBtn}
+        </div>
+      );
     }
 
     // ── pending_unit_head: unit head approves based on store decision ──
@@ -794,12 +1203,54 @@ export function Maintenance() {
               <PanelField label="BUSY transaction reference *">
                 <PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" />
               </PanelField>
+              <PanelRow>
+                <PanelField label="Unit price (₹)">
+                  <PanelInput type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder="e.g. 4500" />
+                </PanelField>
+                <PanelField label={`Total (× ${selectedStoreReq?.quantity || 1})`}>
+                  <PanelInput value={unitPrice.trim() ? `₹ ${((parseFloat(unitPrice.replace(/[^0-9.]/g, '')) || 0) * (selectedStoreReq?.quantity || 1)).toLocaleString('en-IN')}` : '—'} disabled />
+                </PanelField>
+              </PanelRow>
               <button onClick={markPurchased} disabled={!busyRef.trim()} style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#7C3AED', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: !busyRef.trim() ? 0.5 : 1 }}>
-                Mark as purchased — notify store manager
+                Mark as purchased — send to Purchase Manager
               </button>
             </div>
           ) : (
             <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Vijay Ji is procuring the part…</div>
+          )}
+        </div>
+      );
+    }
+
+    // ── pending_purchase_manager: purchase manager uploads supplier bill, marks en route ──
+    if (status === 'pending_purchase_manager') {
+      return (
+        <div>
+          <div style={{ background: '#FDF4FF', border: '1px solid #F5D0FE', borderRadius: 12, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#A21CAF', textTransform: 'uppercase', marginBottom: 4 }}>Upload supplier bill &amp; dispatch</div>
+            <div style={{ fontSize: 13, color: '#475569' }}>
+              Procured via BUSY ({selectedStoreReq?.busy_transaction_ref || 'ref pending'}). Upload the supplier bill photo and confirm the part is en route to the store.
+            </div>
+          </div>
+          {isPurchaseManager || isAdmin ? (
+            <div>
+              <PanelRow>
+                <PanelField label="Unit price (₹)">
+                  <PanelInput type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder={selectedStoreReq?.unit_price != null ? String(selectedStoreReq.unit_price) : 'e.g. 4500'} />
+                </PanelField>
+                <PanelField label={`Total (× ${selectedStoreReq?.quantity || 1})`}>
+                  <PanelInput disabled value={(() => { const up = unitPrice.trim() ? (parseFloat(unitPrice.replace(/[^0-9.]/g, '')) || 0) : (selectedStoreReq?.unit_price || 0); return up ? `₹ ${(up * (selectedStoreReq?.quantity || 1)).toLocaleString('en-IN')}` : '—'; })()} />
+                </PanelField>
+              </PanelRow>
+              <PhotoUploader onBlobReady={setDispatchBlob} label="Supplier bill / invoice photo" hint="Clear photo of the supplier bill for this part" />
+              {uploading && <UploadBar pct={uploadPct} color="#A21CAF" />}
+              <button onClick={confirmDispatch} disabled={!dispatchBlob || uploading}
+                style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#A21CAF', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>
+                {uploading ? `Uploading… ${uploadPct}%` : 'Upload bill — mark en route to store'}
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Purchase Manager (Anshul) uploading the bill…</div>
           )}
         </div>
       );
@@ -881,9 +1332,43 @@ export function Maintenance() {
   }
 
   // skipped stages for stage strip (pending_purchase skipped if part was in store)
+  // Part-in-store path skips both the external purchase and the purchase-manager dispatch.
   const skippedStages = selectedTicket && selectedStoreReq?.store_decision === 'available'
-    ? ['pending_purchase']
+    ? ['pending_purchase', 'pending_purchase_manager']
     : [];
+
+  // ── Blacklist guard ─────────────────────────────────────────────────────────
+  // A ticket assigned to (or raised by) a restricted person is flagged. We check
+  // assigned_to first (the active worker), then fall back to raised_by. When a hit
+  // is found we surface a banner in the drawer AND fire one urgent notification to
+  // admin + unit_head so the restriction is visible even to supervisors who aren't
+  // themselves locked out by the dashboard-level overlay.
+  const blacklistHit = (() => {
+    if (!selectedTicket || !blacklistReady) return null;
+    const candidates: { who: string; name: string | null }[] = [
+      { who: 'assigned to', name: selectedTicket.assigned_to },
+      { who: 'raised by',   name: selectedTicket.raised_by   },
+    ];
+    for (const c of candidates) {
+      if (!c.name) continue;
+      const entry = isPersonBlacklisted(c.name);
+      if (entry) return { entry, who: c.who, name: c.name };
+    }
+    return null;
+  })();
+
+  const blacklistNotifiedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!blacklistHit || !selectedTicket) return;
+    const key = `${selectedTicket.id}:${blacklistHit.entry.id}`;
+    if (blacklistNotifiedRef.current === key) return;
+    blacklistNotifiedRef.current = key;
+    notifyActivity(
+      blacklistHit.entry,
+      `${blacklistHit.who} maintenance ticket "${selectedTicket.equipment}" (#${selectedTicket.id.slice(0, 8)})`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blacklistHit?.entry.id, selectedTicket?.id]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -902,6 +1387,17 @@ export function Maintenance() {
           </button>
         )}
       </div>
+
+      {loadError ? (
+        <ErrorState
+          title="Couldn't load maintenance"
+          message="The maintenance tickets and schedules failed to load. Check your connection and try again."
+          onRetry={() => { setLoading(true); setLoadError(false); loadData(); }}
+        />
+      ) : loading ? (
+        <div className="card p-5"><SkeletonRows rows={6} /></div>
+      ) : (
+      <>
 
       {/* ── PERIODIC TAB ─────────────────────────────────────────────────── */}
       {tab === 'periodic' && (
@@ -1008,9 +1504,26 @@ export function Maintenance() {
                 <div className="text-base font-bold">Emergency maintenance tickets</div>
                 <div className="text-xs text-slate-500">Breakdown repairs · click any row for full workflow</div>
               </div>
-              <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setShowRaisePanel(true)}>
-                + Raise ticket
-              </button>
+              <div className="flex items-center gap-2">
+                {isAdmin && emergencyTickets.length > 0 && (
+                  <button
+                    className="chip"
+                    onClick={handleDeleteAllEmergency}
+                    disabled={deletingAll}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: '#DC2626', borderColor: '#FECACA' }}
+                  >
+                    🗑 {deletingAll ? 'Deleting…' : `Delete all (${emergencyTickets.length})`}
+                  </button>
+                )}
+                {(isAdmin || isUnitHead) && (
+                  <button className="chip" onClick={() => setShowReport(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    📄 Create report
+                  </button>
+                )}
+                <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setShowRaisePanel(true)}>
+                  + Raise ticket
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto scroll-x">
               <table className="dt">
@@ -1018,21 +1531,31 @@ export function Maintenance() {
                   <tr>
                     <th>Ticket #</th><th>Equipment</th><th>Plant</th><th>Issue</th>
                     <th>Status</th><th>Raised by</th><th>Created</th>
+                    {isAdmin && <th></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {emergencyTickets.length === 0 && (
-                    <tr><td colSpan={7} className="text-center text-slate-400 py-6 text-sm">No emergency tickets raised yet</td></tr>
+                    <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">No emergency tickets raised yet</td></tr>
                   )}
                   {emergencyTickets.map(t => (
                     <tr key={t.id} onClick={() => setSelectedTicket(t)} style={{ cursor: 'pointer' }}>
                       <td className="font-mono text-xs text-slate-400">{t.id.slice(0, 8)}</td>
                       <td className="font-semibold">{t.equipment}</td>
                       <td>{t.plants?.name || '—'}</td>
-                      <td className="text-slate-500 text-xs">{t.description || t.title}</td>
+                      <td className="text-slate-500 text-xs">{t.description ? <MentionText text={t.description} /> : t.title}</td>
                       <td>{statusBadge(t.status)}</td>
                       <td className="text-slate-500 text-xs">{t.raised_by || '—'}</td>
                       <td className="text-slate-500 text-xs">{formatDate(t.created_at)}</td>
+                      {isAdmin && (
+                        <td>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTicket(t); }}
+                            title="Delete ticket"
+                            style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#DC2626', fontSize: 13, padding: '2px 6px', lineHeight: 1 }}
+                          >🗑</button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -1084,17 +1607,29 @@ export function Maintenance() {
         </div>
       )}
 
+      </>
+      )}
+
       {/* ── PANEL: Raise ticket ──────────────────────────────────────────── */}
       <SlidePanel open={showRaisePanel} onClose={() => { setShowRaisePanel(false); setRaiseSaved(false); }} title="Raise maintenance ticket" subtitle="Emergency · Maintenance">
         <PanelField label="Equipment / asset *">
           <PanelInput value={raiseForm.equipment} onChange={e => setRaiseForm(f => ({ ...f, equipment: e.target.value }))} placeholder="e.g. Reactor R-1, Cooling tower pump" />
         </PanelField>
-        <PanelField label="Plant">
-          <PanelSelect value={raiseForm.plant} onChange={e => setRaiseForm(f => ({ ...f, plant: e.target.value }))}>
-            <option value="">— Select plant —</option>
-            {plantNames.map(p => <option key={p}>{p}</option>)}
-          </PanelSelect>
-        </PanelField>
+        <PanelRow>
+          <PanelField label="Plant">
+            <PanelSelect value={raiseForm.plant} onChange={e => setRaiseForm(f => ({ ...f, plant: e.target.value }))}>
+              <option value="">— Select plant —</option>
+              {plantNames.map(p => <option key={p}>{p}</option>)}
+            </PanelSelect>
+          </PanelField>
+          <PanelField label="Procurement unit (Jharkhand)">
+            <PanelSelect value={raiseForm.unit} onChange={e => setRaiseForm(f => ({ ...f, unit: e.target.value }))}>
+              <option value="">— Not Jharkhand / N/A —</option>
+              <option value="chlorides">Suntek Chlorides</option>
+              <option value="plasticiser">Suntek Plasticiser</option>
+            </PanelSelect>
+          </PanelField>
+        </PanelRow>
         <PanelField label="Issue description">
           <PanelTextarea value={raiseForm.description} onChange={e => setRaiseForm(f => ({ ...f, description: e.target.value }))} placeholder="What broke? What symptoms? What was the impact?" />
         </PanelField>
@@ -1105,7 +1640,7 @@ export function Maintenance() {
           </PanelSelect>
         </PanelField>
         <PanelDivider />
-        <PanelFooter saved={raiseSaved} onCancel={() => setShowRaisePanel(false)} onSave={handleRaiseTicket} saveLabel="Raise ticket" successLabel="Ticket raised" successSub="Store manager, admin and unit head notified" disabled={!raiseForm.equipment.trim()} requiredHint="Fill in equipment name to raise ticket" />
+        <PanelFooter saved={raiseSaved} onCancel={() => setShowRaisePanel(false)} onSave={handleRaiseTicket} saveLabel={raising ? 'Raising…' : 'Raise ticket'} successLabel="Ticket raised" successSub="Store manager, admin and unit head notified" disabled={!raiseForm.equipment.trim() || raising} requiredHint="Fill in equipment name to raise ticket" />
       </SlidePanel>
 
       {/* ── PANEL: Complete periodic ─────────────────────────────────────── */}
@@ -1128,20 +1663,74 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setBusyRef(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
       >
         {selectedTicket && (
           <>
-            <StageStrip status={selectedTicket.status} skippedStages={skippedStages} />
+            <StageStrip status={selectedTicket.status} skippedStages={skippedStages} onStageClick={(s) => setViewStage((cur) => cur === s ? null : s)} activeStage={viewStage} />
+            {viewStage && renderStageDetail(viewStage)}
+            {blacklistHit && (
+              <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  🚫 Restricted person on this ticket
+                </div>
+                <div style={{ fontSize: 12, color: '#7F1D1D', marginTop: 4, lineHeight: 1.5 }}>
+                  <strong>{blacklistHit.name}</strong> is {blacklistHit.who} this ticket but is on the active
+                  blacklist (<strong>{blacklistHit.entry.severity}</strong>). Reason: {blacklistHit.entry.reason}.
+                  <br />Admin &amp; Unit Head have been notified.
+                </div>
+              </div>
+            )}
             <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>
-                #{selectedTicket.id.slice(0, 8)} · Raised by {selectedTicket.raised_by || '—'} · {formatDate(selectedTicket.created_at)}
+                #{selectedTicket.id.slice(0, 8)} · Raised by {selectedTicket.raised_by || '—'}
+                {selectedTicket.assigned_to && <> · Assigned to {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
+                {selectedTicket.unit && <> · <span style={{ color: '#A21CAF', fontWeight: 700 }}>{UNIT_LABELS[selectedTicket.unit as Unit] || selectedTicket.unit}</span></>}
               </div>
-              {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}>{selectedTicket.description}</div>}
+              {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><MentionText text={selectedTicket.description} /></div>}
             </div>
-            {renderTicketActions()}
+
+            {/* Notes are visible to everyone on the ticket; edit/delete are admin-only. */}
+            {!editingTicket && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                <NotesButton entityType="maintenance_ticket" entityId={selectedTicket.id} entityLabel={selectedTicket.equipment || selectedTicket.title || 'Ticket'} route={`/dashboard/purchase/maint?ticket=${selectedTicket.id}`} />
+                {isAdmin && <button onClick={() => startEdit(selectedTicket)} className="chip">✎ Edit</button>}
+                {isAdmin && <button onClick={() => handleDeleteTicket(selectedTicket)} className="chip" style={{ color: '#DC2626' }}>🗑 Delete</button>}
+              </div>
+            )}
+
+            {editingTicket ? (
+              <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Edit ticket (admin)</div>
+                <PanelField label="Equipment / asset">
+                  <PanelInput value={editForm.equipment} onChange={e => setEditForm(f => ({ ...f, equipment: e.target.value }))} />
+                </PanelField>
+                <PanelRow>
+                  <PanelField label="Plant">
+                    <PanelSelect value={editForm.plant} onChange={e => setEditForm(f => ({ ...f, plant: e.target.value }))}>
+                      <option value="">— Select plant —</option>
+                      {plantNames.map(p => <option key={p}>{p}</option>)}
+                    </PanelSelect>
+                  </PanelField>
+                  <PanelField label="Status">
+                    <PanelSelect value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))}>
+                      {Object.keys(STATUS_CFG).map(s => <option key={s} value={s}>{STATUS_CFG[s].label}</option>)}
+                    </PanelSelect>
+                  </PanelField>
+                </PanelRow>
+                <PanelField label="Issue description">
+                  <PanelTextarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} placeholder="What broke? Type @ to tag someone." />
+                </PanelField>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={() => setEditingTicket(false)} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
+                  <button onClick={saveEdit} disabled={!editForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !editForm.equipment.trim() ? 0.5 : 1 }}>Save changes</button>
+                </div>
+              </div>
+            ) : (
+              renderTicketActions()
+            )}
           </>
         )}
       </SlidePanel>
@@ -1167,14 +1756,90 @@ export function Maintenance() {
             </PanelSelect>
           </PanelField>
         </PanelRow>
-        <PanelField label="First due date">
-          <PanelInput type="date" value={scheduleForm.firstDue} onChange={e => setScheduleForm(f => ({ ...f, firstDue: e.target.value }))} />
-        </PanelField>
+        <PanelRow>
+          <PanelField label="First due date">
+            <PanelInput type="date" value={scheduleForm.firstDue} onChange={e => setScheduleForm(f => ({ ...f, firstDue: e.target.value }))} />
+          </PanelField>
+          <PanelField label="Assign to">
+            <PanelSelect value={scheduleForm.assignedTo} onChange={e => setScheduleForm(f => ({ ...f, assignedTo: e.target.value }))}>
+              <option value="">— Unassigned —</option>
+              {ASSIGNABLE_STAFF.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
+            </PanelSelect>
+          </PanelField>
+        </PanelRow>
+        {scheduleForm.assignedTo && blacklistReady && isPersonBlacklisted(scheduleForm.assignedTo) && (
+          <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: '#B91C1C', fontWeight: 600 }}>
+            🚫 {scheduleForm.assignedTo} is on the active blacklist. Admin &amp; Unit Head will be notified on save.
+          </div>
+        )}
         <PanelField label="Task description / checklist">
           <PanelTextarea value={scheduleForm.description} onChange={e => setScheduleForm(f => ({ ...f, description: e.target.value }))} placeholder="Steps to complete, tools needed, safety precautions…" />
         </PanelField>
         <PanelDivider />
-        <PanelFooter saved={scheduleSaved} onCancel={() => setShowSchedulePanel(false)} onSave={handleAddSchedule} saveLabel="Save schedule" successLabel="Schedule created" successSub="Ticket will auto-generate on due date" disabled={!scheduleForm.title.trim() || !scheduleForm.equipment.trim()} requiredHint="Fill in title and equipment to create schedule" />
+        <PanelFooter saved={scheduleSaved} onCancel={() => setShowSchedulePanel(false)} onSave={handleAddSchedule} saveLabel={savingSchedule ? 'Saving…' : 'Save schedule'} successLabel="Schedule created" successSub="Ticket will auto-generate on due date" disabled={!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule} requiredHint="Fill in title and equipment to create schedule" />
+      </SlidePanel>
+
+      {/* ── PANEL: Create maintenance report (CSV) ───────────────────────────── */}
+      <SlidePanel open={showReport} onClose={() => setShowReport(false)} title="Create maintenance report" subtitle="Export · CSV">
+        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 18, lineHeight: 1.5 }}>
+          Pick what to include. The CSV carries the full life of each ticket — maintenance ID, who raised it &amp; their role, who's tagged/watching, the whole part-procurement trail, every timestamp, and how it was resolved — plus a header noting who generated the report and when. Tick the box below to also export the @-mention/notes timeline as a second CSV.
+        </div>
+
+        <PanelField label="Include ticket types">
+          <div style={{ display: 'flex', gap: 8 }}>
+            {([['emergency', '⚡ Emergency'], ['periodic', '🔄 Periodic']] as const).map(([key, label]) => {
+              const on = reportForm[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setReportForm(f => ({ ...f, [key]: !f[key] }))}
+                  style={{
+                    flex: 1, padding: '10px', borderRadius: 12, cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
+                    border: `2px solid ${on ? '#F47651' : '#E2E8F0'}`, background: on ? '#FFF7F5' : '#F8FAFC', color: on ? '#F47651' : '#64748B',
+                  }}
+                >
+                  {on ? '✓ ' : ''}{label}
+                </button>
+              );
+            })}
+          </div>
+        </PanelField>
+
+        <PanelField label="Status">
+          <PanelSelect value={reportForm.status} onChange={e => setReportForm(f => ({ ...f, status: e.target.value }))}>
+            <option value="all">All statuses</option>
+            <option value="open">Open / in progress only</option>
+            <option value="closed">Closed only</option>
+          </PanelSelect>
+        </PanelField>
+
+        <PanelRow>
+          <PanelField label="From date (created)">
+            <PanelInput type="date" value={reportForm.from} onChange={e => setReportForm(f => ({ ...f, from: e.target.value }))} />
+          </PanelField>
+          <PanelField label="To date (created)">
+            <PanelInput type="date" value={reportForm.to} onChange={e => setReportForm(f => ({ ...f, to: e.target.value }))} />
+          </PanelField>
+        </PanelRow>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#334155', cursor: 'pointer', marginBottom: 8 }}>
+          <input type="checkbox" checked={reportForm.includeNotes} onChange={e => setReportForm(f => ({ ...f, includeNotes: e.target.checked }))} />
+          Also export the notes / @-mention activity log (second CSV)
+        </label>
+
+        <PanelDivider />
+        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12, textAlign: 'center' }}>
+          <strong style={{ color: '#0F172A' }}>{reportTickets().length}</strong> ticket{reportTickets().length === 1 ? '' : 's'} match these filters
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" onClick={() => setShowReport(false)} style={{ flex: 1, padding: '11px 0', borderRadius: 24, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', fontFamily: 'inherit' }}>
+            Cancel
+          </button>
+          <button type="button" onClick={generateReport} disabled={generating || reportTickets().length === 0} style={{ flex: 2, padding: '11px 0', borderRadius: 24, border: 'none', background: (generating || reportTickets().length === 0) ? '#CBD5E1' : '#F47651', fontSize: 13, fontWeight: 700, color: '#fff', cursor: (generating || reportTickets().length === 0) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+            {generating ? 'Generating…' : 'Generate CSV report'}
+          </button>
+        </div>
       </SlidePanel>
     </>
   );

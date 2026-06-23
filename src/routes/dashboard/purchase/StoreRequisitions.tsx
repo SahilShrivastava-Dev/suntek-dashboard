@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { insertRows } from '../../../lib/db';
+import { useMentionNotifier } from '../../../lib/mentions';
+import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
+import { useToast } from '../../../components/ui/toast';
+import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import type { Database } from '../../../lib/database.types';
+
+type ReqRow = Database['public']['Tables']['store_requisitions']['Row'] & { plants?: { name: string | null } | null };
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -40,25 +48,40 @@ const STATUS_STAGE: Record<string, { bg: string; color: string; label: string }>
 };
 
 export function StoreRequisitions() {
+  const toast = useToast();
+  const notifyMentions = useMentionNotifier();
+  const screenBlacklist = useBlacklistGuard();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<ReqRow[]>([]);
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
 
-  useEffect(() => {
-    async function load() {
-      const { data: plantsData } = await (supabase.from('plants').select('id, name') as any);
+  async function load() {
+    try {
+      const { data: plantsData } = await supabase.from('plants').select('id, name')
+        .returns<{ id: string; name: string }[]>();
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
-      const { data } = await (supabase
+      const { data, error } = await supabase
         .from('store_requisitions')
         .select('*, plants(name)')
-        .order('created_at', { ascending: false }) as any);
+        .order('created_at', { ascending: false })
+        .returns<ReqRow[]>();
+      if (error) throw error;
       setItems(data || []);
+      setLoadError(false);
+    } catch (err) {
+      console.error('[StoreRequisitions] load failed', err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : FALLBACK_PLANTS;
 
@@ -67,7 +90,7 @@ export function StoreRequisitions() {
   async function handleSave() {
     if (!form.item.trim() || !form.qty) return;
     const plant = dbPlants.find(p => p.name === form.plant);
-    const { data, error } = await (supabase.from('store_requisitions') as any).insert({
+    const { data, error } = await insertRows('store_requisitions', {
       item: form.item,
       plant_id: plant?.id || null,
       qty: parseFloat(form.qty) || 0,
@@ -77,13 +100,13 @@ export function StoreRequisitions() {
     }).select('*, plants(name)').single();
 
     if (error) {
-      alert(`Save failed: ${error.message}`);
+      toast.error(`Save failed: ${error.message}`);
       return;
     }
     if (data) {
-      setItems(prev => [data, ...prev]);
+      setItems(prev => [data as ReqRow, ...prev]);
       // Notify admin and unit head
-      (supabase.from('notifications') as any).insert({
+      insertRows('notifications', {
         target_roles: ['admin', 'unit_head'],
         title: `Store req raised: ${form.item}`,
         body: `${form.plant} · Qty: ${form.qty} ${form.unit} · ${form.priority}`,
@@ -92,7 +115,19 @@ export function StoreRequisitions() {
         actor_name: form.plant,
         actor_role: 'warehouse_manager',
         read_by: [],
-      }).then(() => {}).catch(() => {});
+      }).then(() => {}, () => {});
+      await notifyMentions(form.notes, {
+        entityType: 'store_requisition', entityId: (data as ReqRow).id,
+        entityLabel: `Store req · ${form.item}`, route: '/dashboard/purchase/storereq',
+      });
+    }
+    const hits = await screenBlacklist(
+      [{ value: form.item, label: 'Item' }, { value: form.notes, label: 'Notes' }],
+      { workflow: 'Store Requisition', source: 'entry', entityLabel: `Store req · ${form.item}` },
+    );
+    if (hits.length) {
+      const h = hits[0];
+      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
     }
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' }); }, 1600);
@@ -141,6 +176,12 @@ export function StoreRequisitions() {
             + Raise request
           </button>
         </div>
+        {loadError ? (
+          <ErrorState title="Couldn't load requisitions" message="The store requisition records failed to load."
+            onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
+        ) : loading ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -173,6 +214,7 @@ export function StoreRequisitions() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* Slide panel */}

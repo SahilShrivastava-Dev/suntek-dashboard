@@ -7,8 +7,18 @@ const QC_BADGE: Record<string, { bg: string; color: string }> = {
   awaiting: { bg: '#F1F5F9', color: '#475569' },
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function formatBatch(b: any) {
+/** Shape consumed by formatBatch — an active_batches row with its joined relations. */
+interface BatchSource {
+  id: string;
+  batch_no?: string;
+  recipe?: string | null;
+  target_qty?: number | null;
+  plants?: { name?: string | null } | null;
+  profiles?: { name?: string | null } | null;
+  batch_readings?: { id: string }[] | null;
+}
+
+function formatBatch(b: BatchSource) {
   const readingsCount = b.batch_readings ? b.batch_readings.length : 0;
   // Dynamic calculation based on actual logged readings
   const computedCurrent = readingsCount * 10;
@@ -29,9 +39,10 @@ function formatBatch(b: any) {
   };
 }
 
+type BatchDisplay = ReturnType<typeof formatBatch>;
+
 export function BatchSheet() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [liveBatches, setLiveBatches] = useState<any[]>([]);
+  const [liveBatches, setLiveBatches] = useState<BatchDisplay[]>([]);
   const [updateFlash, setUpdateFlash] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,7 +50,8 @@ export function BatchSheet() {
       const { data } = await supabase
         .from('active_batches')
         .select('*, profiles(name), plants(name), batch_readings(id)')
-        .eq('status', 'active') as any;
+        .eq('status', 'active')
+        .returns<BatchSource[]>();
       if (data) {
         setLiveBatches(data.map(formatBatch));
       }
@@ -69,12 +81,14 @@ export function BatchSheet() {
     // Subscribe to new active batch creation in real-time
     const batchesSub = supabase.channel('active_batches_dashboard_changes')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'active_batches' }, async (payload) => {
-        const { data } = await supabase
+        const { data: rows } = await supabase
           .from('active_batches')
           .select('*, profiles(name), plants(name), batch_readings(id)')
           .eq('id', payload.new.id)
-          .single() as any;
-        
+          .limit(1)
+          .returns<BatchSource[]>();
+        const data = rows?.[0];
+
         if (data) {
           const formatted = formatBatch(data);
           setLiveBatches(prev => {
@@ -84,7 +98,7 @@ export function BatchSheet() {
           setUpdateFlash(formatted.id);
           setTimeout(() => setUpdateFlash(null), 3000);
         } else {
-          const formatted = formatBatch(payload.new);
+          const formatted = formatBatch(payload.new as BatchSource);
           setLiveBatches(prev => {
             if (prev.some(b => b.id === formatted.id)) return prev;
             return [formatted, ...prev];

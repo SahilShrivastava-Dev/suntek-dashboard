@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { insertRows, updateRows } from '../lib/db';
 import { useRoleContext } from './RoleContext';
 
 export interface AppNotification {
@@ -7,12 +8,13 @@ export interface AppNotification {
   target_roles: string[];
   title: string;
   body: string | null;
-  type: 'info' | 'warning' | 'urgent';
+  type: 'info' | 'warning' | 'urgent' | 'critical';
   route: string | null;
   actor_name: string | null;
   actor_role: string | null;
   created_at: string;
   read_by: string[];
+  cleared_by?: string[];
 }
 
 interface NotificationsContextValue {
@@ -20,6 +22,8 @@ interface NotificationsContextValue {
   unreadCount: number;
   markRead: (id: string) => void;
   markAllRead: () => void;
+  /** Remove every notification from THIS profile's view (read or unread). */
+  clearAll: () => void;
   addNotification: (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => Promise<void>;
   tableReady: boolean;
 }
@@ -29,12 +33,30 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   unreadCount: 0,
   markRead: () => {},
   markAllRead: () => {},
+  clearAll: () => {},
   addNotification: async () => {},
   tableReady: false,
 });
 
 export function useNotifications() {
   return useContext(NotificationsContext);
+}
+
+// ── Per-profile "cleared" pointer (localStorage) ──────────────────────────────
+// "Clear all" must persist across reloads WITHOUT deleting the DB row (the
+// record of who-was-notified stays intact). We keep a per-profile set of
+// cleared notification ids locally and filter them out on load.
+const clearedKey = (roleId: string) => `suntek.clearedNotifs.${roleId}`;
+function getClearedSet(roleId: string): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(clearedKey(roleId)) || '[]')); }
+  catch { return new Set(); }
+}
+function addCleared(roleId: string, ids: string[]) {
+  try {
+    const set = getClearedSet(roleId);
+    ids.forEach((id) => set.add(id));
+    localStorage.setItem(clearedKey(roleId), JSON.stringify([...set].slice(-2000)));
+  } catch { /* storage unavailable — clear is session-only */ }
 }
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
@@ -47,12 +69,13 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   // Load notifications for the current role from Supabase
   const loadNotifications = useCallback(async () => {
     try {
-      const { data, error } = await (supabase
+      const { data, error } = await supabase
         .from('notifications')
         .select('*')
         .contains('target_roles', [roleId])
         .order('created_at', { ascending: false })
-        .limit(50) as any);
+        .limit(50)
+        .returns<AppNotification[]>();
       if (error) {
         // Table doesn't exist yet — degrade gracefully
         if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('notifications')) {
@@ -61,7 +84,9 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         }
       }
       setTableReady(true);
-      setNotifications(data || []);
+      // Hide notifications this profile has cleared (local pointer + DB marker).
+      const cleared = getClearedSet(roleId);
+      setNotifications((data || []).filter((n) => !cleared.has(n.id) && !n.cleared_by?.includes(roleId)));
     } catch {
       setTableReady(false);
     }
@@ -80,9 +105,9 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         event: 'INSERT',
         schema: 'public',
         table: 'notifications',
-      }, (payload: any) => {
+      }, (payload) => {
         const n = payload.new as AppNotification;
-        if (n.target_roles?.includes(roleId)) {
+        if (n.target_roles?.includes(roleId) && !getClearedSet(roleId).has(n.id)) {
           setNotifications(prev => [n, ...prev]);
         }
       })
@@ -100,16 +125,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       )
     );
     // Persist read state to DB (non-blocking) — optimistic local state is primary
-    (supabase.from('notifications') as any)
-      .select('read_by').eq('id', id).single()
-      .then(({ data }: any) => {
-        if (data && !data.read_by?.includes(roleId)) {
-          (supabase.from('notifications') as any)
-            .update({ read_by: [...(data.read_by || []), roleId] })
+    supabase.from('notifications')
+      .select('read_by').eq('id', id).limit(1).returns<{ read_by: string[] | null }[]>()
+      .then(({ data }) => {
+        const row = data?.[0];
+        if (row && !row.read_by?.includes(roleId)) {
+          updateRows('notifications', { read_by: [...(row.read_by || []), roleId] })
             .eq('id', id)
-            .then(() => {}).catch(() => {});
+            .then(() => {}, () => {});
         }
-      }).catch(() => {});
+      }, () => {});
   }
 
   function markAllRead() {
@@ -119,16 +144,30 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     // Optimistic — don't wait for DB
   }
 
+  function clearAll() {
+    const current = notifications;
+    // Persistent per-profile pointer (survives reload, no DB delete needed).
+    addCleared(roleId, current.map((n) => n.id));
+    setNotifications([]); // optimistic — instant for this profile
+    // Also write the DB marker when the column exists (best-effort, cross-device).
+    current.forEach((n) => {
+      if (n.cleared_by?.includes(roleId)) return;
+      updateRows('notifications', { cleared_by: [...(n.cleared_by || []), roleId] })
+        .eq('id', n.id)
+        .then(() => {}, () => {});
+    });
+  }
+
   async function addNotification(n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) {
     if (!tableReady) return;
-    await (supabase.from('notifications') as any).insert({
+    await insertRows('notifications', {
       ...n,
       read_by: [],
-    }).then(() => {}).catch(() => {});
+    }).then(() => {}, () => {});
   }
 
   return (
-    <NotificationsContext.Provider value={{ notifications, unreadCount, markRead, markAllRead, addNotification, tableReady }}>
+    <NotificationsContext.Provider value={{ notifications, unreadCount, markRead, markAllRead, clearAll, addNotification, tableReady }}>
       {children}
     </NotificationsContext.Provider>
   );

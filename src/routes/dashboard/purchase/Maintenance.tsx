@@ -143,6 +143,25 @@ export function Maintenance() {
   async function notifyTicketWatchers(t: TicketRow, title: string, body: string, type: AppNotification['type'] = 'info') {
     await notifyWatchers({ ref: ticketRef(t), actor: actorObj(), title, body, type, addNotification: addNote });
   }
+
+  // ── Store register (inventory) helpers ──────────────────────────────────────
+  // Store key = the Jharkhand unit (if set) else the plant.
+  const storeKeyOf = (t: TicketRow) => t.unit ? (UNIT_LABELS[t.unit as Unit] || t.unit) : (t.plants?.name || 'Store');
+  async function setInventory(store: string, part: string, qty: number) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from('store_inventory') as any)
+      .upsert({ store, part_name: part, quantity: qty, updated_at: new Date().toISOString() }, { onConflict: 'store,part_name' })
+      .then(() => {}, () => {});
+  }
+  async function subtractInventory(store: string, part: string, qty: number) {
+    const { data } = await supabase.from('store_inventory').select('id, quantity')
+      .eq('store', store).eq('part_name', part).limit(1).returns<{ id: string; quantity: number }[]>();
+    const row = data?.[0];
+    if (!row) return;
+    const next = Math.max(0, Number(row.quantity) - qty);
+    await updateRows('store_inventory', { quantity: next, updated_at: new Date().toISOString() }).eq('id', row.id).then(() => {}, () => {});
+  }
+
   const isTechnician = role === 'technician_shd';
   const isAdmin = role === 'admin';
   const isUnitHead = role === 'unit_head';
@@ -189,6 +208,7 @@ export function Maintenance() {
   // Other action state
   const [busyRef, setBusyRef] = useState('');
   const [unitPrice, setUnitPrice] = useState(''); // procurement unit price (₹) → feeds FAR cost
+  const [supplierName, setSupplierName] = useState(''); // external vendor → recorded as a Purchase Order
   const [defectiveDecision, setDefectiveDecision] = useState<'repair' | 'scrap' | ''>('');
 
   // Upload
@@ -721,6 +741,11 @@ export function Maintenance() {
       type: available ? 'info' : 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
+    // Record the current stock for this part in the store register.
+    if (available) {
+      const qty = parseFloat(storeDecisionForm.qtyInStore) || 0;
+      await setInventory(storeKeyOf(selectedTicket), selectedStoreReq.part_name, qty);
+    }
     setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' });
     await loadData();
   }
@@ -771,23 +796,33 @@ export function Maintenance() {
 
   async function markPurchased() {
     if (!selectedTicket || !selectedStoreReq || !busyRef.trim()) return;
-    const qty = selectedStoreReq.quantity || 1;
-    const up = unitPrice.trim() ? parseFloat(unitPrice.replace(/[^0-9.]/g, '')) : null;
-    const total = up != null ? up * qty : null;
-    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, unit_price: up, total_price: total })
+    // Unit head procures: records the BUSY ref + supplier. Price is entered by
+    // the Purchase Manager (from the actual bill) at the next stage.
+    const supplier = supplierName.trim();
+    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null })
       .eq('id', selectedStoreReq.id);
-    setSelectedStoreReq((sr) => sr ? { ...sr, busy_transaction_ref: busyRef, unit_price: up, total_price: total } : sr);
-    // Procured by unit head → hand to the Purchase Manager (bill + dispatch).
+    setSelectedStoreReq((sr) => sr ? { ...sr, busy_transaction_ref: busyRef, supplier_name: supplier || null } : sr);
     await updateTicketStatus(selectedTicket.id, 'pending_purchase_manager');
     setSelectedTicket((t) => t ? { ...t, status: 'pending_purchase_manager' } : t);
     notify({
       target_roles: ['purchase_manager', 'admin'],
-      title: `Procured — upload bill: ${selectedStoreReq.part_name}`,
-      body: `BUSY ref: ${busyRef}${total != null ? ` · ₹${total.toLocaleString('en-IN')}` : ''} — Purchase Manager to upload the supplier bill and mark the part en route to store.`,
+      title: `Procured — Purchase Manager to bill: ${selectedStoreReq.part_name}`,
+      body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to enter the price, upload the bill, and mark en route.`,
       type: 'info', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
-    setBusyRef(''); setUnitPrice(''); await loadData();
+    // Screen the chosen supplier against the blacklist (vendor risk).
+    if (supplier) {
+      const hits = await screenBlacklist(
+        [{ value: supplier, label: 'Supplier' }],
+        { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment },
+      );
+      if (hits.length) {
+        const h = hits[0];
+        toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      }
+    }
+    setBusyRef(''); setSupplierName(''); await loadData();
   }
 
   // Purchase Manager: upload the supplier bill photo + mark the part en route.
@@ -806,6 +841,20 @@ export function Maintenance() {
       await updateRows('maintenance_store_requests', { handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total })
         .eq('id', selectedStoreReq.id);
       setSelectedStoreReq((sr) => sr ? { ...sr, handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total } : sr);
+
+      // Externally-bought part → record it as a Purchase Order (supplier from the
+      // unit head, price from the bill the PM just entered) so it shows on the PO page.
+      await insertRows('oil_contracts', {
+        oil_type: `${selectedStoreReq.part_name} (maintenance part)`,
+        company: selectedStoreReq.supplier_name || `Maintenance · ${selectedTicket.equipment}`,
+        paraffin_type: 'Maintenance part',
+        port: selectedTicket.plants?.name || null,
+        date: new Date().toISOString().split('T')[0],
+        book_qty_mt: qty,
+        price: total,
+        status: 'pending',
+      }).then(() => {}, () => {});
+
       await updateTicketStatus(selectedTicket.id, 'pending_handover');
       setSelectedTicket((t) => t ? { ...t, status: 'pending_handover' } : t);
       notify({
@@ -852,6 +901,11 @@ export function Maintenance() {
           bill_verified: true,
         })
         .eq('id', selectedStoreReq.id);
+      // If the part came FROM store (in-store path), subtract the supplied qty
+      // from the store register. (External buys aren't in the register.)
+      if (selectedStoreReq.store_decision === 'available') {
+        await subtractInventory(storeKeyOf(selectedTicket), selectedStoreReq.part_name, selectedStoreReq.quantity || 1);
+      }
       await updateTicketStatus(selectedTicket.id, 'pending_defective_return');
       setSelectedTicket((t) => t ? { ...t, status: 'pending_defective_return' } : t);
       notify({
@@ -963,10 +1017,10 @@ export function Maintenance() {
         if (sr) body = <>{line('Unit head decision', sr.unit_head_approval)}{line('Part availability', sr.store_decision)}</>;
         break;
       case 'pending_purchase':
-        if (sr) body = <>{line('BUSY transaction ref', sr.busy_transaction_ref)}{line('Unit price', sr.unit_price != null ? `₹ ${Number(sr.unit_price).toLocaleString('en-IN')}` : null)}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement by unit head.</div></>;
+        if (sr) body = <>{line('BUSY transaction ref', sr.busy_transaction_ref)}{line('Supplier', sr.supplier_name)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement by unit head (price entered by Purchase Manager).</div></>;
         break;
       case 'pending_purchase_manager':
-        if (sr) body = <>{line('Bill uploaded', sr.bill_verified ? 'Yes' : '—')}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}{photo(sr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
+        if (sr) body = <>{line('Supplier', sr.supplier_name)}{line('Unit price', sr.unit_price != null ? `₹ ${Number(sr.unit_price).toLocaleString('en-IN')}` : null)}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}{line('Bill uploaded', sr.bill_verified ? 'Yes' : '—')}{photo(sr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
         break;
       case 'pending_handover':
         if (sr) body = <>{line('Receipt confirmed', sr.handover_confirmed_at ? formatDate(sr.handover_confirmed_at) : '—')}{line('Notes', sr.handover_notes)}{photo(sr.handover_invoice_url, 'Bill / invoice')}{photo(sr.handover_photo_url, 'Part received photo')}</>;
@@ -1203,14 +1257,10 @@ export function Maintenance() {
               <PanelField label="BUSY transaction reference *">
                 <PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" />
               </PanelField>
-              <PanelRow>
-                <PanelField label="Unit price (₹)">
-                  <PanelInput type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder="e.g. 4500" />
-                </PanelField>
-                <PanelField label={`Total (× ${selectedStoreReq?.quantity || 1})`}>
-                  <PanelInput value={unitPrice.trim() ? `₹ ${((parseFloat(unitPrice.replace(/[^0-9.]/g, '')) || 0) * (selectedStoreReq?.quantity || 1)).toLocaleString('en-IN')}` : '—'} disabled />
-                </PanelField>
-              </PanelRow>
+              <PanelField label="Supplier / vendor (bought from)">
+                <PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals · recorded as a PO" />
+              </PanelField>
+              <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>The Purchase Manager enters the price from the supplier bill at the next step.</div>
               <button onClick={markPurchased} disabled={!busyRef.trim()} style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#7C3AED', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: !busyRef.trim() ? 0.5 : 1 }}>
                 Mark as purchased — send to Purchase Manager
               </button>
@@ -1663,7 +1713,7 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
       >

@@ -10,6 +10,13 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import type { Database } from '../../../lib/database.types';
 
 type ReqRow = Database['public']['Tables']['store_requisitions']['Row'] & { plants?: { name: string | null } | null };
+type InvRow = Database['public']['Tables']['store_inventory']['Row'];
+
+function invStatus(r: InvRow): { label: string; bg: string; color: string } {
+  if (Number(r.quantity) <= 0) return { label: 'Out of stock', bg: '#FEE2E2', color: '#DC2626' };
+  if (Number(r.quantity) <= Number(r.low_threshold ?? 2)) return { label: 'Low', bg: '#FEF3C7', color: '#D97706' };
+  return { label: 'In stock', bg: '#DCFCE7', color: '#16A34A' };
+}
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -58,6 +65,9 @@ export function StoreRequisitions() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
+  // Store register (maintenance spare-parts inventory)
+  const [inventory, setInventory] = useState<InvRow[]>([]);
+  const [storeFilter, setStoreFilter] = useState<string[]>([]); // empty = all stores
 
   async function load() {
     try {
@@ -72,6 +82,10 @@ export function StoreRequisitions() {
         .returns<ReqRow[]>();
       if (error) throw error;
       setItems(data || []);
+
+      const { data: inv } = await supabase.from('store_inventory').select('*')
+        .order('store', { ascending: true }).order('part_name', { ascending: true }).returns<InvRow[]>();
+      setInventory(inv || []);
       setLoadError(false);
     } catch (err) {
       console.error('[StoreRequisitions] load failed', err);
@@ -84,6 +98,11 @@ export function StoreRequisitions() {
   useEffect(() => { load(); }, []);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : FALLBACK_PLANTS;
+
+  // ── Store register (inventory) derived ────────────────────────────────────
+  const stores = [...new Set(inventory.map(r => r.store))].sort();
+  const shownInv = storeFilter.length ? inventory.filter(r => storeFilter.includes(r.store)) : inventory;
+  function toggleStore(s: string) { setStoreFilter(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]); }
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -161,6 +180,53 @@ export function StoreRequisitions() {
             <div className="text-[11px] text-slate-500">4 · Otherwise</div>
             <div className="font-semibold text-sm mt-1">Vijay Ji approves purchase</div>
           </div>
+        </div>
+      </div>
+
+      {/* ── Store register (maintenance spare-parts inventory) ──────────────── */}
+      <div className="card p-6 mb-5">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+          <div>
+            <div className="text-base font-bold">Store register · spare parts</div>
+            <div className="text-xs text-slate-500">Live stock per store — fed by the maintenance flow · quantity drops when a part is issued</div>
+          </div>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#16A34A', display: 'inline-block' }} /> In stock</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} /> Low</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#DC2626', display: 'inline-block' }} /> Out</span>
+          </div>
+        </div>
+
+        {/* Store filter — single / multi / all */}
+        {stores.length > 0 && (
+          <div className="flex gap-2 mb-4 flex-wrap">
+            <button onClick={() => setStoreFilter([])} className={`chip${storeFilter.length === 0 ? ' active' : ''}`}>All stores</button>
+            {stores.map(s => (
+              <button key={s} onClick={() => toggleStore(s)} className={`chip${storeFilter.includes(s) ? ' active' : ''}`}>{s}</button>
+            ))}
+          </div>
+        )}
+
+        <div className="overflow-x-auto scroll-x">
+          <table className="dt">
+            <thead><tr><th>Part</th><th>Store</th><th className="num">Quantity</th><th>Status</th></tr></thead>
+            <tbody>
+              {shownInv.length === 0 && (
+                <tr><td colSpan={4} className="text-center text-slate-400 py-6 text-sm">No parts in the register yet — it fills as store managers report stock in the maintenance flow.</td></tr>
+              )}
+              {shownInv.map(r => {
+                const st = invStatus(r);
+                return (
+                  <tr key={r.id}>
+                    <td className="font-semibold text-slate-700">{r.part_name}</td>
+                    <td className="text-slate-500 text-xs">{r.store}</td>
+                    <td className="num font-bold" style={{ color: st.color }}>{Number(r.quantity)}</td>
+                    <td><span className="badge" style={{ background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 

@@ -550,6 +550,7 @@ export interface Database {
           busy_transaction_ref: string | null;
           unit_price: number | null;
           total_price: number | null;
+          supplier_name: string | null;
           handover_invoice_url: string | null;
           handover_photo_url: string | null;
           handover_notes: string | null;
@@ -681,6 +682,23 @@ export interface Database {
           mentions?: string[];
         };
         Update: Partial<Database['public']['Tables']['entity_notes']['Insert']>;
+      };
+
+      // ── Store inventory (maintenance spare-parts register) ────────────────
+      store_inventory: {
+        Row: {
+          id: string;
+          store: string;
+          part_name: string;
+          quantity: number;
+          low_threshold: number;
+          updated_at: string;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_inventory']['Row'], 'id' | 'created_at' | 'updated_at'>> & {
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['store_inventory']['Insert']>;
       };
 
       // ── Blacklist audit trail ─────────────────────────────────────────────

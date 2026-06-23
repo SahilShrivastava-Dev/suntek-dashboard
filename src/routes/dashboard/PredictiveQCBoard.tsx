@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts';
 import { SkeletonRows, ErrorState, EmptyState } from '../../components/ui/states';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
+import { NotesButton } from '../../components/mentions';
 import type { Database } from '../../lib/database.types';
 
 type BatchRow = Database['public']['Tables']['active_batches']['Row'] & { plants?: { name: string | null } | null };
@@ -126,7 +127,15 @@ export function PredictiveQCBoard() {
                     <div className="text-base font-bold">Batch {p.batch.batch_no}</div>
                     <div className="text-xs text-slate-500">{p.batch.plants?.name || '—'} · grade {p.grade} · {p.live.length} readings</div>
                   </div>
-                  <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{cfg.label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{cfg.label}</span>
+                    <NotesButton
+                      entityType="active_batch"
+                      entityId={p.batch.id}
+                      entityLabel={`Batch ${p.batch.batch_no}${p.batch.plants?.name ? ' · ' + p.batch.plants.name : ''}`}
+                      route="/dashboard/predictive-qc"
+                    />
+                  </div>
                 </div>
                 <div style={{ height: 160 }}>
                   <ResponsiveContainer width="100%" height="100%">

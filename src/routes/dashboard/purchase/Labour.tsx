@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelTextarea, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { useMentionNotifier } from '../../../lib/mentions';
 import type { Database } from '../../../lib/database.types';
 
 type LabourRow = Database['public']['Tables']['labour_costs']['Row'] & { plants?: { name: string | null } | null };
@@ -13,6 +14,7 @@ export function Labour() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [form, setForm] = useState({ baseRate: '1487', targetRate: '1450', overhead: '12', transport: '85', reason: '' });
+  const notifyMentions = useMentionNotifier();
 
   async function load() {
     try {
@@ -36,7 +38,8 @@ export function Labour() {
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
-  function handleSave() {
+  async function handleSave() {
+    await notifyMentions(form.reason, { entityLabel: 'Labour rate update', route: '/dashboard/purchase/labour' });
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); }, 1600);
   }

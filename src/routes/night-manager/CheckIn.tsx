@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { MentionTextarea } from '../../components/mentions';
 import { validateGeofence } from '../../lib/algorithms/geofencing';
 import { uploadCheckinPhoto } from '../../lib/cloudinary';
 import { insertRows } from '../../lib/db';
+import { useMentionNotifier } from '../../lib/mentions';
 
 // ── Plant config ── Replace with real coordinates before production ──────────
 const PLANT_LAT      = 24.1856;
@@ -51,6 +53,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
 
   // Form
   const [note,        setNote]        = useState('');
+  const notifyMentions = useMentionNotifier();
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -245,6 +248,9 @@ export function CheckIn({ embedded = false }: CheckInProps) {
       actor_name: PLANT_NAME,
       actor_role: 'night_manager',
     }).then(() => {}, () => {}); // non-blocking
+
+    // Tag anyone @-mentioned in the shift note.
+    notifyMentions(note, { entityLabel: `Night check-in · ${PLANT_NAME}`, route: '/dashboard/night-manager' });
 
     setSubmitState('done');
   }
@@ -598,11 +604,11 @@ export function CheckIn({ embedded = false }: CheckInProps) {
           <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wide">
             Note (optional)
           </label>
-          <textarea
+          <MentionTextarea
             value={note}
-            onChange={e => setNote(e.target.value)}
+            onChange={setNote}
             rows={2}
-            placeholder="Any observations for this shift…"
+            placeholder="Any observations for this shift… type @ to tag"
             className="w-full p-3 text-sm border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
           />
         </div>

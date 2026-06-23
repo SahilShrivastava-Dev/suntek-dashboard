@@ -5,6 +5,9 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRo
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { useDirectory, extractMentionIds, truncate } from '../../../lib/mentions';
+import { useRoleContext } from '../../../contexts/RoleContext';
+import { useNotifications } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
 
 type ActivityRow = Database['public']['Tables']['activity_logs']['Row'] & { plants?: { name: string | null } | null };
@@ -24,6 +27,9 @@ const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 
 export function ActivityLog() {
   const toast = useToast();
+  const people = useDirectory();
+  const { activeProfile } = useRoleContext();
+  const { addNotification } = useNotifications();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [logs, setLogs] = useState<ActivityRow[]>([]);
@@ -78,6 +84,21 @@ export function ActivityLog() {
       return;
     }
     if (data) setLogs(prev => [data as ActivityRow, ...prev]);
+
+    // Notify anyone @-tagged in the notes (Teams-style heads-up).
+    const mentionIds = extractMentionIds(form.notes, people).filter(id => id !== activeProfile.id);
+    if (mentionIds.length) {
+      await addNotification({
+        target_roles: mentionIds,
+        title: `${activeProfile.name} tagged you in an activity log`,
+        body: `${form.equipment}: “${truncate(form.notes)}”`,
+        type: 'info',
+        route: '/dashboard/purchase/activity',
+        actor_name: activeProfile.name,
+        actor_role: activeProfile.roleLabel,
+      });
+    }
+
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' }); }, 1600);
   }

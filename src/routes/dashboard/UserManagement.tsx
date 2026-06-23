@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
+import { useMentionNotifier } from '../../lib/mentions';
 import { MOCK_PROFILES } from '../../lib/profiles';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
@@ -84,6 +85,7 @@ const SYSTEM_USERS: DisplayUser[] = MOCK_PROFILES.map(p => ({
 
 export function UserManagement() {
   const toast = useToast();
+  const notifyMentions = useMentionNotifier();
   const [users, setUsers] = useState<DisplayUser[]>([]);
   const [plants, setPlants] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,6 +188,10 @@ export function UserManagement() {
       const { error } = await insertRows('user_accounts', payload);
       if (error) { toast.error(`Save failed: ${error.message}`); return; }
     }
+    await notifyMentions(form.access_note, {
+      entityType: 'user_account', entityId: editingUser?.id,
+      entityLabel: `User · ${form.name.trim()}`, route: '/dashboard/users',
+    });
     setSaved(true);
     await loadData();
     setTimeout(() => {

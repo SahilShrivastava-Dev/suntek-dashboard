@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { MentionTextarea } from './mentions/MentionTextarea';
 
 // ── Slide-in drawer ───────────────────────────────────────────────────────────
 
@@ -118,7 +119,25 @@ export function PanelSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>
   return <select {...props} style={selectStyle} />;
 }
 export function PanelTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} style={textareaStyle} />;
+  const { value, onChange, style, placeholder, rows } = props;
+  // Upgrade controlled string textareas to @-mention aware (Teams-style
+  // tagging) — so every panel form gets the same tagging behaviour for free.
+  // The synthetic event keeps each form's existing `e.target.value` handler
+  // working unchanged.
+  if (typeof value === 'string' && onChange) {
+    return (
+      <MentionTextarea
+        value={value}
+        onChange={(v) =>
+          onChange({ target: { value: v }, currentTarget: { value: v } } as unknown as React.ChangeEvent<HTMLTextAreaElement>)
+        }
+        placeholder={typeof placeholder === 'string' ? placeholder : undefined}
+        rows={typeof rows === 'number' ? rows : undefined}
+        style={{ ...textareaStyle, ...(style as React.CSSProperties | undefined) }}
+      />
+    );
+  }
+  return <textarea {...props} style={{ ...textareaStyle, ...(style as React.CSSProperties | undefined) }} />;
 }
 
 export function PanelRow({ children, cols = 2 }: { children: React.ReactNode; cols?: number }) {

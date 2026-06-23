@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
+import { useMentionNotifier } from '../../../lib/mentions';
 import { exportToXlsx } from '../../../lib/utils/exportXlsx';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelSection, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
@@ -34,6 +35,7 @@ const UNITS  = ['nos', 'kg', 'MT', 'L', 'sets', 'boxes'];
 
 export function PurchaseOrders() {
   const toast = useToast();
+  const notifyMentions = useMentionNotifier();
   const [filter, setFilter] = useState('all');
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -78,6 +80,10 @@ export function PurchaseOrders() {
 
     if (error) { toast.error(`Save failed: ${error.message}`); return; }
     if (data) setOrders(prev => [data as OrderRow, ...prev]);
+    await notifyMentions(form.notes, {
+      entityType: 'oil_contract', entityId: (data as OrderRow | undefined)?.id,
+      entityLabel: `PO · ${form.material || form.supplier}`, route: '/dashboard/purchase/purchase',
+    });
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ material: '', type: 'PO', supplier: '', destination: 'SHD', qty: '', unit: 'nos', value: '', notes: '' }); }, 1600);
   }

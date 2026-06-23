@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { insertRows, updateRows } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
@@ -6,14 +7,72 @@ import { MOCK_PROFILES } from '../../../lib/profiles';
 import { useBlacklist } from '../../../contexts/BlacklistContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
+import { MentionText, NotesButton } from '../../../components/mentions';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { useDirectory, useMentionNotifier, extractMentionIds, addWatchers, notifyWatchers, truncate } from '../../../lib/mentions';
+import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
+import type { AppNotification } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
 import {
-  FREQ_OPTIONS, FREQ_LABEL, STATUS_CFG, EMERGENCY_STAGES, STAGE_LABELS,
+  FREQ_OPTIONS, FREQ_LABEL, STATUS_CFG, STAGE_LABELS,
   statusBadge, formatDate, daysFromNow, dueDateLabel, calculateNextDue,
   PhotoUploader, StageStrip,
 } from './maintenance/shared';
+
+type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
+
+// Full date+time for report cells (locale, IST).
+function fmtDT(d: string | null | undefined): string {
+  return d ? new Date(d).toLocaleString('en-IN') : '';
+}
+// Map a stored role id (e.g. 'technician_shd') to its human label.
+function roleLabelFor(roleId: string | null | undefined): string {
+  if (!roleId) return '';
+  return MOCK_PROFILES.find((p) => p.id === roleId)?.roleLabel || roleId;
+}
+
+// CSV layout for the maintenance report — the full life of each ticket.
+const REPORT_COLUMNS: CsvColumn[] = [
+  { header: 'Maintenance ID', key: 'id' },
+  { header: 'Ref #', key: 'shortId' },
+  { header: 'Type', key: 'type' },
+  { header: 'Equipment', key: 'equipment' },
+  { header: 'Plant', key: 'plant' },
+  { header: 'Issue / description', key: 'issue' },
+  { header: 'Current status', key: 'status' },
+  { header: 'Stage reached', key: 'stage' },
+  { header: 'Raised by', key: 'raised_by' },
+  { header: 'Raised by role', key: 'raised_role' },
+  { header: 'Assigned to', key: 'assigned_to' },
+  { header: 'Created at', key: 'created' },
+  { header: 'Closed at', key: 'closed' },
+  { header: 'Days open', key: 'days' },
+  { header: 'How resolved', key: 'how' },
+  { header: 'Defective part decision', key: 'defective' },
+  { header: 'Part requested', key: 'part' },
+  { header: 'Qty requested', key: 'qty' },
+  { header: 'Specification', key: 'spec' },
+  { header: 'Store decision', key: 'store_decision' },
+  { header: 'Qty in store', key: 'qty_in_store' },
+  { header: 'Shelf location', key: 'shelf' },
+  { header: 'Part condition', key: 'condition' },
+  { header: 'Unit head approval', key: 'approval' },
+  { header: 'BUSY ref', key: 'busy' },
+  { header: 'Handover at', key: 'handover' },
+  { header: 'Handover notes', key: 'handover_notes' },
+  { header: 'Tagged / watchers', key: 'tagged' },
+  { header: 'Notes count', key: 'notes_count' },
+];
+const NOTE_COLUMNS: CsvColumn[] = [
+  { header: 'Maintenance ID', key: 'id' },
+  { header: 'Ref #', key: 'shortId' },
+  { header: 'Equipment', key: 'equipment' },
+  { header: 'Note / activity', key: 'note' },
+  { header: 'Author', key: 'author' },
+  { header: 'Tagged', key: 'tagged' },
+  { header: 'At', key: 'at' },
+];
 
 // ── Row types (base table rows + the joined plants(name) relation) ─────────────
 type Tables = Database['public']['Tables'];
@@ -49,7 +108,25 @@ export function Maintenance() {
   const { activeProfile } = useRoleContext();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const toast = useToast();
+  const people = useDirectory();
+  const notifyMentions = useMentionNotifier();
   const role = activeProfile.id;
+
+  // ── @-mention / watcher plumbing for tickets ────────────────────────────────
+  const ticketRef = (t: TicketRow) => ({
+    entityType: 'maintenance_ticket', entityId: t.id,
+    entityLabel: t.equipment || t.title || 'Maintenance ticket',
+    route: `/dashboard/purchase/maint?ticket=${t.id}`,
+  });
+  const actorObj = () => ({ id: activeProfile.id, name: activeProfile.name, role: activeProfile.roleLabel });
+  // Insert directly (mirrors the module's role-based notify) so it doesn't depend on context tableReady.
+  const addNote = async (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => {
+    await insertRows('notifications', { ...n, read_by: [] }).then(() => {}, () => {});
+  };
+  // Ping everyone tagged / CC'd on a ticket that its workflow moved.
+  async function notifyTicketWatchers(t: TicketRow, title: string, body: string, type: AppNotification['type'] = 'info') {
+    await notifyWatchers({ ref: ticketRef(t), actor: actorObj(), title, body, type, addNotification: addNote });
+  }
   const isTechnician = role === 'technician_shd';
   const isAdmin = role === 'admin';
   const isUnitHead = role === 'unit_head';
@@ -103,6 +180,16 @@ export function Maintenance() {
   // Save states
   const [raiseSaved, setRaiseSaved] = useState(false);
   const [scheduleSaved, setScheduleSaved] = useState(false);
+  const [raising, setRaising] = useState(false);          // double-submit guard
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  // Admin edit + report
+  const [editingTicket, setEditingTicket] = useState(false);
+  const [editForm, setEditForm] = useState({ equipment: '', description: '', plant: '', status: '' });
+  const [showReport, setShowReport] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [reportForm, setReportForm] = useState({ emergency: true, periodic: true, status: 'all', from: '', to: '', includeNotes: true });
 
   // ── Data loading ──────────────────────────────────────────────────────────
 
@@ -158,6 +245,20 @@ export function Maintenance() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Deep-link: a notification's "?ticket=<id>" opens that ticket directly.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const tid = searchParams.get('ticket');
+    if (!tid) return;
+    const t = tickets.find((x) => x.id === tid);
+    if (!t) return; // tickets may still be loading; this effect re-runs when they arrive
+    setSelectedTicket(t);
+    setTab(t.type === 'periodic' ? 'periodic' : 'emergency');
+    const next = new URLSearchParams(searchParams);
+    next.delete('ticket');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, tickets, setSearchParams]);
+
   useEffect(() => {
     if (!selectedTicket) { setSelectedStoreReq(null); return; }
     supabase.from('maintenance_store_requests').select('*').eq('ticket_id', selectedTicket.id).limit(1).returns<StoreReqRow[]>()
@@ -186,7 +287,9 @@ export function Maintenance() {
   // ── Actions ───────────────────────────────────────────────────────────────
 
   async function handleRaiseTicket() {
-    if (!raiseForm.equipment.trim()) return;
+    if (!raiseForm.equipment.trim() || raising) return;
+    setRaising(true);
+    try {
     const plant = dbPlants.find(p => p.name === raiseForm.plant);
     const { data: newTicket, error } = await insertRows('maintenance_tickets', {
       type: 'emergency', status: 'open',
@@ -206,6 +309,24 @@ export function Maintenance() {
       type: 'urgent', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
+
+    // Notify anyone @-tagged in the description and make them watchers of this
+    // ticket, so they also get pinged as it moves through the workflow.
+    if (newTicket) {
+      const mentionIds = extractMentionIds(raiseForm.description || '', people).filter(id => id !== activeProfile.id);
+      if (mentionIds.length) {
+        const tagged = people.filter(p => mentionIds.includes(p.id));
+        await addWatchers(ticketRef(newTicket), tagged.map(p => ({ id: p.id, name: p.name })), 'mention', activeProfile.id);
+        notify({
+          target_roles: mentionIds,
+          title: `${activeProfile.name} tagged you in a maintenance ticket`,
+          body: `${raiseForm.equipment}: “${truncate(raiseForm.description || '')}”`,
+          type: 'urgent', route: `/dashboard/purchase/maint?ticket=${newTicket.id}`,
+          actor_name: activeProfile.name, actor_role: role, read_by: [],
+        });
+      }
+    }
+
     setRaiseSaved(true);
     await loadData();
     setTimeout(() => {
@@ -215,6 +336,200 @@ export function Maintenance() {
         setSelectedTicket(newTicket); setShowStoreForm(true);
       }
     }, 1400);
+    } finally { setRaising(false); }
+  }
+
+  // ── Admin: edit / delete a ticket ───────────────────────────────────────────
+  function startEdit(t: TicketRow) {
+    setEditForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plants?.name || '', status: t.status });
+    setEditingTicket(true);
+  }
+
+  async function saveEdit() {
+    if (!selectedTicket) return;
+    const plant = dbPlants.find(p => p.name === editForm.plant);
+    await updateRows('maintenance_tickets', {
+      equipment: editForm.equipment,
+      description: editForm.description || null,
+      plant_id: plant?.id ?? selectedTicket.plant_id ?? null,
+      status: editForm.status as TicketStatus,
+    }).eq('id', selectedTicket.id);
+    setSelectedTicket((t) => t ? { ...t, equipment: editForm.equipment, description: editForm.description || null, status: editForm.status as TicketStatus, plants: plant ? { name: plant.name } : t.plants } : t);
+    await notifyMentions(editForm.description, {
+      entityType: 'maintenance_ticket', entityId: selectedTicket.id,
+      entityLabel: editForm.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
+    });
+    setEditingTicket(false);
+    toast.success('Ticket updated');
+    await loadData();
+  }
+
+  async function handleDeleteTicket(t: TicketRow) {
+    if (!isAdmin) return;
+    if (!window.confirm(`Delete ticket "${t.equipment || t.title}"? This permanently removes it and cannot be undone.`)) return;
+    // Remove dependent store-request rows first (FK: maintenance_store_requests.ticket_id).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().eq('ticket_id', t.id);
+    if (srErr) { toast.error(`Delete failed: ${srErr.message}`); return; }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from('maintenance_tickets') as any).delete().eq('id', t.id);
+    if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+    setTickets((prev) => prev.filter((x) => x.id !== t.id));
+    if (selectedTicket?.id === t.id) { setSelectedTicket(null); setEditingTicket(false); }
+    toast.success('Ticket deleted');
+  }
+
+  // Bulk-delete every emergency ticket currently shown (admin cleanup tool).
+  async function handleDeleteAllEmergency() {
+    if (!isAdmin) return;
+    const ids = emergencyTickets.map((t) => t.id);
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ALL ${ids.length} emergency tickets? This permanently removes every emergency ticket and cannot be undone.`)) return;
+    setDeletingAll(true);
+    try {
+      // Delete in chunks so a long id list doesn't blow the URL length limit.
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        // Remove dependent store-request rows first (FK: maintenance_store_requests.ticket_id).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().in('ticket_id', chunk);
+        if (srErr) { toast.error(`Delete failed: ${srErr.message}`); return; }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase.from('maintenance_tickets') as any).delete().in('id', chunk);
+        if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+      }
+      setTickets((prev) => prev.filter((t) => !ids.includes(t.id)));
+      setSelectedTicket(null); setEditingTicket(false);
+      toast.success(`Deleted ${ids.length} emergency tickets`);
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
+  // ── Admin: generate CSV maintenance report ──────────────────────────────────
+  function reportTickets(): TicketRow[] {
+    return tickets.filter((t) => {
+      if (t.type === 'emergency' && !reportForm.emergency) return false;
+      if (t.type === 'periodic' && !reportForm.periodic) return false;
+      if (t.type !== 'emergency' && t.type !== 'periodic') return false;
+      if (reportForm.status === 'open' && t.status === 'closed') return false;
+      if (reportForm.status === 'closed' && t.status !== 'closed') return false;
+      const created = (t.created_at || '').slice(0, 10);
+      if (reportForm.from && created < reportForm.from) return false;
+      if (reportForm.to && created > reportForm.to) return false;
+      return true;
+    });
+  }
+
+  async function generateReport() {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const rows = reportTickets();
+      if (!rows.length) { toast.error('No tickets match these filters'); return; }
+      const ids = rows.map((t) => t.id);
+
+      // Enrich each ticket with its full trail: store-request lifecycle,
+      // watchers (who's tagged/following), and the notes/@-mention thread.
+      const [srRes, wRes, nRes] = await Promise.all([
+        supabase.from('maintenance_store_requests').select('*').in('ticket_id', ids).returns<StoreReqRow[]>(),
+        supabase.from('entity_watchers').select('entity_id, profile_name, kind').eq('entity_type', 'maintenance_ticket').in('entity_id', ids).returns<{ entity_id: string; profile_name: string; kind: string }[]>(),
+        supabase.from('entity_notes').select('*').eq('entity_type', 'maintenance_ticket').in('entity_id', ids).order('created_at', { ascending: true }).returns<EntityNoteRow[]>(),
+      ]);
+
+      const srBy = new Map<string, StoreReqRow>();
+      (srRes.data ?? []).forEach((s) => { if (s.ticket_id && !srBy.has(s.ticket_id)) srBy.set(s.ticket_id, s); });
+
+      const watchersBy = new Map<string, Set<string>>();
+      (wRes.data ?? []).forEach((w) => {
+        if (!watchersBy.has(w.entity_id)) watchersBy.set(w.entity_id, new Set());
+        watchersBy.get(w.entity_id)!.add(w.profile_name);
+      });
+
+      const notes = nRes.data ?? [];
+      const notesBy = new Map<string, EntityNoteRow[]>();
+      notes.forEach((n) => {
+        if (!notesBy.has(n.entity_id)) notesBy.set(n.entity_id, []);
+        notesBy.get(n.entity_id)!.push(n);
+      });
+
+      const csvRows = rows.map((t) => {
+        const sr = srBy.get(t.id);
+        const created = t.created_at ? new Date(t.created_at).getTime() : null;
+        const closedT = t.closed_at ? new Date(t.closed_at).getTime() : null;
+        const days = created != null ? Math.max(0, Math.round(((closedT ?? Date.now()) - created) / 86400000)) : '';
+        const how = t.status === 'closed'
+          ? (t.defective_part_decision ? `Part replaced · old part ${t.defective_part_decision}` : sr ? 'Part from store' : 'Fixed in-house')
+          : (sr ? 'Awaiting part / approval' : 'In progress');
+        return {
+          id: t.id,
+          shortId: t.id.slice(0, 8),
+          type: t.type,
+          equipment: t.equipment || '',
+          plant: t.plants?.name || '',
+          issue: t.description || t.title || '',
+          status: STATUS_CFG[t.status]?.label || t.status,
+          stage: STAGE_LABELS[t.status] || '',
+          raised_by: t.raised_by || '',
+          raised_role: roleLabelFor(t.raised_role),
+          assigned_to: t.assigned_to || '',
+          created: fmtDT(t.created_at),
+          closed: fmtDT(t.closed_at),
+          days,
+          how,
+          defective: t.defective_part_decision || '',
+          part: sr?.part_name || '',
+          qty: sr?.quantity ?? '',
+          spec: sr?.specification || '',
+          store_decision: sr?.store_decision || '',
+          qty_in_store: sr?.qty_in_store ?? '',
+          shelf: sr?.shelf_location || '',
+          condition: sr?.part_condition || '',
+          approval: sr?.unit_head_approval || '',
+          busy: sr?.busy_transaction_ref || '',
+          handover: fmtDT(sr?.handover_confirmed_at),
+          handover_notes: sr?.handover_notes || '',
+          tagged: [...(watchersBy.get(t.id) ?? new Set<string>())].join('; '),
+          notes_count: (notesBy.get(t.id) ?? []).length,
+        };
+      });
+
+      // Report metadata header (who generated it, when, and the filters used).
+      const typeSel = [reportForm.emergency && 'Emergency', reportForm.periodic && 'Periodic'].filter(Boolean).join(' + ') || 'None';
+      const statusSel = reportForm.status === 'all' ? 'All statuses' : reportForm.status === 'open' ? 'Open / in progress' : 'Closed only';
+      const dateSel = (reportForm.from || reportForm.to) ? `${reportForm.from || '…'} → ${reportForm.to || '…'}` : 'All dates';
+      const preamble: (string | number)[][] = [
+        ['Suntek — Maintenance Report'],
+        ['Generated by', `${activeProfile.name} (${activeProfile.roleLabel})`],
+        ['Generated at', new Date().toLocaleString('en-IN')],
+        ['Scope', `${typeSel} · ${statusSel} · ${dateSel}`],
+        ['Total tickets', rows.length],
+      ];
+
+      exportToCsv(`maintenance-report-${today}`, REPORT_COLUMNS, csvRows, preamble);
+
+      // Optional second CSV: the notes / @-mention activity timeline.
+      if (reportForm.includeNotes && notes.length) {
+        const eqById = new Map(rows.map((t) => [t.id, t.equipment || '']));
+        const noteRows = notes.map((n) => ({
+          id: n.entity_id,
+          shortId: n.entity_id.slice(0, 8),
+          equipment: eqById.get(n.entity_id) || '',
+          note: n.body,
+          author: n.author_name,
+          tagged: people.filter((p) => (n.mentions || []).includes(p.id)).map((p) => p.name).join('; '),
+          at: fmtDT(n.created_at),
+        }));
+        exportToCsv(`maintenance-activity-${today}`, NOTE_COLUMNS, noteRows, preamble);
+      }
+
+      toast.success(`Report ready · ${csvRows.length} tickets exported`);
+      setShowReport(false);
+    } catch (err) {
+      toast.error(`Report failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function handleCompletePeriodicTicket() {
@@ -275,6 +590,10 @@ export function Maintenance() {
       type: 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
+    await notifyMentions(storeForm.specification, {
+      entityType: 'maintenance_ticket', entityId: selectedTicket.id,
+      entityLabel: selectedTicket.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
+    });
     setShowStoreForm(false);
     setStoreForm({ partName: '', quantity: '', specification: '' });
     await loadData();
@@ -284,6 +603,7 @@ export function Maintenance() {
     if (!selectedTicket) return;
     await updateTicketStatus(selectedTicket.id, 'in_progress', { assigned_to: activeProfile.name });
     setSelectedTicket((t) => t ? { ...t, status: 'in_progress' } : t);
+    await notifyTicketWatchers(selectedTicket, `Repair started: ${selectedTicket.equipment}`, `${activeProfile.name} started fixing it in-house.`);
     await loadData();
   }
 
@@ -305,6 +625,7 @@ export function Maintenance() {
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
+      await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Fixed in-house by ${activeProfile.name}.`);
       setSelectedTicket(null); setCompletionBlob(null); setUploadPct(0);
       await loadData();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
@@ -382,6 +703,11 @@ export function Maintenance() {
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
     }
+    await notifyTicketWatchers(
+      selectedTicket,
+      approved ? `Approved: ${selectedTicket.equipment}` : `Sent back: ${selectedTicket.equipment}`,
+      approved ? `${activeProfile.name} approved the store request.` : `${activeProfile.name} sent the ticket back to the technician.`,
+    );
     await loadData();
   }
 
@@ -440,6 +766,11 @@ export function Maintenance() {
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
+      await notifyTicketWatchers(selectedTicket, `Part handed over: ${selectedTicket.equipment}`, `${activeProfile.name} confirmed handover — repair can proceed.`);
+      await notifyMentions(handoverNotes, {
+        entityType: 'maintenance_ticket', entityId: selectedTicket.id,
+        entityLabel: selectedTicket.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
+      });
       setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); setUploadPct(0);
       await loadData();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
@@ -467,6 +798,7 @@ export function Maintenance() {
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
+      await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Defective part → ${defectiveDecision} · closed by ${activeProfile.name}.`);
       setSelectedTicket(null); setDefectiveBlob(null); setDefectiveDecision(''); setUploadPct(0);
       await loadData();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
@@ -474,7 +806,9 @@ export function Maintenance() {
   }
 
   async function handleAddSchedule() {
-    if (!scheduleForm.title.trim() || !scheduleForm.equipment.trim()) return;
+    if (!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule) return;
+    setSavingSchedule(true);
+    try {
     const plant = dbPlants.find(p => p.name === scheduleForm.plant);
     const { error } = await insertRows('maintenance_schedules', {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
@@ -489,12 +823,16 @@ export function Maintenance() {
       const entry = isPersonBlacklisted(scheduleForm.assignedTo);
       if (entry) notifyActivity(entry, `assigned the recurring task "${scheduleForm.title}" (${FREQ_LABEL[scheduleForm.frequency] || scheduleForm.frequency})`);
     }
+    await notifyMentions(scheduleForm.description, {
+      entityLabel: scheduleForm.title || 'Maintenance schedule', route: '/dashboard/purchase/maint',
+    });
     setScheduleSaved(true);
     await loadData();
     setTimeout(() => {
       setShowSchedulePanel(false); setScheduleSaved(false);
       setScheduleForm({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
     }, 1400);
+    } finally { setSavingSchedule(false); }
   }
 
   // ── Ticket action panel ───────────────────────────────────────────────────
@@ -950,9 +1288,26 @@ export function Maintenance() {
                 <div className="text-base font-bold">Emergency maintenance tickets</div>
                 <div className="text-xs text-slate-500">Breakdown repairs · click any row for full workflow</div>
               </div>
-              <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setShowRaisePanel(true)}>
-                + Raise ticket
-              </button>
+              <div className="flex items-center gap-2">
+                {isAdmin && emergencyTickets.length > 0 && (
+                  <button
+                    className="chip"
+                    onClick={handleDeleteAllEmergency}
+                    disabled={deletingAll}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: '#DC2626', borderColor: '#FECACA' }}
+                  >
+                    🗑 {deletingAll ? 'Deleting…' : `Delete all (${emergencyTickets.length})`}
+                  </button>
+                )}
+                {(isAdmin || isUnitHead) && (
+                  <button className="chip" onClick={() => setShowReport(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    📄 Create report
+                  </button>
+                )}
+                <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setShowRaisePanel(true)}>
+                  + Raise ticket
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto scroll-x">
               <table className="dt">
@@ -960,21 +1315,31 @@ export function Maintenance() {
                   <tr>
                     <th>Ticket #</th><th>Equipment</th><th>Plant</th><th>Issue</th>
                     <th>Status</th><th>Raised by</th><th>Created</th>
+                    {isAdmin && <th></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {emergencyTickets.length === 0 && (
-                    <tr><td colSpan={7} className="text-center text-slate-400 py-6 text-sm">No emergency tickets raised yet</td></tr>
+                    <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">No emergency tickets raised yet</td></tr>
                   )}
                   {emergencyTickets.map(t => (
                     <tr key={t.id} onClick={() => setSelectedTicket(t)} style={{ cursor: 'pointer' }}>
                       <td className="font-mono text-xs text-slate-400">{t.id.slice(0, 8)}</td>
                       <td className="font-semibold">{t.equipment}</td>
                       <td>{t.plants?.name || '—'}</td>
-                      <td className="text-slate-500 text-xs">{t.description || t.title}</td>
+                      <td className="text-slate-500 text-xs">{t.description ? <MentionText text={t.description} /> : t.title}</td>
                       <td>{statusBadge(t.status)}</td>
                       <td className="text-slate-500 text-xs">{t.raised_by || '—'}</td>
                       <td className="text-slate-500 text-xs">{formatDate(t.created_at)}</td>
+                      {isAdmin && (
+                        <td>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTicket(t); }}
+                            title="Delete ticket"
+                            style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#DC2626', fontSize: 13, padding: '2px 6px', lineHeight: 1 }}
+                          >🗑</button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -1050,7 +1415,7 @@ export function Maintenance() {
           </PanelSelect>
         </PanelField>
         <PanelDivider />
-        <PanelFooter saved={raiseSaved} onCancel={() => setShowRaisePanel(false)} onSave={handleRaiseTicket} saveLabel="Raise ticket" successLabel="Ticket raised" successSub="Store manager, admin and unit head notified" disabled={!raiseForm.equipment.trim()} requiredHint="Fill in equipment name to raise ticket" />
+        <PanelFooter saved={raiseSaved} onCancel={() => setShowRaisePanel(false)} onSave={handleRaiseTicket} saveLabel={raising ? 'Raising…' : 'Raise ticket'} successLabel="Ticket raised" successSub="Store manager, admin and unit head notified" disabled={!raiseForm.equipment.trim() || raising} requiredHint="Fill in equipment name to raise ticket" />
       </SlidePanel>
 
       {/* ── PANEL: Complete periodic ─────────────────────────────────────── */}
@@ -1073,7 +1438,7 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setBusyRef(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setBusyRef(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
       >
@@ -1097,9 +1462,48 @@ export function Maintenance() {
                 #{selectedTicket.id.slice(0, 8)} · Raised by {selectedTicket.raised_by || '—'}
                 {selectedTicket.assigned_to && <> · Assigned to {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
               </div>
-              {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}>{selectedTicket.description}</div>}
+              {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><MentionText text={selectedTicket.description} /></div>}
             </div>
-            {renderTicketActions()}
+
+            {/* Notes are visible to everyone on the ticket; edit/delete are admin-only. */}
+            {!editingTicket && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                <NotesButton entityType="maintenance_ticket" entityId={selectedTicket.id} entityLabel={selectedTicket.equipment || selectedTicket.title || 'Ticket'} route={`/dashboard/purchase/maint?ticket=${selectedTicket.id}`} />
+                {isAdmin && <button onClick={() => startEdit(selectedTicket)} className="chip">✎ Edit</button>}
+                {isAdmin && <button onClick={() => handleDeleteTicket(selectedTicket)} className="chip" style={{ color: '#DC2626' }}>🗑 Delete</button>}
+              </div>
+            )}
+
+            {editingTicket ? (
+              <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Edit ticket (admin)</div>
+                <PanelField label="Equipment / asset">
+                  <PanelInput value={editForm.equipment} onChange={e => setEditForm(f => ({ ...f, equipment: e.target.value }))} />
+                </PanelField>
+                <PanelRow>
+                  <PanelField label="Plant">
+                    <PanelSelect value={editForm.plant} onChange={e => setEditForm(f => ({ ...f, plant: e.target.value }))}>
+                      <option value="">— Select plant —</option>
+                      {plantNames.map(p => <option key={p}>{p}</option>)}
+                    </PanelSelect>
+                  </PanelField>
+                  <PanelField label="Status">
+                    <PanelSelect value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))}>
+                      {Object.keys(STATUS_CFG).map(s => <option key={s} value={s}>{STATUS_CFG[s].label}</option>)}
+                    </PanelSelect>
+                  </PanelField>
+                </PanelRow>
+                <PanelField label="Issue description">
+                  <PanelTextarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} placeholder="What broke? Type @ to tag someone." />
+                </PanelField>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={() => setEditingTicket(false)} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
+                  <button onClick={saveEdit} disabled={!editForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !editForm.equipment.trim() ? 0.5 : 1 }}>Save changes</button>
+                </div>
+              </div>
+            ) : (
+              renderTicketActions()
+            )}
           </>
         )}
       </SlidePanel>
@@ -1145,7 +1549,70 @@ export function Maintenance() {
           <PanelTextarea value={scheduleForm.description} onChange={e => setScheduleForm(f => ({ ...f, description: e.target.value }))} placeholder="Steps to complete, tools needed, safety precautions…" />
         </PanelField>
         <PanelDivider />
-        <PanelFooter saved={scheduleSaved} onCancel={() => setShowSchedulePanel(false)} onSave={handleAddSchedule} saveLabel="Save schedule" successLabel="Schedule created" successSub="Ticket will auto-generate on due date" disabled={!scheduleForm.title.trim() || !scheduleForm.equipment.trim()} requiredHint="Fill in title and equipment to create schedule" />
+        <PanelFooter saved={scheduleSaved} onCancel={() => setShowSchedulePanel(false)} onSave={handleAddSchedule} saveLabel={savingSchedule ? 'Saving…' : 'Save schedule'} successLabel="Schedule created" successSub="Ticket will auto-generate on due date" disabled={!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule} requiredHint="Fill in title and equipment to create schedule" />
+      </SlidePanel>
+
+      {/* ── PANEL: Create maintenance report (CSV) ───────────────────────────── */}
+      <SlidePanel open={showReport} onClose={() => setShowReport(false)} title="Create maintenance report" subtitle="Export · CSV">
+        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 18, lineHeight: 1.5 }}>
+          Pick what to include. The CSV carries the full life of each ticket — maintenance ID, who raised it &amp; their role, who's tagged/watching, the whole part-procurement trail, every timestamp, and how it was resolved — plus a header noting who generated the report and when. Tick the box below to also export the @-mention/notes timeline as a second CSV.
+        </div>
+
+        <PanelField label="Include ticket types">
+          <div style={{ display: 'flex', gap: 8 }}>
+            {([['emergency', '⚡ Emergency'], ['periodic', '🔄 Periodic']] as const).map(([key, label]) => {
+              const on = reportForm[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setReportForm(f => ({ ...f, [key]: !f[key] }))}
+                  style={{
+                    flex: 1, padding: '10px', borderRadius: 12, cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
+                    border: `2px solid ${on ? '#F47651' : '#E2E8F0'}`, background: on ? '#FFF7F5' : '#F8FAFC', color: on ? '#F47651' : '#64748B',
+                  }}
+                >
+                  {on ? '✓ ' : ''}{label}
+                </button>
+              );
+            })}
+          </div>
+        </PanelField>
+
+        <PanelField label="Status">
+          <PanelSelect value={reportForm.status} onChange={e => setReportForm(f => ({ ...f, status: e.target.value }))}>
+            <option value="all">All statuses</option>
+            <option value="open">Open / in progress only</option>
+            <option value="closed">Closed only</option>
+          </PanelSelect>
+        </PanelField>
+
+        <PanelRow>
+          <PanelField label="From date (created)">
+            <PanelInput type="date" value={reportForm.from} onChange={e => setReportForm(f => ({ ...f, from: e.target.value }))} />
+          </PanelField>
+          <PanelField label="To date (created)">
+            <PanelInput type="date" value={reportForm.to} onChange={e => setReportForm(f => ({ ...f, to: e.target.value }))} />
+          </PanelField>
+        </PanelRow>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#334155', cursor: 'pointer', marginBottom: 8 }}>
+          <input type="checkbox" checked={reportForm.includeNotes} onChange={e => setReportForm(f => ({ ...f, includeNotes: e.target.checked }))} />
+          Also export the notes / @-mention activity log (second CSV)
+        </label>
+
+        <PanelDivider />
+        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12, textAlign: 'center' }}>
+          <strong style={{ color: '#0F172A' }}>{reportTickets().length}</strong> ticket{reportTickets().length === 1 ? '' : 's'} match these filters
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" onClick={() => setShowReport(false)} style={{ flex: 1, padding: '11px 0', borderRadius: 24, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', fontFamily: 'inherit' }}>
+            Cancel
+          </button>
+          <button type="button" onClick={generateReport} disabled={generating || reportTickets().length === 0} style={{ flex: 2, padding: '11px 0', borderRadius: 24, border: 'none', background: (generating || reportTickets().length === 0) ? '#CBD5E1' : '#F47651', fontSize: 13, fontWeight: 700, color: '#fff', cursor: (generating || reportTickets().length === 0) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+            {generating ? 'Generating…' : 'Generate CSV report'}
+          </button>
+        </div>
       </SlidePanel>
     </>
   );

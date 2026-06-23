@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
+import { useMentionNotifier } from '../../../lib/mentions';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
@@ -12,6 +13,7 @@ type LedgerRow = Database['public']['Tables']['marine_insurance']['Row'];
 
 export function MarineInsurance() {
   const toast = useToast();
+  const notifyMentions = useMentionNotifier();
   const [panel, setPanel] = useState<Panel>(null);
   const [saved, setSaved] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState<'all' | 'top-up' | 'deduct'>('all');
@@ -62,6 +64,10 @@ export function MarineInsurance() {
       return;
     }
     if (data) setLedger(prev => [data as LedgerRow, ...prev]);
+    await notifyMentions(form.notes, {
+      entityType: 'marine_insurance', entityId: (data as LedgerRow | undefined)?.id,
+      entityLabel: 'Marine insurance top-up', route: '/dashboard/purchase/marine',
+    });
     setSaved(true);
     setTimeout(() => { setPanel(null); setSaved(false); setForm({ amount: '', reference: '', date: today, mode: 'NEFT', notes: '' }); }, 1600);
   }

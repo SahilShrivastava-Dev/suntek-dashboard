@@ -655,6 +655,43 @@ export interface Database {
         Insert: OptionalNulls<Omit<Database['public']['Tables']['oil_contracts']['Row'], 'id' | 'created_at'>>;
         Update: Partial<Database['public']['Tables']['oil_contracts']['Insert']>;
       };
+
+      // ── @-mentions / tagging ──────────────────────────────────────────────
+      // Generic notes attachable to any entity, with @mention ids. See 10_mentions.sql.
+      entity_notes: {
+        Row: {
+          id: string;
+          entity_type: string;
+          entity_id: string;
+          author_id: string;
+          author_name: string;
+          author_role: string | null;
+          body: string;
+          mentions: string[];
+          created_at: string;
+        };
+        // mentions has a DB default ('{}'), so it is optional on insert.
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['entity_notes']['Row'], 'id' | 'created_at' | 'mentions'>> & {
+          mentions?: string[];
+        };
+        Update: Partial<Database['public']['Tables']['entity_notes']['Insert']>;
+      };
+
+      // CC / watchers: people who follow an entity and get notified on changes.
+      entity_watchers: {
+        Row: {
+          id: string;
+          entity_type: string;
+          entity_id: string;
+          profile_id: string;
+          profile_name: string;
+          kind: string; // 'cc' | 'mention' | 'author'
+          added_by: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['entity_watchers']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['entity_watchers']['Insert']>;
+      };
     };
   };
 }

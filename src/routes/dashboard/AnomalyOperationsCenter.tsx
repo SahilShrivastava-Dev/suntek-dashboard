@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useTable } from '../../hooks/useTable';
 import { useToast } from '../../components/ui/toast';
 import { SkeletonRows, ErrorState, EmptyState } from '../../components/ui/states';
+import { MentionTextarea, CcSelect, NotesButton, MentionText } from '../../components/mentions';
+import { useDirectory, addWatchers, notifyWatchers, truncate } from '../../lib/mentions';
+import { useRoleContext } from '../../contexts/RoleContext';
+import { useNotifications } from '../../contexts/NotificationsContext';
 import type { Database } from '../../lib/database.types';
 
 type FlagRow = Database['public']['Tables']['anomaly_flags']['Row'];
@@ -36,6 +40,9 @@ function fmtValue(v: number | null, unit: string | null): string | null {
 export function AnomalyOperationsCenter() {
   const navigate = useNavigate();
   const toast = useToast();
+  const { activeProfile } = useRoleContext();
+  const { addNotification } = useNotifications();
+  const people = useDirectory();
   const { rows, isLoading, isError, refetch, update } = useTable<'anomaly_flags'>('anomaly_flags', {
     orderBy: 'created_at',
   });
@@ -47,6 +54,8 @@ export function AnomalyOperationsCenter() {
   // Reason capture for resolve/dismiss (the §5.4 feedback signal).
   const [reasonFor, setReasonFor] = useState<{ id: string; action: 'resolved' | 'dismissed' } | null>(null);
   const [reasonText, setReasonText] = useState('');
+  const [reasonMentions, setReasonMentions] = useState<string[]>([]);
+  const [reasonCc, setReasonCc] = useState<string[]>([]);
 
   const plants = useMemo(() => [...new Set(rows.map(r => r.plant).filter(Boolean))] as string[], [rows]);
   const sources = useMemo(() => [...new Set(rows.map(r => r.source_app))], [rows]);
@@ -93,11 +102,34 @@ export function AnomalyOperationsCenter() {
     }
   }
 
-  function submitReason() {
+  async function submitReason() {
     if (!reasonFor || !reasonText.trim()) return;
-    setStatus(reasonFor.id, reasonFor.action, reasonText.trim());
+    const flag = rows.find((r) => r.id === reasonFor.id);
+    const text = reasonText.trim();
+    const action = reasonFor.action;
+    await setStatus(reasonFor.id, action, text);
+
+    // Tagged / CC'd people watch this flag and get notified of the change.
+    const ref = { entityType: 'anomaly', entityId: reasonFor.id, entityLabel: flag?.title ?? 'Anomaly flag', route: '/anomaly-center' };
+    const actor = { id: activeProfile.id, name: activeProfile.name, role: activeProfile.roleLabel };
+    const ccPeople = people.filter((p) => reasonCc.includes(p.id));
+    const mPeople = people.filter((p) => reasonMentions.includes(p.id));
+    if (ccPeople.length) await addWatchers(ref, ccPeople.map((p) => ({ id: p.id, name: p.name })), 'cc', actor.id);
+    if (mPeople.length) await addWatchers(ref, mPeople.map((p) => ({ id: p.id, name: p.name })), 'mention', actor.id);
+    await notifyWatchers({
+      ref,
+      actor,
+      title: `${actor.name} ${action} a flag`,
+      body: `${ref.entityLabel} — “${truncate(text)}”`,
+      type: action === 'resolved' ? 'info' : 'info',
+      addNotification,
+      extraIds: [...reasonMentions, ...reasonCc],
+    });
+
     setReasonFor(null);
     setReasonText('');
+    setReasonMentions([]);
+    setReasonCc([]);
   }
 
   return (
@@ -171,7 +203,7 @@ export function AnomalyOperationsCenter() {
                       </div>
                     )}
                     {f.resolution_reason && (
-                      <div className="text-[11px] text-slate-400 mt-2">Reason: {f.resolution_reason}</div>
+                      <div className="text-[11px] text-slate-400 mt-2">Reason: <MentionText text={f.resolution_reason} /></div>
                     )}
                   </div>
                   <div className="text-right shrink-0">
@@ -185,6 +217,7 @@ export function AnomalyOperationsCenter() {
                   {f.route && (
                     <button onClick={() => navigate(f.route!)} className="chip hover:bg-slate-200">Open source →</button>
                   )}
+                  <NotesButton entityType="anomaly" entityId={f.id} entityLabel={f.title} route="/anomaly-center" />
                   {isOpen && (
                     <>
                       {f.status !== 'acknowledged' && (
@@ -209,12 +242,17 @@ export function AnomalyOperationsCenter() {
             <div className="text-xs text-slate-500 mb-4">
               Capture why — this tunes the detectors. Confirmed anomalies sharpen the models; dismissed false positives raise the threshold.
             </div>
-            <textarea
+            <MentionTextarea
               value={reasonText}
-              onChange={e => setReasonText(e.target.value)}
-              placeholder={reasonFor.action === 'resolved' ? 'What was the issue and how was it fixed?' : 'Why is this not a real anomaly?'}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-200 min-h-[90px]"
+              onChange={setReasonText}
+              onMentionsChange={setReasonMentions}
+              placeholder={reasonFor.action === 'resolved' ? 'What was the issue and how was it fixed? Type @ to tag whoever should know.' : 'Why is this not a real anomaly? Type @ to tag whoever should know.'}
+              style={{ minHeight: 90 }}
+              autoFocus
             />
+            <div className="mt-3">
+              <CcSelect value={reasonCc} onChange={setReasonCc} label="Also notify (CC)" excludeIds={[activeProfile.id]} />
+            </div>
             <div className="flex gap-3 mt-4">
               <button onClick={() => setReasonFor(null)} className="btn-ghost pill flex-1 py-2.5 font-semibold text-sm">Cancel</button>
               <button onClick={submitReason} disabled={!reasonText.trim()} className="btn-accent pill flex-1 py-2.5 font-semibold text-sm" style={{ opacity: reasonText.trim() ? 1 : 0.5 }}>

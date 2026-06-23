@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
+import { useMentionNotifier } from '../../lib/mentions';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
@@ -58,6 +59,7 @@ const BLANK_RESOLVE = { reason: '' };
 export function Blacklist() {
   const { activeProfile } = useRoleContext();
   const toast = useToast();
+  const notifyMentions = useMentionNotifier();
 
   const [entries, setEntries] = useState<BlacklistEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,6 +141,10 @@ export function Blacklist() {
       read_by: [],
     }).then(() => {}, () => {});
 
+    await notifyMentions(`${form.reason} ${form.notes}`, {
+      entityLabel: `Blacklist · ${form.name.trim()}`, route: '/dashboard/blacklist',
+    });
+
     setSaved(true);
     await load();
     setTimeout(() => {
@@ -170,6 +176,10 @@ export function Blacklist() {
       actor_role: activeProfile.roleLabel,
       read_by: [],
     }).then(() => {}, () => {});
+
+    await notifyMentions(resolveForm.reason, {
+      entityLabel: `Blacklist · ${resolvingEntry.name}`, route: '/dashboard/blacklist',
+    });
 
     setResolveSaved(true);
     await load();

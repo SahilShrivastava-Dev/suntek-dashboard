@@ -1,4 +1,6 @@
 import React, { useState, useRef } from 'react';
+import { MentionTextarea } from '../../components/mentions';
+import { useMentionNotifier } from '../../lib/mentions';
 
 type Tab = 'stock' | 'req';
 
@@ -111,12 +113,14 @@ function RequisitionForm() {
   const [qty, setQty]             = useState('');
   const [urgency, setUrgency]     = useState('low');
   const [remarks, setRemarks]     = useState('');
+  const notifyMentions = useMentionNotifier();
   const [photoName, setPhotoName] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     await new Promise(r => setTimeout(r, 800));
+    await notifyMentions(remarks, { entityLabel: `Warehouse requisition · ${item || 'item'}`, route: '/warehouse/requisition' });
     setSubmitted(true);
   }
 
@@ -179,9 +183,9 @@ function RequisitionForm() {
         </div>
         <div>
           <label className="block text-sm font-bold text-slate-600 mb-1">Reason / Remarks</label>
-          <textarea
-            value={remarks} onChange={e => setRemarks(e.target.value)} rows={3}
-            placeholder="Belt snapped during batch 1228. Need urgent replacement."
+          <MentionTextarea
+            value={remarks} onChange={setRemarks} rows={3}
+            placeholder="Belt snapped during batch 1228. Need urgent replacement. Type @ to tag."
             className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none text-sm"
           />
         </div>

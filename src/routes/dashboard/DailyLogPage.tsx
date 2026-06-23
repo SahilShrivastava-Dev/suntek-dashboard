@@ -11,7 +11,9 @@
  * Route: /dashboard/daily-log
  */
 import React, { useState, useRef, useCallback } from 'react';
+import { MentionTextarea } from '../../components/mentions';
 import { insertRows } from '../../lib/db';
+import { useMentionNotifier } from '../../lib/mentions';
 import { useToast } from '../../components/ui/toast';
 import {
   extractDailyLog,
@@ -63,6 +65,7 @@ function rowVal(r: EditableReading, key: keyof DailyLogReading): string {
 
 export function DailyLogPage() {
   const toast = useToast();
+  const notifyMentions = useMentionNotifier();
   const [stage, setStage]           = useState<Stage>('idle');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError]           = useState<string | null>(null);
@@ -204,6 +207,10 @@ export function DailyLogPage() {
           created_at: new Date().toISOString(),
         });
       }
+
+      await notifyMentions(remarks, {
+        entityLabel: `Daily log · ${unitName || 'Unit'} · ${date}`, route: '/daily-log',
+      });
 
       setDoneSummary(`${readings.length} hourly readings · ${date} · ${shift}`);
       setStage('done');
@@ -540,8 +547,8 @@ export function DailyLogPage() {
             </div>
             <div className="sm:col-span-1">
               <label className={labelCls}>Remarks</label>
-              <textarea value={remarks} onChange={e => setRemarks(e.target.value)}
-                className={inputCls + ' resize-none'} rows={2} placeholder="Any remarks (Hindi text OK)" />
+              <MentionTextarea value={remarks} onChange={setRemarks}
+                className={inputCls + ' resize-none'} rows={2} placeholder="Any remarks (Hindi text OK) · type @ to tag" />
             </div>
           </div>
 

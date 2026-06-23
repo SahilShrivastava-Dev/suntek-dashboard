@@ -4,6 +4,7 @@ import { validateGeofence } from '../../lib/algorithms/geofencing';
 import { uploadCheckinPhoto } from '../../lib/cloudinary';
 import { insertRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
+import { useRoleContext } from '../../contexts/RoleContext';
 
 // ── Plant config ── Replace with real coordinates before production ──────────
 const PLANT_LAT      = 24.1856;
@@ -54,6 +55,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
   // Form
   const [note,        setNote]        = useState('');
   const notifyMentions = useMentionNotifier();
+  const { activeProfile } = useRoleContext();
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -210,6 +212,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
         lat:        gpsData.lat,
         lng:        gpsData.lng,
         isOnSite:   gpsData.isOnSite,
+        creator:    activeProfile.name,
         onProgress: setUploadProgress,
       });
       finalPhotoUrl = result.secure_url;

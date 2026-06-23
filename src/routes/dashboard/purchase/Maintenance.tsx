@@ -551,7 +551,7 @@ export function Maintenance() {
       if (!ticket) throw new Error('Could not create ticket');
       const result = await uploadMaintenancePhoto(completionBlob, {
         ticketId: ticket.id, plantName: ticket.plants?.name || completingSchedule.plants?.name || 'Plant',
-        photoType: 'completion', onProgress: setUploadPct,
+        photoType: 'completion', creator: activeProfile.name, onProgress: setUploadPct,
       });
       await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: completingSchedule.assigned_to || activeProfile.name })
         .eq('id', ticket.id);
@@ -613,7 +613,7 @@ export function Maintenance() {
     try {
       const result = await uploadMaintenancePhoto(completionBlob, {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
-        photoType: 'completion', onProgress: setUploadPct,
+        photoType: 'completion', creator: activeProfile.name, onProgress: setUploadPct,
       });
       await updateTicketStatus(selectedTicket.id, 'closed', {
         completion_photo_url: result.secure_url, closed_at: new Date().toISOString(),
@@ -738,14 +738,14 @@ export function Maintenance() {
       if (handoverInvoiceBlob) {
         const r = await uploadMaintenancePhoto(handoverInvoiceBlob, {
           ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
-          photoType: 'bill', onProgress: pct => setUploadPct(Math.round(pct / 2)),
+          photoType: 'bill', creator: activeProfile.name, onProgress: pct => setUploadPct(Math.round(pct / 2)),
         });
         invoiceUrl = r.secure_url;
       }
       if (handoverPhotoBlob) {
         const r = await uploadMaintenancePhoto(handoverPhotoBlob, {
           ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
-          photoType: 'completion', onProgress: pct => setUploadPct(50 + Math.round(pct / 2)),
+          photoType: 'completion', creator: activeProfile.name, onProgress: pct => setUploadPct(50 + Math.round(pct / 2)),
         });
         photoUrl = r.secure_url;
       }
@@ -783,7 +783,7 @@ export function Maintenance() {
     try {
       const result = await uploadMaintenancePhoto(defectiveBlob, {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
-        photoType: 'defective', onProgress: setUploadPct,
+        photoType: 'defective', creator: activeProfile.name, onProgress: setUploadPct,
       });
       await updateTicketStatus(selectedTicket.id, 'closed', {
         defective_part_photo_url: result.secure_url,

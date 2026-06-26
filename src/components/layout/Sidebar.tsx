@@ -234,8 +234,10 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
   const showWarehouseEntry = activeProfile.id === 'warehouse_manager';
   const showNightEntry     = activeProfile.id === 'night_manager';
   const showBatchEntry     = activeProfile.id === 'factory_operator';
-  // Daily log upload: visible to admin, unit_head, and factory_operator
-  const showDailyLog = ['admin','unit_head','factory_operator'].includes(activeProfile.id);
+  // Daily log upload: admin + unit_head only. The Technical Team (factory_operator)
+  // is the Batch Logger — their only job is "Log Reading" (batch-entry), and
+  // /dashboard/daily-log isn't in their allowed routes, so it must not appear.
+  const showDailyLog = ['admin','unit_head'].includes(activeProfile.id);
 
   const showOperations = !isAccountant && (showBatches || showNightMgr || showStock || showWarehouseEntry || showNightEntry || showBatchEntry || showDailyLog);
 

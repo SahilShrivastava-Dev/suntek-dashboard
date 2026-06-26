@@ -64,7 +64,7 @@ function AccessBadge({ profile }: { profile: MockProfile }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProfileSwitcher() {
-  const { activeProfile, allProfiles, switchProfile } = useRoleContext();
+  const { activeProfile, allProfiles, switchProfile, canSwitch } = useRoleContext();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -85,6 +85,21 @@ export function ProfileSwitcher() {
     switchProfile(profile.id);
     navigate(profile.homeRoute);
     setOpen(false);
+  }
+
+  // Locked (non-admin) users see a static identity chip — no role switching.
+  if (!canSwitch) {
+    return (
+      <div className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 bg-white border border-slate-200 rounded-full">
+        <ProfileAvatar profile={activeProfile} size="sm" />
+        <div className="text-left hidden md:block">
+          <div className="text-[12px] font-semibold leading-tight">
+            {activeProfile.name.split(' ')[0]}
+          </div>
+          <div className="text-[10px] text-slate-500">{activeProfile.roleLabel}</div>
+        </div>
+      </div>
+    );
   }
 
   return (

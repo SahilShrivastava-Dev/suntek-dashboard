@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
+import { createLogin, updateLogin } from '../../lib/adminUsers';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { MOCK_PROFILES } from '../../lib/profiles';
@@ -23,6 +24,8 @@ interface DisplayUser {
   access_note: string | null;
   is_active: boolean;
   created_at: string | null;
+  auth_user_id?: string | null;
+  login_enabled?: boolean | null;
   _isSystem?: boolean;
 }
 
@@ -62,6 +65,7 @@ const BLANK_FORM = {
   name: '', mobile: '', email: '', whatsapp: '',
   role_id: 'night_manager', plant: '', designation: '',
   access_note: '', is_active: true,
+  login_enabled: false, password: '',
 };
 
 // Built-in profiles derived from MOCK_PROFILES — always shown, cannot be deleted
@@ -79,6 +83,8 @@ const SYSTEM_USERS: DisplayUser[] = MOCK_PROFILES.map(p => ({
   access_note: p.accessNote || null,
   is_active: true,
   created_at: null,
+  auth_user_id: null,
+  login_enabled: false,
   _isSystem: true,
 }));
 
@@ -161,6 +167,8 @@ export function UserManagement() {
       designation: u.designation || '',
       access_note: u.access_note || '',
       is_active: u.is_active ?? true,
+      login_enabled: !!u.auth_user_id || !!u.login_enabled,
+      password: '',
     });
     setSaved(false);
     setShowPanel(true);
@@ -168,11 +176,22 @@ export function UserManagement() {
 
   async function handleSave() {
     if (!form.name.trim() || !form.mobile.trim()) return;
+
+    const existingAuthId = editingUser?.auth_user_id || null;
+    // A brand-new login is being provisioned when login is enabled but no auth
+    // user is linked yet (new user, or enabling login on an existing directory row).
+    const provisioningNewLogin = form.login_enabled && !existingAuthId;
+    if (provisioningNewLogin) {
+      if (!form.email.trim()) { toast.error('Login email is required to create an account'); return; }
+      if (form.password.length < 8) { toast.error('Password must be at least 8 characters'); return; }
+    }
+
     const plant = plants.find(p => p.name === form.plant);
+    const email = form.email.trim() || null;
     const payload = {
       name: form.name.trim(),
       mobile: form.mobile.trim(),
-      email: form.email.trim() || null,
+      email,
       whatsapp: form.whatsapp.trim() || null,
       role_id: form.role_id,
       role_label: ROLE_OPTIONS.find(r => r.id === form.role_id)?.label || form.role_id,
@@ -183,12 +202,41 @@ export function UserManagement() {
       is_active: form.is_active,
     };
 
+    // 1) Save the directory row first (and capture its id for credential linking).
+    let accountId = editingUser?.id || '';
     if (editingUser) {
       const { error } = await updateRows('user_accounts', payload).eq('id', editingUser.id);
       if (error) { toast.error(`Update failed: ${error.message}`); return; }
     } else {
-      const { error } = await insertRows('user_accounts', payload);
+      const { data, error } = await insertRows('user_accounts', payload).select('id').single();
       if (error) { toast.error(`Save failed: ${error.message}`); return; }
+      accountId = data?.id || '';
+    }
+
+    // 2) Provision / update the login via the service_role edge function.
+    if (form.login_enabled) {
+      if (existingAuthId) {
+        const { error } = await updateLogin({
+          auth_user_id: existingAuthId,
+          user_account_id: accountId,
+          email: email || undefined,
+          password: form.password || undefined, // blank = keep current password
+          name: form.name.trim(),
+          role_id: form.role_id,
+          plant_id: plant?.id || null,
+        });
+        if (error) { toast.error(`Login update failed: ${error}`); return; }
+      } else {
+        const { error } = await createLogin({
+          user_account_id: accountId,
+          email: email!,
+          password: form.password,
+          name: form.name.trim(),
+          role_id: form.role_id,
+          plant_id: plant?.id || null,
+        });
+        if (error) { toast.error(`Login creation failed: ${error}`); return; }
+      }
     }
     await notifyMentions(form.access_note, {
       entityType: 'user_account', entityId: editingUser?.id,
@@ -330,7 +378,14 @@ export function UserManagement() {
                         : <span className="text-slate-300 text-sm">—</span>}
                     </td>
                     <td className="text-slate-500 text-xs">{u.whatsapp || u.mobile || <span className="text-slate-300">—</span>}</td>
-                    <td className="text-slate-500 text-xs">{u.email || <span className="text-slate-300">—</span>}</td>
+                    <td className="text-slate-500 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span>{u.email || <span className="text-slate-300">—</span>}</span>
+                        {!u._isSystem && u.auth_user_id && (
+                          <span className="badge" style={{ background: '#EFF6FF', color: '#2563EB', fontSize: 9.5, padding: '1px 6px' }}>🔑 login</span>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <span className="badge" style={{ background: lvl.bg, color: lvl.color, fontSize: 11 }}>
                         {u.role_label || ro?.label || u.role_id}
@@ -436,6 +491,52 @@ export function UserManagement() {
         <PanelField label="Access note (optional)">
           <PanelTextarea value={form.access_note} onChange={e => setForm(f => ({ ...f, access_note: e.target.value }))} placeholder="Any notes about this user's access scope, restrictions, or special permissions…" />
         </PanelField>
+
+        {/* ── Login access ─────────────────────────────────────────────────── */}
+        <div style={{ marginBottom: 16, background: '#F8FAFC', borderRadius: 12, border: '1px solid #E2E8F0', padding: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>
+                Dashboard login {editingUser?.auth_user_id && <span style={{ fontSize: 11, color: '#16A34A', fontWeight: 700 }}>· account exists</span>}
+              </div>
+              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
+                Give this person a sign-in. They'll log in with the email above and the password you set here.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setForm(f => ({ ...f, login_enabled: !f.login_enabled }))}
+              style={{
+                width: 44, height: 24, borderRadius: 12,
+                background: form.login_enabled ? '#2563EB' : '#CBD5E1',
+                border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+              }}
+            >
+              <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, transition: 'left 0.2s', left: form.login_enabled ? 22 : 4 }} />
+            </button>
+          </div>
+
+          {form.login_enabled && (
+            <div style={{ marginTop: 12 }}>
+              {!form.email.trim() && (
+                <div style={{ fontSize: 11, color: '#DC2626', marginBottom: 8 }}>
+                  ⚠ Set the <strong>Email</strong> field above — it's the login username.
+                </div>
+              )}
+              <PanelField label={editingUser?.auth_user_id ? 'Set new password (leave blank to keep current)' : 'Password *'}>
+                <PanelInput
+                  type="password"
+                  value={form.password}
+                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                  placeholder={editingUser?.auth_user_id ? 'Leave blank to keep existing password' : 'Min 8 characters — share with the user securely'}
+                />
+              </PanelField>
+              <div style={{ fontSize: 11, color: '#94A3B8' }}>
+                The account is activated immediately — the user can sign in right away. You can change email or reset the password here anytime.
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Active toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, padding: '12px 14px', background: '#F8FAFC', borderRadius: 12, border: '1px solid #E2E8F0' }}>

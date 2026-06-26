@@ -32,7 +32,7 @@ export interface Database {
       profiles: {
         Row: {
           id: string; // uuid FK auth.users
-          role: UserRole;
+          role: string; // role_id — matches MockProfile.id ('admin', 'unit_head', …); drives RBAC
           plant_id: string | null;
           name: string;
           phone: string | null;
@@ -71,6 +71,8 @@ export interface Database {
           access_note: string | null;
           is_active: boolean;
           created_at: string;
+          auth_user_id: string | null;   // linked auth.users id once a login is provisioned
+          login_enabled: boolean | null; // true when this row has an active login
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['user_accounts']['Row'], 'id' | 'created_at'>>;
         Update: Partial<Database['public']['Tables']['user_accounts']['Insert']>;

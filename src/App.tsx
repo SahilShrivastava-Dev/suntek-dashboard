@@ -4,6 +4,7 @@ import { RoleProvider } from './contexts/RoleContext';
 import { NotificationsProvider } from './contexts/NotificationsContext';
 import { BlacklistProvider } from './contexts/BlacklistContext';
 import { AnomalyProvider } from './contexts/AnomalyContext';
+import { DailyLogOcrProvider } from './contexts/DailyLogOcrContext';
 
 // Layout + auth load eagerly (shell + entry — always needed, small).
 import { DashboardLayout } from './components/layout/DashboardLayout';
@@ -65,6 +66,7 @@ function App() {
       <NotificationsProvider>
       <BlacklistProvider>
       <AnomalyProvider>
+      <DailyLogOcrProvider>
       <BrowserRouter>
         <Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -124,6 +126,7 @@ function App() {
         </Routes>
         </Suspense>
       </BrowserRouter>
+      </DailyLogOcrProvider>
       </AnomalyProvider>
       </BlacklistProvider>
       </NotificationsProvider>

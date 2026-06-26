@@ -10,15 +10,14 @@
  *
  * Route: /dashboard/daily-log
  */
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { MentionTextarea } from '../../components/mentions';
 import { insertRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { useToast } from '../../components/ui/toast';
+import { useDailyLogOcr } from '../../contexts/DailyLogOcrContext';
 import {
-  extractDailyLog,
-  resizeImageToDataUrl,
   type ExtractedDailyLog,
   type DailyLogReading,
   type DailyLogTankSummary,
@@ -68,16 +67,21 @@ export function DailyLogPage() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
-  const [stage, setStage]           = useState<Stage>('idle');
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError]           = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  // OCR job lives in a provider above the router, so it survives navigating away
+  // mid-extraction. This page just reflects + drives that job.
+  const { job, selectFile, extract, reset: resetJob } = useDailyLogOcr();
+  const previewUrl = job.previewUrl;
+  const error = job.error;
+  const rawData = job.result;
+
+  const [saving, setSaving]           = useState(false);
+  const [savedDone, setSavedDone]     = useState(false);
+  const [isDragging, setIsDragging]   = useState(false);
   const [doneSummary, setDoneSummary] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const apiImageRef  = useRef<string>('');
+  const populatedRef = useRef<ExtractedDailyLog | null>(null);
 
   // ── Review form state ──────────────────────────────────────────────────────
-  const [rawData, setRawData]         = useState<ExtractedDailyLog | null>(null);
   const [date, setDate]               = useState('');
   const [shift, setShift]             = useState('');
   const [unitName, setUnitName]       = useState('');
@@ -94,55 +98,40 @@ export function DailyLogPage() {
   ]);
 
   // ── File handling ──────────────────────────────────────────────────────────
+  // Selection + extraction run in the OCR provider so they survive navigation.
 
-  const handleFile = useCallback(async (file: File) => {
-    if (!file.type.startsWith('image/') && !/\.(jpe?g|png|heic|webp)$/i.test(file.name)) {
-      setError('Please upload a JPG, PNG, or HEIC image.'); setStage('error'); return;
-    }
-    setError(null);
-    setPreviewUrl(URL.createObjectURL(file));
-    try {
-      // 1200px is sufficient for the 11B model and keeps the base64 payload small
-      apiImageRef.current = await resizeImageToDataUrl(file, 1200);
-      setStage('ready');
-    } catch (e) {
-      setError(`Image processing failed: ${e instanceof Error ? e.message : String(e)}`); setStage('error');
-    }
-  }, []);
+  const handleFile = useCallback((file: File) => { selectFile(file); }, [selectFile]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
     const f = e.dataTransfer.files?.[0]; if (f) handleFile(f);
   };
 
-  // ── Extract ────────────────────────────────────────────────────────────────
+  const handleExtract = () => { extract(); };
 
-  const handleExtract = async () => {
-    if (!apiImageRef.current) return;
-    setStage('loading');
-    try {
-      const data = await extractDailyLog(apiImageRef.current);
-      setRawData(data);
-      setDate(data.date ?? '');
-      setShift(data.shift ?? '');
-      setUnitName(data.unitName ?? '');
-      setOperators((data.operatorNames ?? []).join(', '));
-      setHelper(data.helperName ?? '');
-      setRemarks(data.remarks ?? '');
-      setNotesHnp(data.notes?.hnpTank ?? '');
-      setNotesHcl(data.notes?.hclTank ?? '');
-      setReadings((data.readings ?? []).map((r, i) => ({ ...r, _key: `r-${i}` })));
-      setTankSummaries(
-        [1, 2, 3].map(idx => {
-          const found = (data.tankSummaries ?? []).find(t => t.tankIndex === idx);
-          return found ?? { tankIndex: idx, shiftingToStorageTime: null, density: null, heatStabilizerQty: null, brightenerQty: null };
-        })
-      );
-      setStage('review');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e)); setStage('error');
-    }
-  };
+  // When the background OCR finishes, populate the editable review form once.
+  // Runs on completion AND when the user returns to the page mid/post extraction.
+  useEffect(() => {
+    if (job.status !== 'done' || !job.result) return;
+    if (populatedRef.current === job.result) return; // already loaded this result
+    populatedRef.current = job.result;
+    const data = job.result;
+    setDate(data.date ?? '');
+    setShift(data.shift ?? '');
+    setUnitName(data.unitName ?? '');
+    setOperators((data.operatorNames ?? []).join(', '));
+    setHelper(data.helperName ?? '');
+    setRemarks(data.remarks ?? '');
+    setNotesHnp(data.notes?.hnpTank ?? '');
+    setNotesHcl(data.notes?.hclTank ?? '');
+    setReadings((data.readings ?? []).map((r, i) => ({ ...r, _key: `r-${i}` })));
+    setTankSummaries(
+      [1, 2, 3].map(idx => {
+        const found = (data.tankSummaries ?? []).find(t => t.tankIndex === idx);
+        return found ?? { tankIndex: idx, shiftingToStorageTime: null, density: null, heatStabilizerQty: null, brightenerQty: null };
+      })
+    );
+  }, [job.status, job.result]);
 
   // ── Reading table helpers ──────────────────────────────────────────────────
 
@@ -178,9 +167,9 @@ export function DailyLogPage() {
   // ── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (stage === 'saving') return; // double-submit guard
+    if (saving) return; // double-submit guard
     if (!date) { toast.error('Date is required.'); return; }
-    setStage('saving');
+    setSaving(true);
 
     try {
       const payload = {
@@ -229,18 +218,20 @@ export function DailyLogPage() {
       }
 
       setDoneSummary(`${readings.length} hourly readings · ${date} · ${shift}`);
-      setStage('done');
+      setSaving(false);
+      setSavedDone(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setStage('error');
+      toast.error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+      setSaving(false);
     }
   };
 
   // ── Reset ──────────────────────────────────────────────────────────────────
 
   const reset = () => {
-    setStage('idle'); setPreviewUrl(null); setError(null);
-    setRawData(null); setReadings([]); apiImageRef.current = '';
+    setSavedDone(false); setSaving(false);
+    setReadings([]); populatedRef.current = null;
+    resetJob();
   };
 
   // ── Input style ────────────────────────────────────────────────────────────
@@ -248,7 +239,7 @@ export function DailyLogPage() {
   const labelCls = 'block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1';
 
   // ── Render: done ──────────────────────────────────────────────────────────
-  if (stage === 'done') return (
+  if (savedDone) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 py-16 text-center">
       <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5">
@@ -265,7 +256,7 @@ export function DailyLogPage() {
   );
 
   // ── Render: error ─────────────────────────────────────────────────────────
-  if (stage === 'error') return (
+  if (job.status === 'error') return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4 max-w-lg mx-auto">
       <div className="w-full bg-red-50 border border-red-200 rounded-xl p-4">
         <div className="text-sm font-bold text-red-700 mb-1">Extraction failed</div>
@@ -279,8 +270,8 @@ export function DailyLogPage() {
     </div>
   );
 
-  // ── Render: loading ───────────────────────────────────────────────────────
-  if (stage === 'loading') return (
+  // ── Render: loading (OCR in progress — survives navigation) ───────────────
+  if (job.status === 'processing') return (
     <div className="flex-1 flex flex-col items-center justify-center gap-5">
       {previewUrl && (
         <img src={previewUrl} alt="Sheet" className="rounded-xl shadow border border-slate-200 object-cover max-h-52 max-w-xs" style={{ objectPosition: 'top' }} />
@@ -295,7 +286,7 @@ export function DailyLogPage() {
   );
 
   // ── Render: saving ────────────────────────────────────────────────────────
-  if (stage === 'saving') return (
+  if (saving) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3">
       <svg className="animate-spin" width="28" height="28" viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="12" r="10" stroke="#fde68a" strokeWidth="3" />
@@ -306,7 +297,7 @@ export function DailyLogPage() {
   );
 
   // ── Render: idle / ready ──────────────────────────────────────────────────
-  if (stage === 'idle' || stage === 'ready') return (
+  if (job.status === 'idle' || job.status === 'ready') return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <input
         ref={fileInputRef}
@@ -354,7 +345,7 @@ export function DailyLogPage() {
         </div>
       )}
 
-      {stage === 'ready' && (
+      {job.status === 'ready' && (
         <button
           onClick={handleExtract}
           className="mt-5 px-8 py-3.5 rounded-xl text-white font-bold text-sm flex items-center gap-2 transition-all"

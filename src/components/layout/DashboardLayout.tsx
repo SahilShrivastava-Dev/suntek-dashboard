@@ -171,6 +171,19 @@ export function DashboardLayout() {
     !activeProfile.standaloneOnly &&
     (isPurchaseRoot ? hasSomePurchaseAccess : profileCanAccess(activeProfile, path));
 
+  // Post-login landing: a locked user who hits the Overview ('/dashboard') they
+  // can't see is sent straight to their own home section, instead of bouncing
+  // off the Access Restricted screen. Scoped to the index so other restricted
+  // navigation still shows the explanatory page.
+  if (
+    !canAccessRoute &&
+    path === '/dashboard' &&
+    activeProfile.homeRoute !== '/dashboard' &&
+    profileCanAccess(activeProfile, activeProfile.homeRoute)
+  ) {
+    return <Navigate to={activeProfile.homeRoute} replace />;
+  }
+
   return (
     <div style={{ minHeight: '100vh' }}>
       <Sidebar user={user} onSignOut={signOut} />

@@ -36,6 +36,7 @@ export interface Database {
           plant_id: string | null;
           name: string;
           phone: string | null;
+          preferred_language: string | null;
           created_at: string;
         };
         Insert: Omit<Database['public']['Tables']['profiles']['Row'], 'created_at'>;
@@ -73,9 +74,27 @@ export interface Database {
           created_at: string;
           auth_user_id: string | null;   // linked auth.users id once a login is provisioned
           login_enabled: boolean | null; // true when this row has an active login
+          preferred_language: string | null;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['user_accounts']['Row'], 'id' | 'created_at'>>;
         Update: Partial<Database['public']['Tables']['user_accounts']['Insert']>;
+      };
+
+      // Audit history of profile changes (self-service + admin). See migration 21.
+      user_account_events: {
+        Row: {
+          id: string;
+          user_account_id: string | null;
+          target_name: string | null;
+          target_email: string | null;
+          action: string;
+          details: string | null;
+          actor_name: string | null;
+          actor_role: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['user_account_events']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['user_account_events']['Insert']>;
       };
 
       // Restricted persons/vehicles/vendors registry with resolve workflow. See migration 0006.

@@ -5,8 +5,19 @@ import { createLogin, updateLogin } from '../../lib/adminUsers';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { MOCK_PROFILES } from '../../lib/profiles';
+import { useRoleContext } from '../../contexts/RoleContext';
+import { logUserAccountEvent, LANGUAGE_OPTIONS } from '../../lib/userEvents';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
+
+interface UserEvent {
+  id: string;
+  action: string;
+  details: string | null;
+  actor_name: string | null;
+  actor_role: string | null;
+  created_at: string;
+}
 
 /** A user row for display — a user_accounts row (+ plants join) or a built-in system profile. */
 interface DisplayUser {
@@ -26,6 +37,7 @@ interface DisplayUser {
   created_at: string | null;
   auth_user_id?: string | null;
   login_enabled?: boolean | null;
+  preferred_language?: string | null;
   _isSystem?: boolean;
 }
 
@@ -66,6 +78,7 @@ const BLANK_FORM = {
   role_id: 'night_manager', plant: '', designation: '',
   access_note: '', is_active: true,
   login_enabled: false, password: '',
+  preferred_language: 'en',
 };
 
 // Built-in profiles derived from MOCK_PROFILES — always shown, cannot be deleted
@@ -85,6 +98,7 @@ const SYSTEM_USERS: DisplayUser[] = MOCK_PROFILES.map(p => ({
   created_at: null,
   auth_user_id: null,
   login_enabled: false,
+  preferred_language: 'en',
   _isSystem: true,
 }));
 
@@ -94,6 +108,7 @@ export function UserManagement() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
+  const { activeProfile } = useRoleContext();
   const [users, setUsers] = useState<DisplayUser[]>([]);
   const [plants, setPlants] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,6 +117,27 @@ export function UserManagement() {
   const [editingUser, setEditingUser] = useState<DisplayUser | null>(null);
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM });
+
+  // History panel — per-profile action log
+  const [historyUser, setHistoryUser] = useState<DisplayUser | null>(null);
+  const [historyEvents, setHistoryEvents] = useState<UserEvent[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  async function openHistory(u: DisplayUser) {
+    setHistoryUser(u);
+    setHistoryLoading(true);
+    setHistoryEvents([]);
+    const { data } = await supabase
+      .from('user_account_events')
+      .select('id, action, details, actor_name, actor_role, created_at')
+      .eq('user_account_id', u.id)
+      .order('created_at', { ascending: false })
+      .returns<UserEvent[]>();
+    setHistoryEvents(data || []);
+    setHistoryLoading(false);
+  }
+
+  const actor = { actorName: activeProfile.name, actorRole: activeProfile.id };
 
   const [filterRole, setFilterRole] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -169,6 +205,7 @@ export function UserManagement() {
       is_active: u.is_active ?? true,
       login_enabled: !!u.auth_user_id || !!u.login_enabled,
       password: '',
+      preferred_language: u.preferred_language || 'en',
     });
     setSaved(false);
     setShowPanel(true);
@@ -200,6 +237,7 @@ export function UserManagement() {
       designation: form.designation.trim() || null,
       access_note: form.access_note.trim() || null,
       is_active: form.is_active,
+      preferred_language: form.preferred_language || 'en',
     };
 
     // 1) Save the directory row first (and capture its id for credential linking).
@@ -238,6 +276,31 @@ export function UserManagement() {
         if (error) { toast.error(`Login creation failed: ${error}`); return; }
       }
     }
+
+    // Record the admin action in the profile history.
+    if (editingUser) {
+      const changed: string[] = [];
+      if (form.name.trim() !== (editingUser.name || '')) changed.push('name');
+      if (email !== (editingUser.email || null)) changed.push('email');
+      if (form.mobile.trim() !== (editingUser.mobile || '')) changed.push('contact');
+      if (form.role_id !== editingUser.role_id) changed.push('role');
+      if ((form.preferred_language || 'en') !== (editingUser.preferred_language || 'en')) changed.push('language');
+      if (form.login_enabled && form.password) changed.push('password reset');
+      await logUserAccountEvent({
+        userAccountId: accountId, targetName: form.name.trim(), targetEmail: email,
+        action: form.login_enabled && form.password ? 'password_reset' : 'admin_update',
+        details: changed.length ? `Admin updated: ${changed.join(', ')}` : 'Admin saved (no field changes)',
+        ...actor,
+      });
+    } else {
+      await logUserAccountEvent({
+        userAccountId: accountId, targetName: form.name.trim(), targetEmail: email,
+        action: 'created',
+        details: `Created${form.login_enabled ? ' with login' : ' (directory only)'} · role ${ROLE_OPTIONS.find(r => r.id === form.role_id)?.label || form.role_id}`,
+        ...actor,
+      });
+    }
+
     await notifyMentions(form.access_note, {
       entityType: 'user_account', entityId: editingUser?.id,
       entityLabel: `User · ${form.name.trim()}`, route: '/dashboard/users',
@@ -415,6 +478,11 @@ export function UserManagement() {
                             style={{ padding: '5px 12px', borderRadius: 10, border: `1px solid ${u.is_active ? '#FECACA' : '#BBF7D0'}`, background: u.is_active ? '#FEF2F2' : '#F0FDF4', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: u.is_active ? '#DC2626' : '#16A34A' }}>
                             {u.is_active ? 'Deactivate' : 'Activate'}
                           </button>
+                          <button onClick={() => openHistory(u)} title="View change history"
+                            style={{ padding: '5px 12px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#64748B', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                            History
+                          </button>
                         </div>
                       )}
                     </td>
@@ -486,6 +554,13 @@ export function UserManagement() {
             <PanelInput value={form.designation} onChange={e => setForm(f => ({ ...f, designation: e.target.value }))} placeholder="e.g. Store In-Charge" />
           </PanelField>
         </PanelRow>
+
+        {/* Preferred language */}
+        <PanelField label="Preferred language">
+          <PanelSelect value={form.preferred_language} onChange={e => setForm(f => ({ ...f, preferred_language: e.target.value }))}>
+            {LANGUAGE_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+          </PanelSelect>
+        </PanelField>
 
         {/* Access note */}
         <PanelField label="Access note (optional)">
@@ -572,8 +647,53 @@ export function UserManagement() {
           requiredHint="Fill in name and mobile number to add user"
         />
       </SlidePanel>
+
+      {/* ── History panel: who changed what on this profile ─────────────────── */}
+      <SlidePanel
+        open={!!historyUser}
+        onClose={() => setHistoryUser(null)}
+        title="Profile history"
+        subtitle={historyUser ? `${historyUser.name} · User Management` : ''}
+      >
+        {historyLoading ? (
+          <div className="text-sm text-slate-400 py-6 text-center">Loading…</div>
+        ) : historyEvents.length === 0 ? (
+          <div className="text-sm text-slate-400 py-6 text-center">No recorded actions yet for this profile.</div>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {historyEvents.map(ev => {
+              const cfg = EVENT_CFG[ev.action] || { label: ev.action, bg: '#F1F5F9', color: '#475569' };
+              return (
+                <div key={ev.id} style={{ border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px' }}>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontSize: 10.5, fontWeight: 700 }}>{cfg.label}</span>
+                    <span className="text-[11px] text-slate-400">{formatEventTime(ev.created_at)}</span>
+                  </div>
+                  {ev.details && <div className="text-[13px] text-slate-700 leading-snug">{ev.details}</div>}
+                  <div className="text-[11px] text-slate-400 mt-1">
+                    by {ev.actor_name || 'Unknown'}{ev.actor_role ? ` · ${ev.actor_role}` : ''}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SlidePanel>
     </>
   );
+}
+
+const EVENT_CFG: Record<string, { label: string; bg: string; color: string }> = {
+  created:        { label: 'Created',        bg: '#EFF6FF', color: '#2563EB' },
+  self_update:    { label: 'Self update',    bg: '#F5F3FF', color: '#7C3AED' },
+  admin_update:   { label: 'Admin update',   bg: '#FFF7ED', color: '#EA580C' },
+  password_reset: { label: 'Password reset', bg: '#FEF2F2', color: '#DC2626' },
+  login_enabled:  { label: 'Login enabled',  bg: '#F0FDF4', color: '#16A34A' },
+  login_disabled: { label: 'Login disabled', bg: '#F1F5F9', color: '#64748B' },
+};
+
+function formatEventTime(d: string) {
+  return new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function getRoleDescription(roleId: string): string {

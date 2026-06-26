@@ -305,6 +305,7 @@ export function Maintenance() {
   // Upload
   const [completionBlob, setCompletionBlob] = useState<Blob | null>(null);
   const [defectiveBlob, setDefectiveBlob] = useState<Blob | null>(null);
+  const [raisePhotoBlob, setRaisePhotoBlob] = useState<Blob | null>(null); // optional defective-item photo at raise
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
 
@@ -435,6 +436,21 @@ export function Maintenance() {
       assigned_to: isTechnician ? activeProfile.name : null,
     }).select('*, plants(name)').single();
     if (error) { toast.error(`Failed: ${error.message}`); return; }
+
+    // Optional: photo of the broken/defective item(s) attached at raise time.
+    if (newTicket && raisePhotoBlob) {
+      try {
+        setUploading(true);
+        const r = await uploadMaintenancePhoto(raisePhotoBlob, {
+          ticketId: newTicket.id, plantName: newTicket.plants?.name || 'Plant',
+          photoType: 'defective', creator: activeProfile.name, onProgress: setUploadPct,
+        });
+        await updateRows('maintenance_tickets', { defective_raise_photo_url: r.secure_url }).eq('id', newTicket.id);
+        newTicket.defective_raise_photo_url = r.secure_url;
+      } catch { /* non-blocking — the ticket is already raised */ }
+      finally { setUploading(false); setUploadPct(0); }
+    }
+
     notify({
       target_roles: ['admin', 'unit_head', 'store_manager_maint'],
       title: `Maintenance ticket raised: ${raiseForm.equipment}`,
@@ -473,7 +489,7 @@ export function Maintenance() {
     setRaiseSaved(true);
     await loadData();
     setTimeout(() => {
-      setShowRaisePanel(false); setRaiseSaved(false);
+      setShowRaisePanel(false); setRaiseSaved(false); setRaisePhotoBlob(null);
       setRaiseForm({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
       if (newTicket && raiseForm.assessment === 'needs_part') {
         setSelectedTicket(newTicket); setShowStoreForm(true);
@@ -1880,6 +1896,8 @@ export function Maintenance() {
             <option value="needs_part">Need a part from store</option>
           </PanelSelect>
         </PanelField>
+        <PhotoUploader onBlobReady={setRaisePhotoBlob} label="Defective item photo (optional)" hint="Photo of the broken / defective item(s) — helps the team assess" />
+        {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
         <PanelDivider />
         <PanelFooter saved={raiseSaved} onCancel={() => setShowRaisePanel(false)} onSave={handleRaiseTicket} saveLabel={raising ? 'Raising…' : 'Raise ticket'} successLabel="Ticket raised" successSub="Store manager, admin and unit head notified" disabled={!raiseForm.equipment.trim() || raising} requiredHint="Fill in equipment name to raise ticket" />
       </SlidePanel>

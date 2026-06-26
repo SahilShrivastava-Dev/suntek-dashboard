@@ -543,6 +543,15 @@ export interface Database {
           completion_photo_url: string | null;
           defective_part_photo_url: string | null;
           defective_part_decision: 'repair' | 'scrap' | null;
+          defective_raise_photo_url: string | null; // optional photo of the broken item at raise
+          pm_items_count: number | null;            // Purchase Manager: declared # items
+          pm_bill_total: number | null;             // Purchase Manager: declared bill total
+          pm_bill_url: string | null;               // supplier bill photo (aggregate)
+          pm_ocr_total: number | null;              // OCR-read total
+          pm_ocr_items: number | null;              // OCR-read line-item count
+          pm_ocr_status: string | null;             // 'match' | 'mismatch' | 'unread' | null
+          pm_ocr_raw: unknown | null;               // raw OCR payload
+          pm_mismatch: boolean | null;              // declared vs OCR disagree (advisory, never blocks)
           closed_at: string | null;
           created_at: string;
         };

@@ -472,3 +472,47 @@ export async function extractPurchaseSheet(imageDataUrl: string): Promise<Extrac
   }
   return json as unknown as ExtractedPurchaseSheet;
 }
+
+// ── Supplier bill verification (Purchase Manager) ─────────────────────────────
+
+export interface ExtractedSupplierBill {
+  totalAmount: number | null;
+  lineItemCount: number | null;
+  currency: string | null;
+  raw?: string;
+}
+
+/** OCR a supplier bill photo to read back its grand total + line-item count. */
+export async function extractSupplierBill(imageDataUrl: string): Promise<ExtractedSupplierBill> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  if (!supabaseUrl) throw new Error('VITE_SUPABASE_URL is not set in .env.local');
+
+  const edgeFnUrl = `${supabaseUrl}/functions/v1/extract-supplier-bill`;
+  let response: Response;
+  try {
+    response = await fetch(edgeFnUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(supabaseAnonKey ? {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          apikey: supabaseAnonKey,
+        } : {}),
+      },
+      body: JSON.stringify({ image: imageDataUrl }),
+    });
+  } catch (e: any) {
+    throw new Error(
+      `Network error calling Edge Function.\n` +
+      `Deploy with: supabase functions deploy extract-supplier-bill --no-verify-jwt\n` +
+      `Raw error: ${e?.message ?? e}`
+    );
+  }
+
+  const json = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(`Edge Function error: ${(json as any)?.error ?? `HTTP ${response.status}`}`);
+  }
+  return json as unknown as ExtractedSupplierBill;
+}

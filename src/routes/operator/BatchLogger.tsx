@@ -5,6 +5,7 @@ import { insertRows, upsertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
 import type { Database } from '../../lib/database.types';
 import { BatchSheetUpload } from '../../components/BatchSheetUpload';
+import { useOcrJobs } from '../../contexts/OcrJobsContext';
 import { BatchSheetReview } from '../../components/BatchSheetReview';
 import type { ExtractedBatchSheet } from '../../lib/nvidiaOcr';
 // Sales/Purchase OCR upload moved to the Sales & Purchase pages (admin/unit-head/
@@ -31,6 +32,7 @@ interface BatchLoggerProps {
 
 export function BatchLogger({ embedded = false }: BatchLoggerProps) {
   const toast = useToast();
+  const ocr = useOcrJobs();
   const [batchId, setBatchId] = useState('');
   const [batches, setBatches] = useState<BatchRow[]>([]);
   const [temp, setTemp]           = useState('');
@@ -156,11 +158,12 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
 
   const [saved, setSaved]         = useState(false);
 
-  // Upload-review state: when set, right panel shows extracted data side-by-side
-  const [uploadReview, setUploadReview] = useState<{
-    data: ExtractedBatchSheet;
-    imageUrl: string;
-  } | null>(null);
+  // Batch-sheet OCR job lives in the OcrJobsProvider (above the router) so it
+  // survives navigating away mid-extraction. The review is derived from it.
+  const batchJob = ocr.getJob<ExtractedBatchSheet>('batch');
+  const uploadReview = (batchJob.status === 'done' && batchJob.result)
+    ? { data: batchJob.result, imageUrl: batchJob.previewUrl ?? '' }
+    : null;
 
   // Tab State — driven by the sidebar (?tab=) when embedded in the dashboard.
   const [searchParams] = useSearchParams();
@@ -501,9 +504,8 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
 
             {activeTab === 'upload' ? (
               <BatchSheetUpload
+                channel="batch"
                 reviewing={!!uploadReview}
-                onExtracted={(data, previewUrl) => setUploadReview({ data, imageUrl: previewUrl })}
-                onReset={() => setUploadReview(null)}
                 docLabel="Batch Sheet"
                 accentColor="#7c3aed"
               />
@@ -680,12 +682,12 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
               batches={batches}
               ipAddress={ipAddress}
               onSaved={(savedBatchNo) => {
-                setUploadReview(null);
+                ocr.reset('batch');
                 loadBatches();
                 setActiveTab('reading');
                 toast.success(`Batch #${savedBatchNo} sheet saved to database!`);
               }}
-              onCancel={() => setUploadReview(null)}
+              onCancel={() => ocr.reset('batch')}
             />
           </div>
         ) : null}

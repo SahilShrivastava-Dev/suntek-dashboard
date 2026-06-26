@@ -16,12 +16,15 @@ import { insertRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { useToast } from '../../components/ui/toast';
-import { useDailyLogOcr } from '../../contexts/DailyLogOcrContext';
+import { useOcrJobs } from '../../contexts/OcrJobsContext';
 import {
+  extractDailyLog,
   type ExtractedDailyLog,
   type DailyLogReading,
   type DailyLogTankSummary,
 } from '../../lib/nvidiaOcr';
+
+const OCR_CHANNEL = 'daily-log';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -69,7 +72,8 @@ export function DailyLogPage() {
   const screenBlacklist = useBlacklistGuard();
   // OCR job lives in a provider above the router, so it survives navigating away
   // mid-extraction. This page just reflects + drives that job.
-  const { job, selectFile, extract, reset: resetJob } = useDailyLogOcr();
+  const ocr = useOcrJobs();
+  const job = ocr.getJob<ExtractedDailyLog>(OCR_CHANNEL);
   const previewUrl = job.previewUrl;
   const error = job.error;
   const rawData = job.result;
@@ -100,14 +104,14 @@ export function DailyLogPage() {
   // ── File handling ──────────────────────────────────────────────────────────
   // Selection + extraction run in the OCR provider so they survive navigation.
 
-  const handleFile = useCallback((file: File) => { selectFile(file); }, [selectFile]);
+  const handleFile = useCallback((file: File) => { ocr.select(OCR_CHANNEL, file, 1200); }, [ocr]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
     const f = e.dataTransfer.files?.[0]; if (f) handleFile(f);
   };
 
-  const handleExtract = () => { extract(); };
+  const handleExtract = () => { ocr.extract(OCR_CHANNEL, extractDailyLog); };
 
   // When the background OCR finishes, populate the editable review form once.
   // Runs on completion AND when the user returns to the page mid/post extraction.
@@ -231,7 +235,7 @@ export function DailyLogPage() {
   const reset = () => {
     setSavedDone(false); setSaving(false);
     setReadings([]); populatedRef.current = null;
-    resetJob();
+    ocr.reset(OCR_CHANNEL);
   };
 
   // ── Input style ────────────────────────────────────────────────────────────

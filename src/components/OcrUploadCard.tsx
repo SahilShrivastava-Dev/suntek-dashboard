@@ -1,81 +1,86 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   SalesUploadPanel, PurchaseUploadPanel, SalesReviewPanel, PurchaseReviewPanel,
 } from '../routes/operator/uploadPanels';
 import type { ExtractedSalesSheet, ExtractedPurchaseSheet } from '../lib/nvidiaOcr';
-import { resizeImageToDataUrl, extractSalesSheet, extractPurchaseSheet } from '../lib/nvidiaOcr';
+import { extractSalesSheet, extractPurchaseSheet } from '../lib/nvidiaOcr';
+import { useOcrJobs, type OcrStatus } from '../contexts/OcrJobsContext';
 import { useBlacklistGuard } from '../lib/blacklist/guard';
 import { useToast } from './ui/toast';
 
 type Kind = 'sales' | 'purchase';
 
-interface UploadState {
-  stage: 'idle' | 'loading' | 'done' | 'error';
-  data?: ExtractedSalesSheet | ExtractedPurchaseSheet;
-  imageUrl?: string;
-  error?: string;
+// Map the channel job status onto the upload panels' simpler stage prop.
+function panelStage(status: OcrStatus): 'idle' | 'loading' | 'done' | 'error' {
+  if (status === 'ready' || status === 'processing') return 'loading';
+  if (status === 'done') return 'done';
+  if (status === 'error') return 'error';
+  return 'idle';
 }
 
 /**
  * Collapsible "Upload sheet (OCR)" card for the Sales and Purchase pages.
- *
- * The Sales/Purchase OCR upload used to live inside the Technical Team's batch
- * logger. It now belongs here, where only Admin / Unit Head / Accountant reach it
- * (gate at the call site via the active profile). Saving happens inside the
- * review panels; this card only owns the upload → extract → review lifecycle.
+ * The OCR job runs in the OcrJobsProvider (above the router) so it keeps going
+ * and reconnects if the user navigates away mid-extraction.
  */
 export function OcrUploadCard({ kind }: { kind: Kind }) {
   const toast = useToast();
   const screenBlacklist = useBlacklistGuard();
+  const ocr = useOcrJobs();
   const [open, setOpen] = useState(false);
-  const [state, setState] = useState<UploadState>({ stage: 'idle' });
+  const screenedRef = useRef<unknown>(null);
 
   const isSales = kind === 'sales';
+  const channel = `ocr-${kind}`;
   const accent = isSales ? '#16a34a' : '#dc2626';
   const title = isSales ? 'Upload sales sheet (OCR)' : 'Upload purchase sheet (OCR)';
 
-  async function handleFile(file: File) {
-    const url = URL.createObjectURL(file);
-    setState({ stage: 'loading', imageUrl: url });
-    try {
-      const dataUrl = await resizeImageToDataUrl(file);
-      if (isSales) {
-        const data = await extractSalesSheet(dataUrl);
-        setState({ stage: 'done', data, imageUrl: url });
-        screenBlacklist(
-          [
-            { value: data.customerName ?? '', label: 'Customer' },
-            { value: data.vehicleNumber ?? '', label: 'Vehicle' },
-            { value: data.driverName ?? '', label: 'Driver' },
-          ],
-          { workflow: 'Sales Sheet OCR', source: 'ocr', entityLabel: data.dcNumber ? `DC ${data.dcNumber}` : 'Sales sheet' },
-        );
-      } else {
-        const data = await extractPurchaseSheet(dataUrl);
-        setState({ stage: 'done', data, imageUrl: url });
-        screenBlacklist(
-          [
-            { value: data.supplierName ?? '', label: 'Supplier' },
-            { value: data.supplierGstin ?? '', label: 'GSTIN' },
-            { value: data.buyerName ?? '', label: 'Buyer' },
-          ],
-          { workflow: 'Purchase Sheet OCR', source: 'ocr', entityLabel: data.invoiceNumber ? `Invoice ${data.invoiceNumber}` : 'Purchase sheet' },
-        );
-      }
-    } catch (e) {
-      setState({ stage: 'error', error: e instanceof Error ? e.message : String(e), imageUrl: url });
-    }
-  }
+  const job = isSales
+    ? ocr.getJob<ExtractedSalesSheet>(channel)
+    : ocr.getJob<ExtractedPurchaseSheet>(channel);
 
-  const reset = () => setState({ stage: 'idle' });
+  function handleFile(file: File) {
+    setOpen(true);
+    const extractor: (dataUrl: string) => Promise<ExtractedSalesSheet | ExtractedPurchaseSheet> =
+      isSales ? extractSalesSheet : extractPurchaseSheet;
+    ocr.run(channel, file, extractor);
+  }
+  const reset = () => { screenedRef.current = null; ocr.reset(channel); };
+
+  // Screen the extracted parties against the blacklist once, when the result lands.
+  useEffect(() => {
+    if (job.status !== 'done' || !job.result) return;
+    if (screenedRef.current === job.result) return;
+    screenedRef.current = job.result;
+    if (isSales) {
+      const d = job.result as ExtractedSalesSheet;
+      screenBlacklist(
+        [
+          { value: d.customerName ?? '', label: 'Customer' },
+          { value: d.vehicleNumber ?? '', label: 'Vehicle' },
+          { value: d.driverName ?? '', label: 'Driver' },
+        ],
+        { workflow: 'Sales Sheet OCR', source: 'ocr', entityLabel: d.dcNumber ? `DC ${d.dcNumber}` : 'Sales sheet' },
+      );
+    } else {
+      const d = job.result as ExtractedPurchaseSheet;
+      screenBlacklist(
+        [
+          { value: d.supplierName ?? '', label: 'Supplier' },
+          { value: d.supplierGstin ?? '', label: 'GSTIN' },
+          { value: d.buyerName ?? '', label: 'Buyer' },
+        ],
+        { workflow: 'Purchase Sheet OCR', source: 'ocr', entityLabel: d.invoiceNumber ? `Invoice ${d.invoiceNumber}` : 'Purchase sheet' },
+      );
+    }
+  }, [job.status, job.result, isSales, screenBlacklist]);
+
+  const stage = panelStage(job.status);
+  const panelState = { stage, imageUrl: job.previewUrl ?? undefined, error: job.error ?? undefined };
 
   return (
     <div className="card p-5 mb-5">
-      {/* Header / toggle */}
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between"
-      >
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <span style={{ width: 30, height: 30, borderRadius: 9, background: `${accent}14`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="2.4">
@@ -86,7 +91,9 @@ export function OcrUploadCard({ kind }: { kind: Kind }) {
           </span>
           <div className="text-left">
             <div className="text-[14px] font-bold text-slate-800">{title}</div>
-            <div className="text-[11px] text-slate-500">Snap or upload a sheet — OCR extracts the fields for review</div>
+            <div className="text-[11px] text-slate-500">
+              {job.status === 'processing' ? 'Extracting… (keeps running if you switch tabs)' : 'Snap or upload a sheet — OCR extracts the fields for review'}
+            </div>
           </div>
         </div>
         <svg className="transition-transform duration-200" style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2.4"><path d="m9 6 6 6-6 6" /></svg>
@@ -94,27 +101,27 @@ export function OcrUploadCard({ kind }: { kind: Kind }) {
 
       {open && (
         <div className="mt-4">
-          {state.stage === 'done' && state.data ? (
+          {job.status === 'done' && job.result ? (
             isSales ? (
               <SalesReviewPanel
-                data={state.data as ExtractedSalesSheet}
-                imageUrl={state.imageUrl!}
+                data={job.result as ExtractedSalesSheet}
+                imageUrl={job.previewUrl!}
                 onSaved={() => { reset(); toast.success('Sales sheet saved!'); }}
                 onCancel={reset}
               />
             ) : (
               <PurchaseReviewPanel
-                data={state.data as ExtractedPurchaseSheet}
-                imageUrl={state.imageUrl!}
+                data={job.result as ExtractedPurchaseSheet}
+                imageUrl={job.previewUrl!}
                 onClose={reset}
               />
             )
           ) : (
             <div className="max-w-md">
               {isSales ? (
-                <SalesUploadPanel state={state} onFileSelect={handleFile} onReset={reset} />
+                <SalesUploadPanel state={panelState} onFileSelect={handleFile} onReset={reset} />
               ) : (
-                <PurchaseUploadPanel state={state} onFileSelect={handleFile} onReset={reset} />
+                <PurchaseUploadPanel state={panelState} onFileSelect={handleFile} onReset={reset} />
               )}
             </div>
           )}

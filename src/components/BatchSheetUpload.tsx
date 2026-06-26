@@ -1,107 +1,56 @@
 /**
- * BatchSheetUpload — compact upload zone (left panel)
+ * BatchSheetUpload
  *
- * Handles only: idle → ready → loading → error
- * Calls onExtracted(data, previewUrl) when AI returns structured data.
- * The review + save UI lives in BatchSheetReview (shown in the right panel).
+ * Upload + extract a batch sheet photo. The OCR job runs in the OcrJobsProvider
+ * (above the router) under the given `channel`, so it survives navigating away
+ * mid-extraction. The parent reads the same channel's job to show the review.
  */
 import React, { useState, useRef, useCallback } from 'react';
-import {
-  extractBatchSheet,
-  resizeImageToDataUrl,
-  type ExtractedBatchSheet,
-} from '../lib/nvidiaOcr';
+import { extractBatchSheet, type ExtractedBatchSheet } from '../lib/nvidiaOcr';
+import { useOcrJobs } from '../contexts/OcrJobsContext';
 
 interface BatchSheetUploadProps {
-  /** Called when extraction succeeds — parent renders the review panel */
-  onExtracted: (data: ExtractedBatchSheet, previewUrl: string) => void;
-  /** Whether the component should show as already-extracted (disable re-trigger) */
+  /** OCR channel key (must match the parent reading the result). */
+  channel?: string;
+  /** Whether the parent is showing the review panel (compact state). */
   reviewing?: boolean;
-  /** Reset callback so user can re-upload while reviewing */
+  /** Reset callback so the user can re-upload while reviewing. */
   onReset?: () => void;
-  /** Display label for the document type (e.g. 'Batch Sheet', 'Sales', 'Purchase') */
+  /** Display label for the document type. */
   docLabel?: string;
-  /** Accent color for the upload button (hex or CSS color) */
+  /** Accent color for the upload button. */
   accentColor?: string;
 }
 
-type Stage = 'idle' | 'ready' | 'loading' | 'error';
-
-export function BatchSheetUpload({ onExtracted, reviewing, onReset, docLabel = 'Batch Sheet', accentColor = '#7c3aed' }: BatchSheetUploadProps) {
-  const [stage, setStage] = useState<Stage>('idle');
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+export function BatchSheetUpload({ channel = 'batch', reviewing, onReset, docLabel = 'Batch Sheet', accentColor = '#7c3aed' }: BatchSheetUploadProps) {
+  const ocr = useOcrJobs();
+  const job = ocr.getJob<ExtractedBatchSheet>(channel);
+  const previewUrl = job.previewUrl;
+  const error = job.error;
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const reset = useCallback(() => {
-    setStage('idle');
-    setPreviewUrl(null);
-    setError(null);
-    onReset?.();
-  }, [onReset]);
-
-  const handleFile = useCallback(async (file: File) => {
-    const validTypes = /\.(jpe?g|png|heic|webp)$/i;
-    if (!validTypes.test(file.name) && !file.type.startsWith('image/')) {
-      setError('Please upload a JPG, PNG, or HEIC image.');
-      setStage('error');
-      return;
-    }
-    setError(null);
-    const objectUrl = URL.createObjectURL(file);
-    setPreviewUrl(objectUrl);
-    try {
-      const dataUrl = await resizeImageToDataUrl(file);
-      setStage('ready');
-      // Store for extraction
-      fileInputRef.current && (fileInputRef.current.dataset.dataUrl = dataUrl);
-    } catch (e: any) {
-      setError(`Image processing failed: ${e?.message ?? e}`);
-      setStage('error');
-    }
-  }, []);
+  const reset = useCallback(() => { ocr.reset(channel); onReset?.(); }, [ocr, channel, onReset]);
+  const handleFile = useCallback((file: File) => { ocr.select(channel, file); }, [ocr, channel]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) handleFile(file);
     e.target.value = '';
   };
-
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
+    e.preventDefault(); setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file) handleFile(file);
   };
+  const handleExtract = () => { ocr.extract(channel, extractBatchSheet); };
 
-  const handleExtract = async () => {
-    const dataUrl = fileInputRef.current?.dataset.dataUrl;
-    if (!dataUrl || !previewUrl) return;
-    setStage('loading');
-    setError(null);
-    try {
-      const data = await extractBatchSheet(dataUrl);
-      onExtracted(data, previewUrl);
-      // Keep preview visible but go back to idle (review is shown elsewhere)
-      setStage('idle');
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-      setStage('error');
-    }
-  };
-
-  // ── If parent is showing review, show a compact "reviewing" state ─────────
+  // ── Parent is showing the review → compact "reviewing" state ──────────────
   if (reviewing) {
     return (
       <div className="flex flex-col gap-3">
         {previewUrl && (
-          <img
-            src={previewUrl}
-            alt="Uploaded batch sheet"
-            className="w-full rounded-xl object-cover border border-slate-200 shadow-sm max-h-48"
-            style={{ objectPosition: 'top' }}
-          />
+          <img src={previewUrl} alt="Uploaded batch sheet" className="w-full rounded-xl object-cover border border-slate-200 shadow-sm max-h-48" style={{ objectPosition: 'top' }} />
         )}
         <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2.5 flex items-center gap-2">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5">
@@ -109,10 +58,7 @@ export function BatchSheetUpload({ onExtracted, reviewing, onReset, docLabel = '
           </svg>
           <span className="text-xs font-bold text-violet-700">Extraction complete — review on the right</span>
         </div>
-        <button
-          onClick={reset}
-          className="w-full py-2 rounded-xl border-2 border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 transition"
-        >
+        <button onClick={reset} className="w-full py-2 rounded-xl border-2 border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 transition">
           ↩ Upload different sheet
         </button>
       </div>
@@ -120,43 +66,33 @@ export function BatchSheetUpload({ onExtracted, reviewing, onReset, docLabel = '
   }
 
   // ── Error state ───────────────────────────────────────────────────────────
-  if (stage === 'error') {
+  if (job.status === 'error') {
     return (
       <div className="flex flex-col gap-3">
         <div className="bg-red-50 border border-red-200 rounded-xl p-4">
           <div className="text-xs font-bold text-red-700 mb-1">Extraction failed</div>
-          <div className="text-xs text-red-600 leading-relaxed break-words whitespace-pre-wrap max-h-40 overflow-y-auto">
-            {error}
-          </div>
+          <div className="text-xs text-red-600 leading-relaxed break-words whitespace-pre-wrap max-h-40 overflow-y-auto">{error}</div>
         </div>
-        <button
-          onClick={reset}
-          className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition"
-        >
+        <button onClick={reset} className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition">
           ↩ Try Again
         </button>
       </div>
     );
   }
 
-  // ── Loading state ─────────────────────────────────────────────────────────
-  if (stage === 'loading') {
+  // ── Loading state (keeps running across navigation) ───────────────────────
+  if (job.status === 'processing') {
     return (
       <div className="flex flex-col items-center gap-4 py-6">
         {previewUrl && (
-          <img
-            src={previewUrl}
-            alt="Batch sheet"
-            className="w-full rounded-xl object-cover shadow border border-slate-200 max-h-40"
-            style={{ objectPosition: 'top' }}
-          />
+          <img src={previewUrl} alt="Batch sheet" className="w-full rounded-xl object-cover shadow border border-slate-200 max-h-40" style={{ objectPosition: 'top' }} />
         )}
         <svg className="animate-spin" width="28" height="28" viewBox="0 0 24 24" fill="none">
           <circle cx="12" cy="12" r="10" stroke="#e2e8f0" strokeWidth="3" />
           <path d="M12 2 A10 10 0 0 1 22 12" stroke="#7c3aed" strokeWidth="3" strokeLinecap="round" />
         </svg>
         <div className="text-sm font-bold text-slate-700 text-center">Analyzing batch sheet…</div>
-        <div className="text-xs text-slate-400 text-center">Llama 3.2 Vision 90B reading the table</div>
+        <div className="text-xs text-slate-400 text-center">Reading the table · safe to switch tabs</div>
       </div>
     );
   }
@@ -179,19 +115,11 @@ export function BatchSheetUpload({ onExtracted, reviewing, onReset, docLabel = '
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
         className="cursor-pointer rounded-2xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-2 py-5 px-4 text-center"
-        style={{
-          borderColor: isDragging ? '#7c3aed' : '#cbd5e1',
-          background: isDragging ? '#f5f3ff' : '#f8fafc',
-        }}
+        style={{ borderColor: isDragging ? '#7c3aed' : '#cbd5e1', background: isDragging ? '#f5f3ff' : '#f8fafc' }}
       >
         {previewUrl ? (
           <>
-            <img
-              src={previewUrl}
-              alt="Batch sheet preview"
-              className="w-full rounded-xl object-cover shadow max-h-44"
-              style={{ objectPosition: 'top' }}
-            />
+            <img src={previewUrl} alt="Batch sheet preview" className="w-full rounded-xl object-cover shadow max-h-44" style={{ objectPosition: 'top' }} />
             <div className="text-xs text-slate-400">Tap to change</div>
           </>
         ) : (
@@ -217,7 +145,7 @@ export function BatchSheetUpload({ onExtracted, reviewing, onReset, docLabel = '
         </div>
       )}
 
-      {stage === 'ready' && (
+      {job.status === 'ready' && (
         <button
           onClick={handleExtract}
           className="w-full py-3.5 rounded-xl text-white font-bold text-sm transition-all flex items-center justify-center gap-2"

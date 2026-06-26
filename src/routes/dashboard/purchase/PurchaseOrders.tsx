@@ -19,7 +19,7 @@ const UNIT_LABELS: Record<string, string> = { chlorides: 'Suntek Chlorides', pla
 
 /** An externally-bought maintenance part, DERIVED from a store request (single source). */
 interface MaintPO {
-  id: string; part: string; equipment: string; store: string; supplier: string;
+  id: string; ticketRef: string; part: string; equipment: string; store: string; supplier: string;
   qty: number; unitPrice: number | null; total: number | null; date: string | null; busyRef: string | null;
 }
 
@@ -85,7 +85,7 @@ export function PurchaseOrders() {
           const t = tById.get(s.ticket_id);
           const store = t?.unit ? (UNIT_LABELS[t.unit] || t.unit) : (t?.plants?.name || '—');
           return {
-            id: s.id, part: s.part_name, equipment: t?.equipment || '', store,
+            id: s.id, ticketRef: s.ticket_id.slice(0, 8), part: s.part_name, equipment: t?.equipment || '', store,
             supplier: s.supplier_name || '—', qty: Number(s.quantity ?? 0),
             unitPrice: s.unit_price != null ? Number(s.unit_price) : null,
             total: s.total_price != null ? Number(s.total_price) : null,
@@ -167,7 +167,7 @@ export function PurchaseOrders() {
           <KpiInfoButton info={{ title: 'Total Orders', what: 'Total count of oil/material purchase contracts on record.', source: 'Supabase', tables: ['oil_contracts'] }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total orders</div>
           <div className="text-[28px] font-extrabold mt-1 num">{orders.length + maintPOs.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{maintPOs.length ? `${orders.length} oil · ${maintPOs.length} maintenance` : 'on record'}</div>
+          <div className="text-[11px] text-slate-500 mt-1">{orders.length} material/oil · {maintPOs.length} maintenance</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Total Booked Qty', what: 'Sum of all booked quantities (MT) across all purchase orders.', source: 'Supabase', tables: ['oil_contracts'] }} />
@@ -196,10 +196,13 @@ export function PurchaseOrders() {
       {/* Table — red-soft */}
       <div className="card p-6" style={{ background: 'var(--red-soft)', border: '1px solid #fecaca', position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Purchase Orders List', what: 'All oil/material purchase contracts. New entries via "+ New PO" form.', source: 'Supabase', tables: ['oil_contracts'] }} />
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">Purchase orders</div>
-            <div className="text-xs text-slate-500">Oil & raw material contracts · PO created in Busy</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-base font-bold">Material &amp; oil purchases</span>
+              <span className="badge" style={{ background: '#E0E7FF', color: '#4338CA', fontWeight: 700, fontSize: 10 }}>⟳ BUSY API</span>
+            </div>
+            <div className="text-xs text-slate-500">Oil &amp; raw-material vendor POs · synced from BUSY accounting — separate from the maintenance flow</div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button className="btn-ghost pill px-4 py-2 font-semibold text-sm flex items-center gap-2" onClick={handleExport}>
@@ -212,6 +215,11 @@ export function PurchaseOrders() {
               + New PO
             </button>
           </div>
+        </div>
+        {/* BUSY integration status — these POs will auto-sync from BUSY; manual entry is the stopgap until then. */}
+        <div className="mb-4 rounded-xl px-3 py-2 text-[11px] flex items-center gap-2" style={{ background: '#EEF2FF', border: '1px solid #C7D2FE', color: '#4338CA' }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#F59E0B', display: 'inline-block' }} />
+          <span><b>BUSY sync: not connected yet.</b> Oil/material vendor POs will flow in automatically once the BUSY API is wired. Until then, add them manually with “+ New PO”.</span>
         </div>
         {loadError ? (
           <ErrorState title="Couldn't load purchase orders" message="The purchase order records failed to load."
@@ -255,19 +263,23 @@ export function PurchaseOrders() {
       {/* ── Maintenance purchases (derived from the maintenance flow) ─────────── */}
       <div className="card p-6 mt-5">
         <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-          <div className="text-base font-bold">Maintenance purchases</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-base font-bold">Maintenance purchases</span>
+            <span className="badge" style={{ background: '#DCFCE7', color: '#15803D', fontWeight: 700, fontSize: 10 }}>⚙ from maintenance workflow</span>
+          </div>
           <div className="text-xs num font-bold text-slate-700">Total ₹ {maintPOs.reduce((s, m) => s + (m.total || 0), 0).toLocaleString('en-IN')}</div>
         </div>
-        <div className="text-xs text-slate-500 mb-4">Parts not in store → bought externally · auto-pulled from the maintenance workflow (in sync, no manual entry)</div>
+        <div className="text-xs text-slate-500 mb-4">Spare parts not in store → bought externally · auto-pulled from the maintenance workflow (in sync, no manual entry)</div>
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
-            <thead><tr><th>Part</th><th>Equipment</th><th>Store / unit</th><th>Supplier</th><th className="num">Qty</th><th className="num">Unit price</th><th className="num">Total</th><th>BUSY ref</th><th>Date</th></tr></thead>
+            <thead><tr><th>Ticket</th><th>Part</th><th>Equipment</th><th>Store / unit</th><th>Supplier</th><th className="num">Qty</th><th className="num">Unit price</th><th className="num">Total</th><th>BUSY ref</th><th>Date</th></tr></thead>
             <tbody>
               {maintPOs.length === 0 && (
-                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">No external maintenance buys yet — they appear here when the Purchase Manager bills a part that wasn’t in store.</td></tr>
+                <tr><td colSpan={10} className="text-center text-slate-400 py-6 text-sm">No external maintenance buys yet — they appear here when the Purchase Manager bills a part that wasn’t in store.</td></tr>
               )}
               {maintPOs.map(m => (
                 <tr key={m.id}>
+                  <td className="num text-xs text-slate-500">#{m.ticketRef}</td>
                   <td className="font-semibold">{m.part}</td>
                   <td className="text-slate-500 text-xs">{m.equipment}</td>
                   <td className="text-slate-500 text-xs">{m.store}</td>

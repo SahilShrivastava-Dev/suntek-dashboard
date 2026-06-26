@@ -96,6 +96,12 @@ function fmtDT(d: string | null | undefined): string {
   return d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 }
 function inr(n: number): string { return `₹ ${Math.round(n).toLocaleString('en-IN')}`; }
+function cr(n: number): string { return `₹ ${(n / 1e7).toFixed(2)} Cr`; }
+
+// Annual asset-insurance cover (₹). Asset purchases + maintenance procurement for
+// the financial year are deducted against this cover; any spend beyond it is paid
+// out of pocket. Kept as a constant for now — wire to a per-policy-year source later.
+const INSURANCE_COVERAGE = 38.4e7; // ₹38.4 Cr
 
 const MAINT_CSV_COLUMNS: CsvColumn[] = [
   { header: 'Ticket #', key: 'ticket' },
@@ -226,6 +232,19 @@ export function FAR() {
   );
   const fyTotal = fyEntries.reduce((s, e) => s + e.cost, 0);
   const fyLastUpdated = fyEntries.reduce((mx, e) => { const d = e.closed_at || e.created_at; return d > mx ? d : mx; }, '');
+
+  // ── Insurance deduction math (for the displayed financial year) ───────────────
+  // Deduction = capital assets bought in the FY + maintenance/repair procurement.
+  // Coverage − deduction = headroom left; negative = paid out of pocket.
+  const currentFY = fyOf(today);
+  const displayFY = activeFY || currentFY;
+  const fyAssetSpend = useMemo(
+    () => assets.filter(a => fyOf(a.purchase_date) === displayFY).reduce((s, a) => s + (Number(a.value) || 0), 0),
+    [assets, displayFY],
+  );
+  const fyDeduction = fyAssetSpend + fyTotal;
+  const fyRemaining = INSURANCE_COVERAGE - fyDeduction;
+  const fyOverage = Math.max(0, -fyRemaining);
 
   function downloadMaintCsv() {
     if (!activeFY) return;
@@ -367,10 +386,12 @@ export function FAR() {
           <div className="text-[11px] text-slate-500 mt-1">across 4 factories</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Insurance Coverage', what: 'Total insured value of all assets listed on the Fixed Asset Register. Assets must be individually named on the FAR to be covered by the marine/fire insurance policy.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Each asset\'s invoice value is summed from the FAR entries.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Insurance coverage</div>
-          <div className="text-[28px] font-extrabold mt-1 num">₹ 38.4 Cr</div>
-          <div className="text-[11px] text-green-600 mt-1">all named on FAR</div>
+          <KpiInfoButton info={{ title: 'Insurance Coverage', what: `Annual insurance cover (${cr(INSURANCE_COVERAGE)}). Capital asset purchases plus maintenance/repair procurement for the financial year are deducted against this cover. If total spend exceeds the cover, the excess is paid out of pocket.`, source: 'Derived', note: 'Coverage − (FY asset spend + FY repair procurement) = headroom. FY repairs come from the maintenance workflow; asset spend from FAR purchase values.' }} />
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Insurance coverage · {displayFY}</div>
+          <div className="text-[28px] font-extrabold mt-1 num">{cr(INSURANCE_COVERAGE)}</div>
+          {fyRemaining >= 0
+            ? <div className="text-[11px] text-green-600 mt-1">{cr(fyRemaining)} left · {cr(fyDeduction)} used</div>
+            : <div className="text-[11px] text-red-600 mt-1 font-semibold">⚠ {cr(fyOverage)} over — out of pocket</div>}
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Assets Flagged for Repair', what: 'Count of fixed assets that have been flagged as requiring repair or maintenance and are awaiting resolution. High count = production downtime risk.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Assets with repair flag set in FAR_DATA.' }} />
@@ -412,9 +433,11 @@ export function FAR() {
             {/* Aggregate row */}
             <div className="grid grid-cols-12 gap-4 mb-4">
               <div className="col-span-12 sm:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
-                <div className="text-[11px] text-slate-500 uppercase tracking-wider">Aggregate cost · {activeFY}</div>
+                <div className="text-[11px] text-slate-500 uppercase tracking-wider">Repair cost · {activeFY}</div>
                 <div className="text-[24px] font-extrabold mt-1 num text-slate-800">{inr(fyTotal)}</div>
-                <div className="text-[11px] text-green-600 mt-1">deducted from insurance</div>
+                {fyRemaining >= 0
+                  ? <div className="text-[11px] text-green-600 mt-1">{cr(fyRemaining)} insurance cover left</div>
+                  : <div className="text-[11px] text-red-600 mt-1 font-semibold">⚠ {cr(fyOverage)} over cover — out of pocket</div>}
               </div>
               <div className="col-span-6 sm:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
                 <div className="text-[11px] text-slate-500 uppercase tracking-wider">Maintenance entries</div>
@@ -429,14 +452,15 @@ export function FAR() {
             <div className="overflow-x-auto scroll-x">
               <table className="dt">
                 <thead>
-                  <tr><th>Equipment</th><th>Part / type</th><th>Status</th><th>Closed</th><th className="num">Cost</th></tr>
+                  <tr><th>Ticket</th><th>Equipment</th><th>Part / type</th><th>Status</th><th>Closed</th><th className="num">Cost</th></tr>
                 </thead>
                 <tbody>
                   {fyEntries.length === 0 && (
-                    <tr><td colSpan={5} className="text-center text-slate-400 py-6 text-sm">No maintenance in {activeFY}</td></tr>
+                    <tr><td colSpan={6} className="text-center text-slate-400 py-6 text-sm">No maintenance in {activeFY}</td></tr>
                   )}
                   {fyEntries.map(e => (
                     <tr key={e.id} onClick={() => setDrillEntry(e)} style={{ cursor: 'pointer' }}>
+                      <td className="num text-xs text-slate-500">#{e.id.slice(0, 8)}</td>
                       <td className="font-semibold text-slate-700">{e.equipment}</td>
                       <td className="text-slate-500 text-xs">{e.part}</td>
                       <td className="text-slate-500 text-xs">{e.status.replace(/_/g, ' ')}</td>
@@ -446,7 +470,7 @@ export function FAR() {
                   ))}
                   {fyEntries.length > 0 && (
                     <tr style={{ borderTop: '2px solid #E2E8F0' }}>
-                      <td colSpan={4} className="font-bold text-right pr-4">Total · {activeFY}</td>
+                      <td colSpan={5} className="font-bold text-right pr-4">Total · {activeFY}</td>
                       <td className="num font-extrabold text-slate-800">{inr(fyTotal)}</td>
                     </tr>
                   )}

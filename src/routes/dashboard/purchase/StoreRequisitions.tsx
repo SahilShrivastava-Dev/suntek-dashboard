@@ -19,6 +19,7 @@ const UNIT_LABELS: Record<string, string> = { chlorides: 'Suntek Chlorides', pla
 interface RegisterRow {
   id: string; part: string; store: string; equipment: string;
   inStore: number; requested: number; remaining: number;
+  ticketRef: string; hasPhoto: boolean;
 }
 function regStatus(remaining: number): { label: string; bg: string; color: string } {
   if (remaining <= 0) return { label: 'Out of stock', bg: '#FEE2E2', color: '#DC2626' };
@@ -109,7 +110,12 @@ export function StoreRequisitions() {
           const store = t?.unit ? (UNIT_LABELS[t.unit] || t.unit) : (t?.plants?.name || 'Store');
           const inStore = Number(s.qty_in_store ?? 0);
           const requested = Number(s.quantity ?? 0);
-          return { id: s.id, part: s.part_name, store, equipment: t?.equipment || '', inStore, requested, remaining: Math.max(0, inStore - requested) };
+          return {
+            id: s.id, part: s.part_name, store, equipment: t?.equipment || '',
+            inStore, requested, remaining: Math.max(0, inStore - requested),
+            ticketRef: s.ticket_id.slice(0, 8),
+            hasPhoto: !!(s.handover_photo_url || s.handover_invoice_url),
+          };
         });
       setRegister(reg);
       setLoadError(false);
@@ -235,15 +241,16 @@ export function StoreRequisitions() {
 
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
-            <thead><tr><th>Part</th><th>Equipment</th><th>Store</th><th className="num">In store</th><th className="num">Requested</th><th className="num">Remaining</th><th>Status</th></tr></thead>
+            <thead><tr><th>Ticket</th><th>Part</th><th>Equipment</th><th>Store</th><th className="num">In store</th><th className="num">Requested</th><th className="num">Remaining</th><th>Status</th><th>Pic</th></tr></thead>
             <tbody>
               {shownReg.length === 0 && (
-                <tr><td colSpan={7} className="text-center text-slate-400 py-6 text-sm">No in-store parts yet — fills when a store manager marks a maintenance part “in stock”.</td></tr>
+                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">No in-store parts yet — fills when a store manager marks a maintenance part “in stock”.</td></tr>
               )}
               {shownReg.map(r => {
                 const st = regStatus(r.remaining);
                 return (
                   <tr key={r.id}>
+                    <td className="num text-xs text-slate-500">#{r.ticketRef}</td>
                     <td className="font-semibold text-slate-700">{r.part}</td>
                     <td className="text-slate-500 text-xs">{r.equipment}</td>
                     <td className="text-slate-500 text-xs">{r.store}</td>
@@ -251,6 +258,7 @@ export function StoreRequisitions() {
                     <td className="num">{r.requested}</td>
                     <td className="num font-bold" style={{ color: st.color }}>{r.remaining}</td>
                     <td><span className="badge" style={{ background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span></td>
+                    <td title="Photo of the part supplied to the technician"><PicBadge has={r.hasPhoto} /></td>
                   </tr>
                 );
               })}

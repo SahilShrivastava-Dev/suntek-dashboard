@@ -550,6 +550,7 @@ export interface Database {
           busy_transaction_ref: string | null;
           unit_price: number | null;
           total_price: number | null;
+          supplier_name: string | null;
           handover_invoice_url: string | null;
           handover_photo_url: string | null;
           handover_notes: string | null;

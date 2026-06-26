@@ -10,6 +10,22 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import type { Database } from '../../../lib/database.types';
 
 type ReqRow = Database['public']['Tables']['store_requisitions']['Row'] & { plants?: { name: string | null } | null };
+type MaintStoreReq = Database['public']['Tables']['maintenance_store_requests']['Row'];
+type MaintTicket = Database['public']['Tables']['maintenance_tickets']['Row'] & { plants?: { name: string | null } | null };
+
+const UNIT_LABELS: Record<string, string> = { chlorides: 'Suntek Chlorides', plasticiser: 'Suntek Plasticiser' };
+
+/** A store-register row, DERIVED from a maintenance store request (single source). */
+interface RegisterRow {
+  id: string; part: string; store: string; equipment: string;
+  inStore: number; requested: number; remaining: number;
+  ticketRef: string; hasPhoto: boolean;
+}
+function regStatus(remaining: number): { label: string; bg: string; color: string } {
+  if (remaining <= 0) return { label: 'Out of stock', bg: '#FEE2E2', color: '#DC2626' };
+  if (remaining <= 2) return { label: 'Low', bg: '#FEF3C7', color: '#D97706' };
+  return { label: 'In stock', bg: '#DCFCE7', color: '#16A34A' };
+}
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -58,6 +74,9 @@ export function StoreRequisitions() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
+  // Store register — derived from the maintenance store requests (in-store path)
+  const [register, setRegister] = useState<RegisterRow[]>([]);
+  const [storeFilter, setStoreFilter] = useState<string[]>([]); // empty = all stores
 
   async function load() {
     try {
@@ -72,6 +91,33 @@ export function StoreRequisitions() {
         .returns<ReqRow[]>();
       if (error) throw error;
       setItems(data || []);
+
+      // Derive the store register from the maintenance flow (parent source):
+      // in-store store requests become register rows; remaining = in-store − requested.
+      const { data: tickets } = await supabase.from('maintenance_tickets')
+        .select('*, plants(name)').eq('type', 'emergency').returns<MaintTicket[]>();
+      const tIds = (tickets || []).map(t => t.id);
+      let srs: MaintStoreReq[] = [];
+      if (tIds.length) {
+        const { data: srData } = await supabase.from('maintenance_store_requests').select('*').in('ticket_id', tIds).returns<MaintStoreReq[]>();
+        srs = srData || [];
+      }
+      const tById = new Map((tickets || []).map(t => [t.id, t]));
+      const reg: RegisterRow[] = srs
+        .filter(s => s.store_decision === 'available')
+        .map(s => {
+          const t = tById.get(s.ticket_id);
+          const store = t?.unit ? (UNIT_LABELS[t.unit] || t.unit) : (t?.plants?.name || 'Store');
+          const inStore = Number(s.qty_in_store ?? 0);
+          const requested = Number(s.quantity ?? 0);
+          return {
+            id: s.id, part: s.part_name, store, equipment: t?.equipment || '',
+            inStore, requested, remaining: Math.max(0, inStore - requested),
+            ticketRef: s.ticket_id.slice(0, 8),
+            hasPhoto: !!(s.handover_photo_url || s.handover_invoice_url),
+          };
+        });
+      setRegister(reg);
       setLoadError(false);
     } catch (err) {
       console.error('[StoreRequisitions] load failed', err);
@@ -84,6 +130,11 @@ export function StoreRequisitions() {
   useEffect(() => { load(); }, []);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : FALLBACK_PLANTS;
+
+  // ── Store register derived ────────────────────────────────────────────────
+  const stores = [...new Set(register.map(r => r.store))].sort();
+  const shownReg = storeFilter.length ? register.filter(r => storeFilter.includes(r.store)) : register;
+  function toggleStore(s: string) { setStoreFilter(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]); }
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -161,6 +212,58 @@ export function StoreRequisitions() {
             <div className="text-[11px] text-slate-500">4 · Otherwise</div>
             <div className="font-semibold text-sm mt-1">Vijay Ji approves purchase</div>
           </div>
+        </div>
+      </div>
+
+      {/* ── Store register (maintenance spare-parts inventory) ──────────────── */}
+      <div className="card p-6 mb-5">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+          <div>
+            <div className="text-base font-bold">Store register · spare parts</div>
+            <div className="text-xs text-slate-500">Live stock per store — fed by the maintenance flow · quantity drops when a part is issued</div>
+          </div>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#16A34A', display: 'inline-block' }} /> In stock</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} /> Low</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#DC2626', display: 'inline-block' }} /> Out</span>
+          </div>
+        </div>
+
+        {/* Store filter — single / multi / all */}
+        {stores.length > 0 && (
+          <div className="flex gap-2 mb-4 flex-wrap">
+            <button onClick={() => setStoreFilter([])} className={`chip${storeFilter.length === 0 ? ' active' : ''}`}>All stores</button>
+            {stores.map(s => (
+              <button key={s} onClick={() => toggleStore(s)} className={`chip${storeFilter.includes(s) ? ' active' : ''}`}>{s}</button>
+            ))}
+          </div>
+        )}
+
+        <div className="overflow-x-auto scroll-x">
+          <table className="dt">
+            <thead><tr><th>Ticket</th><th>Part</th><th>Equipment</th><th>Store</th><th className="num">In store</th><th className="num">Requested</th><th className="num">Remaining</th><th>Status</th><th>Pic</th></tr></thead>
+            <tbody>
+              {shownReg.length === 0 && (
+                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">No in-store parts yet — fills when a store manager marks a maintenance part “in stock”.</td></tr>
+              )}
+              {shownReg.map(r => {
+                const st = regStatus(r.remaining);
+                return (
+                  <tr key={r.id}>
+                    <td className="num text-xs text-slate-500">#{r.ticketRef}</td>
+                    <td className="font-semibold text-slate-700">{r.part}</td>
+                    <td className="text-slate-500 text-xs">{r.equipment}</td>
+                    <td className="text-slate-500 text-xs">{r.store}</td>
+                    <td className="num">{r.inStore}</td>
+                    <td className="num">{r.requested}</td>
+                    <td className="num font-bold" style={{ color: st.color }}>{r.remaining}</td>
+                    <td><span className="badge" style={{ background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span></td>
+                    <td title="Photo of the part supplied to the technician"><PicBadge has={r.hasPhoto} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 

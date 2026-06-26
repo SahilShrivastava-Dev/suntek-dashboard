@@ -1,15 +1,16 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { supabase } from '../../../lib/supabase';
 
+// Each subtab maps to the Supabase table that backs its page. The badge shows
+// the live row count for that table (hidden when zero) — no hardcoded numbers.
 const SUBTABS = [
-  { id: 'far',      label: 'FAR',             count: 42 },
-  { id: 'maint',    label: 'Maintenance',     count: 28 },
-  { id: 'activity', label: 'Activity Log',    count: 14 },
-  { id: 'storereq', label: 'Store Req',       count: 7  },
-  { id: 'purchase', label: 'Purchase orders', count: 12 },
-  { id: 'marine',   label: 'Marine Insurance'           },
-  { id: 'labour',   label: 'Labour'                     },
-];
+  { id: 'far',      label: 'FAR',             table: 'fixed_assets'      },
+  { id: 'maint',    label: 'Maintenance',     table: 'maintenance_tickets' },
+  { id: 'activity', label: 'Activity Log',    table: 'activity_logs'     },
+  { id: 'storereq', label: 'Store Req',       table: 'store_requisitions' },
+  { id: 'purchase', label: 'Purchase orders', table: 'oil_contracts'     },
+] as const;
 
 function ArrowRight() {
   return (
@@ -22,6 +23,24 @@ function ArrowRight() {
 export function PurchaseLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [counts, setCounts] = React.useState<Record<string, number>>({});
+
+  // Fetch live row counts for each tab (count-only, no rows downloaded).
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(
+        SUBTABS.map(async (t) => {
+          const { count, error } = await supabase
+            .from(t.table)
+            .select('*', { count: 'exact', head: true });
+          return [t.id, error ? 0 : (count ?? 0)] as const;
+        })
+      );
+      if (!cancelled) setCounts(Object.fromEntries(results));
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Determine active subtab from URL
   const segments = location.pathname.split('/');
@@ -94,8 +113,8 @@ export function PurchaseLayout() {
             onClick={() => goToTab(t.id)}
           >
             {t.label}
-            {t.count !== undefined && (
-              <span className="count">{t.count}</span>
+            {counts[t.id] > 0 && (
+              <span className="count">{counts[t.id]}</span>
             )}
           </div>
         ))}

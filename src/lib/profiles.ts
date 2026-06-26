@@ -111,28 +111,6 @@ export const MOCK_PROFILES: MockProfile[] = [
     accessNote: 'Stock levels and store requisitions only',
   },
 
-  // ── L2: Labour Manager — worker cost tracking ─────────────────────────────
-  // Sees: Labour cost page, Activity log only
-  // Hidden: Everything with financial, production or sales data
-  {
-    id: 'labour_manager',
-    name: 'Mohan Lal',
-    role: 'L2',
-    roleLabel: 'Labour Manager',
-    roleDescription: 'Labour cost tracking · worker activity',
-    initials: 'ML',
-    avatarFrom: 'from-green-400',
-    avatarTo: 'to-green-600',
-    homeRoute: '/dashboard/purchase/labour',  // Land directly on labour page
-    allowedDashboardRoutes: [
-      '/dashboard/purchase/labour',           // Labour cost analysis
-      '/dashboard/purchase/activity',         // Plant worker activity logs
-      // Nothing else — no overview, no stock, no batches, no sales
-    ],
-    standaloneOnly: false,
-    accessNote: 'Labour costs and activity log only',
-  },
-
   // ── L1: Night Manager — check-in form embedded in dashboard ──────────────
   // Single-purpose: GPS photo check-in. Sidebar shows, only the check-in
   // form appears on the right. No access to any other dashboard section.

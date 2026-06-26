@@ -20,8 +20,6 @@ const PURCHASE_TABS = [
   { label: 'Activity Log',       tab: 'activity'  },
   { label: 'Store Req',          tab: 'storereq'  },
   { label: 'Purchase orders',    tab: 'purchase'  },
-  { label: 'Marine Ins.',        tab: 'marine'    },
-  { label: 'Labour',             tab: 'labour'    },
 ];
 
 // ── Icons ─────────────────────────────────────────────────────────────────────

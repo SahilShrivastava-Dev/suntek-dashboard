@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
@@ -11,7 +11,31 @@ import { useRoleContext } from '../../../contexts/RoleContext';
 import { useNotifications } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
 
-type ActivityRow = Database['public']['Tables']['activity_logs']['Row'] & { plants?: { name: string | null } | null };
+type Tables = Database['public']['Tables'];
+type PlantRel = { plants?: { name: string | null } | null };
+type ActivityRow = Tables['activity_logs']['Row'] & PlantRel;
+type TicketRow = Tables['maintenance_tickets']['Row'] & PlantRel;
+type StoreReqRow = Tables['maintenance_store_requests']['Row'];
+
+// One normalized row for the unified timeline — whether it came from the
+// activity_logs table (manual) or was derived from the maintenance workflow.
+type UnifiedRow = {
+  key: string;
+  equipment: string;
+  type: string;            // event kind / activity type
+  date: string;            // ISO or YYYY-MM-DD
+  doneBy: string | null;
+  verifiedBy: string | null;
+  plant: string | null;
+  hasPhoto: boolean;
+  ticketRef: string | null;   // short maintenance ticket id, e.g. "f855d730"
+  source: 'manual' | 'maintenance';
+};
+
+const ticketRef = (id: string) => id.slice(0, 8);
+const t = (ts: string | null | undefined) => (ts ? new Date(ts).getTime() : 0);
+const fmtDate = (d: string | null | undefined) =>
+  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
 function PicBadge({ has }: { has: boolean }) {
   return (
@@ -26,6 +50,75 @@ function PicBadge({ has }: { has: boolean }) {
 
 const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 
+// Build the derived maintenance-lifecycle events. Each milestone (raised, part
+// procured, part handed over, repair completed, defective part decided) becomes
+// one timeline row — so the Activity Log is the single overall record of "what
+// happened, where, by whom, with proof", keyed by the maintenance ticket #.
+function deriveMaintenanceEvents(tickets: TicketRow[], srs: StoreReqRow[]): UnifiedRow[] {
+  const srByTicket = new Map<string, StoreReqRow[]>();
+  for (const s of srs) {
+    if (!s.ticket_id) continue;
+    (srByTicket.get(s.ticket_id) ?? srByTicket.set(s.ticket_id, []).get(s.ticket_id)!).push(s);
+  }
+
+  const out: UnifiedRow[] = [];
+  for (const tk of tickets) {
+    const ref = ticketRef(tk.id);
+    const plant = tk.plants?.name ?? null;
+    const kindWord = tk.type === 'emergency' ? 'Emergency' : 'Periodic';
+
+    // 1) Raised
+    out.push({
+      key: `${tk.id}:raised`, equipment: tk.equipment, type: `${kindWord} raised`,
+      date: tk.created_at, doneBy: tk.raised_by || tk.assigned_to || null,
+      verifiedBy: null, plant, hasPhoto: false, ticketRef: ref, source: 'maintenance',
+    });
+
+    // Store-request driven milestones
+    for (const sr of srByTicket.get(tk.id) ?? []) {
+      if (sr.supplier_name || sr.busy_transaction_ref) {
+        out.push({
+          key: `${sr.id}:procured`, equipment: tk.equipment,
+          type: `Part procured · ${sr.part_name}`, date: tk.closed_at || sr.created_at,
+          doneBy: sr.supplier_name || 'Procurement', verifiedBy: null, plant,
+          hasPhoto: !!sr.handover_invoice_url, ticketRef: ref, source: 'maintenance',
+        });
+      }
+      if (sr.handover_confirmed_at) {
+        out.push({
+          key: `${sr.id}:handover`, equipment: tk.equipment,
+          type: `Part handed over · ${sr.part_name}`, date: sr.handover_confirmed_at,
+          doneBy: 'Store', verifiedBy: null, plant,
+          hasPhoto: !!(sr.handover_photo_url || sr.handover_invoice_url), ticketRef: ref, source: 'maintenance',
+        });
+      }
+    }
+
+    // 2) Defective-part decision
+    if (tk.defective_part_decision) {
+      out.push({
+        key: `${tk.id}:defective`, equipment: tk.equipment,
+        type: `Defective part ${tk.defective_part_decision === 'scrap' ? 'scrapped' : 'sent for repair'}`,
+        date: tk.closed_at || tk.created_at, doneBy: tk.assigned_to || null, verifiedBy: null, plant,
+        hasPhoto: !!tk.defective_part_photo_url, ticketRef: ref, source: 'maintenance',
+      });
+    }
+
+    // 3) Completed / closed
+    if (tk.status === 'closed') {
+      out.push({
+        key: `${tk.id}:done`, equipment: tk.equipment,
+        type: tk.type === 'emergency' ? 'Repair completed' : 'Periodic check completed',
+        date: tk.closed_at || tk.created_at, doneBy: tk.assigned_to || null,
+        verifiedBy: tk.raised_role || null,
+        plant, hasPhoto: !!(tk.completion_photo_url || tk.defective_part_photo_url),
+        ticketRef: ref, source: 'maintenance',
+      });
+    }
+  }
+  return out;
+}
+
 export function ActivityLog() {
   const toast = useToast();
   const people = useDirectory();
@@ -35,9 +128,12 @@ export function ActivityLog() {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [logs, setLogs] = useState<ActivityRow[]>([]);
+  const [tickets, setTickets] = useState<TicketRow[]>([]);
+  const [storeReqs, setStoreReqs] = useState<StoreReqRow[]>([]);
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [showManualOnly, setShowManualOnly] = useState(false);
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' });
 
@@ -47,13 +143,22 @@ export function ActivityLog() {
         .returns<{ id: string; name: string }[]>();
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
-      const { data, error } = await supabase
-        .from('activity_logs')
-        .select('*, plants(name)')
-        .order('date', { ascending: false })
-        .returns<ActivityRow[]>();
-      if (error) throw error;
-      setLogs(data || []);
+      const [logsRes, ticketsRes] = await Promise.all([
+        supabase.from('activity_logs').select('*, plants(name)').order('date', { ascending: false }).returns<ActivityRow[]>(),
+        supabase.from('maintenance_tickets').select('*, plants(name)').order('created_at', { ascending: false }).returns<TicketRow[]>(),
+      ]);
+      if (logsRes.error) throw logsRes.error;
+      setLogs(logsRes.data || []);
+
+      const tks = ticketsRes.data || [];
+      setTickets(tks);
+      const ids = tks.map(x => x.id);
+      if (ids.length) {
+        const { data: srData } = await supabase.from('maintenance_store_requests').select('*').in('ticket_id', ids).returns<StoreReqRow[]>();
+        setStoreReqs(srData || []);
+      } else {
+        setStoreReqs([]);
+      }
       setLoadError(false);
     } catch (err) {
       console.error('[ActivityLog] load failed', err);
@@ -64,6 +169,29 @@ export function ActivityLog() {
   }
 
   useEffect(() => { load(); }, []);
+
+  // Merge manual entries + derived maintenance events into one sorted timeline.
+  const rows = useMemo<UnifiedRow[]>(() => {
+    const manual: UnifiedRow[] = logs.map((a, i) => ({
+      key: a.id || `manual-${i}`,
+      equipment: a.equipment || '—',
+      type: a.type,
+      date: a.date,
+      doneBy: a.done_by,
+      verifiedBy: a.verified_by,
+      plant: a.plants?.name ?? null,
+      hasPhoto: !!a.photo_url,
+      ticketRef: null,
+      source: 'manual',
+    }));
+    const derived = deriveMaintenanceEvents(tickets, storeReqs);
+    const all = showManualOnly ? manual : [...manual, ...derived];
+    return all.sort((a, b) => t(b.date) - t(a.date));
+  }, [logs, tickets, storeReqs, showManualOnly]);
+
+  const fromMaintenance = rows.filter(r => r.source === 'maintenance').length;
+  const verified = rows.filter(r => r.verifiedBy).length;
+  const withPhoto = rows.length ? Math.round((rows.filter(r => r.hasPhoto).length / rows.length) * 100) : 0;
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
 
@@ -126,41 +254,49 @@ export function ActivityLog() {
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Activities This Week', what: 'Count of non-regular maintenance activities logged this week across all plants — repairs, inspections, new installations, etc. Only unscheduled/ad-hoc activities; routine maintenance is separate.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Activities · total</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{logs.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">non-maintenance</div>
+          <KpiInfoButton info={{ title: 'All activity events', what: 'Every activity across all plants — manual log entries PLUS milestones auto-fed from the maintenance workflow (raised, procured, handed over, completed, defective decided). The single overall record.', source: 'Derived', note: 'Manual activity_logs + maintenance_tickets / maintenance_store_requests milestones.' }} />
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Activity events · total</div>
+          <div className="text-[28px] font-extrabold mt-1 num">{rows.length}</div>
+          <div className="text-[11px] text-slate-500 mt-1">{fromMaintenance} from maintenance</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Activities Verified', what: 'Count of logged activities that have been verified by a supervisor or manager. Verification confirms work was completed correctly and photo proof reviewed.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity', note: 'Verified by field set in ACTIVITY mock data.' }} />
+          <KpiInfoButton info={{ title: 'Verified', what: 'Activity events that carry a verifier (supervisor / unit head sign-off, or the raising role on a completed maintenance ticket).', source: 'Derived' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Verified</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-green-600">{logs.filter(l => l.verified_by).length}</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-green-600">{verified}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Pending Verification', what: 'Activities logged but not yet verified. These need supervisor sign-off. High pending count = verification backlog.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity' }} />
+          <KpiInfoButton info={{ title: 'Pending verification', what: 'Events with no verifier yet. These need supervisor sign-off.', source: 'Derived' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">Pending verification</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{logs.filter(l => !l.verified_by).length}</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{rows.length - verified}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Photo Proof Coverage', what: 'Percentage of logged activities that have a photographic proof attached. Photos are saved to OneDrive. 100% is required for audit compliance.', source: 'Form entry', formLabel: '+ Log activity form (OCR upload)', formPath: '/dashboard/purchase/activity', note: 'Photo uploaded at the time of logging; stored in OneDrive, not Supabase.' }} />
+          <KpiInfoButton info={{ title: 'Photo proof coverage', what: 'Percentage of activity events that carry photo proof — manual uploads plus the completion / handover / defective-part photos captured through the maintenance workflow.', source: 'Derived' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">With photo proof</div>
-          <div className="text-[28px] font-extrabold mt-1 num">
-            {logs.length > 0 ? Math.round((logs.filter(l => l.photo_url).length / logs.length) * 100) : 0}%
-          </div>
+          <div className="text-[28px] font-extrabold mt-1 num">{withPhoto}%</div>
         </div>
       </div>
 
       {/* Table — amber-soft */}
       <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a', position: 'relative' }}>
-        <KpiInfoButton info={{ title: 'Activity Log Book', what: 'Record of all non-routine activities (repairs, inspections, installations) across all plants. Each entry requires: equipment name, who did it, date, plant, and photo proof. Photos are stored in OneDrive. New entries via "+ Log activity" form.', source: 'Form entry', formLabel: '+ Log activity form', formPath: '/dashboard/purchase/activity', note: 'Data from ACTIVITY mock (mockData.ts). Future: Supabase activity_log table.' }} />
+        <KpiInfoButton info={{ title: 'Activity log book', what: 'The overall record of activity across all plants. Maintenance milestones flow in automatically and are tagged with their ticket #; ad-hoc work is added with "+ Log activity". Every row aims to carry photo proof.', source: 'Derived', note: 'Auto-fed from the maintenance workflow + manual activity_logs entries.' }} />
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
             <div className="text-base font-bold">Activity log book</div>
-            <div className="text-xs text-slate-500">Anything outside the regular maintenance schedule · photos saved to OneDrive</div>
+            <div className="text-xs text-slate-500">Maintenance milestones auto-flow in (tagged with ticket #) · ad-hoc work added manually · photos on file</div>
           </div>
-          <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-            + Log activity
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className={`pill px-3 py-2 text-xs font-semibold ${showManualOnly ? 'btn-ghost' : 'btn-ghost'}`}
+              style={{ border: '1px solid #E2E8F0', background: showManualOnly ? '#fff' : '#0F172A', color: showManualOnly ? '#475569' : '#fff' }}
+              onClick={() => setShowManualOnly(v => !v)}
+              title="Toggle auto-fed maintenance events"
+            >
+              {showManualOnly ? 'Show maintenance feed' : 'Manual only'}
+            </button>
+            <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
+              + Log activity
+            </button>
+          </div>
         </div>
         {loadError ? (
           <ErrorState title="Couldn't load the activity log" message="The activity records failed to load."
@@ -172,24 +308,30 @@ export function ActivityLog() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Equipment</th><th>Type</th><th>Date</th>
+                <th>Equipment</th><th>Activity</th><th>Ticket</th><th>Date</th>
                 <th>Done by</th><th>Verified by</th><th>Plant</th><th>Pic</th>
               </tr>
             </thead>
             <tbody>
-              {logs.map((a, i) => (
-                <tr key={a.id || i} style={{ cursor: 'pointer' }}>
+              {rows.map((a) => (
+                <tr key={a.key} style={{ cursor: 'default' }}>
                   <td className="font-semibold">{a.equipment || '—'}</td>
-                  <td className="text-slate-500">{a.type}</td>
-                  <td className="text-slate-500 text-xs">{a.date}</td>
-                  <td>{a.done_by || '—'}</td>
-                  <td className="text-slate-500">{a.verified_by || '—'}</td>
-                  <td>{a.plants?.name || '—'}</td>
-                  <td><PicBadge has={!!a.photo_url} /></td>
+                  <td className="text-slate-600">
+                    {a.type}
+                    {a.source === 'maintenance' && (
+                      <span className="badge" style={{ marginLeft: 6, background: '#E0F2FE', color: '#0369A1', fontWeight: 700, fontSize: 10 }}>auto</span>
+                    )}
+                  </td>
+                  <td>{a.ticketRef ? <span className="num text-xs text-slate-500">#{a.ticketRef}</span> : <span className="text-slate-300">—</span>}</td>
+                  <td className="text-slate-500 text-xs">{fmtDate(a.date)}</td>
+                  <td>{a.doneBy || '—'}</td>
+                  <td className="text-slate-500">{a.verifiedBy || '—'}</td>
+                  <td>{a.plant || '—'}</td>
+                  <td><PicBadge has={a.hasPhoto} /></td>
                 </tr>
               ))}
-              {logs.length === 0 && (
-                <tr><td colSpan={7} className="text-center text-slate-400 py-6 text-sm">No activity logs yet — add the first one</td></tr>
+              {rows.length === 0 && (
+                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">No activity yet — maintenance events will appear here automatically, or add one manually</td></tr>
               )}
             </tbody>
           </table>

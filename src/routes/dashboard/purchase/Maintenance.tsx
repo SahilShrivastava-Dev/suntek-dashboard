@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { insertRows, updateRows } from '../../../lib/db';
@@ -116,6 +117,111 @@ function unitOf(plant?: string | null): Unit | null {
   return null;
 }
 
+// ── Row actions menu (gear → dropdown) ─────────────────────────────────────────
+// Replaces a row of inline buttons with one gear icon that opens a compact menu.
+function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, onDelete }: {
+  isActive: boolean;
+  deleting: boolean;
+  onRevise: () => void;
+  onToggle: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setCoords({ top: r.bottom + 6, right: window.innerWidth - r.right });
+    }
+    setOpen(o => !o);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false); }
+    function onScroll() { setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [open]);
+
+  const item: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
+    background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#334155',
+    textAlign: 'left', whiteSpace: 'nowrap',
+  };
+  const run = (fn: () => void) => () => { setOpen(false); fn(); };
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={toggle}
+        title="Manage schedule"
+        aria-label="Manage schedule"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          width: 30, height: 30, borderRadius: 8, border: '1px solid #E2E8F0',
+          background: open ? '#F1F5F9' : '#fff', cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#475569',
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </button>
+      {open && createPortal(
+        <div ref={menuRef} role="menu" style={{
+          position: 'fixed', top: coords.top, right: coords.right, zIndex: 1000,
+          minWidth: 168, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12,
+          boxShadow: '0 12px 32px rgba(15,23,42,0.14)', padding: 4, overflow: 'hidden',
+        }}>
+          <button role="menuitem" style={item} onClick={run(onRevise)} onMouseEnter={e => (e.currentTarget.style.background = '#F1F5F9')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+            Revise
+          </button>
+          <button role="menuitem" style={item} onClick={run(onToggle)} onMouseEnter={e => (e.currentTarget.style.background = '#F1F5F9')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+            {isActive ? (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            )}
+            {isActive ? 'Pause' : 'Resume'}
+          </button>
+          <button role="menuitem" style={item} onClick={run(onDuplicate)} onMouseEnter={e => (e.currentTarget.style.background = '#F1F5F9')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+            Duplicate
+          </button>
+          <div style={{ height: 1, background: '#F1F5F9', margin: '4px 0' }} />
+          <button role="menuitem" disabled={deleting} style={{ ...item, color: '#DC2626' }} onClick={run(onDelete)} onMouseEnter={e => (e.currentTarget.style.background = '#FEF2F2')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function Maintenance() {
@@ -143,6 +249,7 @@ export function Maintenance() {
   async function notifyTicketWatchers(t: TicketRow, title: string, body: string, type: AppNotification['type'] = 'info') {
     await notifyWatchers({ ref: ticketRef(t), actor: actorObj(), title, body, type, addNotification: addNote });
   }
+
   const isTechnician = role === 'technician_shd';
   const isAdmin = role === 'admin';
   const isUnitHead = role === 'unit_head';
@@ -164,6 +271,9 @@ export function Maintenance() {
   const [selectedStoreReq, setSelectedStoreReq] = useState<StoreReqRow | null>(null);
   const [showRaisePanel, setShowRaisePanel] = useState(false);
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
+  // When set, the schedule panel is in "revise" mode editing this row; null = creating new.
+  const [editingSchedule, setEditingSchedule] = useState<ScheduleRow | null>(null);
+  const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
 
   // Form state
   const today = new Date().toISOString().split('T')[0];
@@ -189,6 +299,7 @@ export function Maintenance() {
   // Other action state
   const [busyRef, setBusyRef] = useState('');
   const [unitPrice, setUnitPrice] = useState(''); // procurement unit price (₹) → feeds FAR cost
+  const [supplierName, setSupplierName] = useState(''); // external vendor → recorded as a Purchase Order
   const [defectiveDecision, setDefectiveDecision] = useState<'repair' | 'scrap' | ''>('');
 
   // Upload
@@ -771,23 +882,33 @@ export function Maintenance() {
 
   async function markPurchased() {
     if (!selectedTicket || !selectedStoreReq || !busyRef.trim()) return;
-    const qty = selectedStoreReq.quantity || 1;
-    const up = unitPrice.trim() ? parseFloat(unitPrice.replace(/[^0-9.]/g, '')) : null;
-    const total = up != null ? up * qty : null;
-    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, unit_price: up, total_price: total })
+    // Unit head procures: records the BUSY ref + supplier. Price is entered by
+    // the Purchase Manager (from the actual bill) at the next stage.
+    const supplier = supplierName.trim();
+    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null })
       .eq('id', selectedStoreReq.id);
-    setSelectedStoreReq((sr) => sr ? { ...sr, busy_transaction_ref: busyRef, unit_price: up, total_price: total } : sr);
-    // Procured by unit head → hand to the Purchase Manager (bill + dispatch).
+    setSelectedStoreReq((sr) => sr ? { ...sr, busy_transaction_ref: busyRef, supplier_name: supplier || null } : sr);
     await updateTicketStatus(selectedTicket.id, 'pending_purchase_manager');
     setSelectedTicket((t) => t ? { ...t, status: 'pending_purchase_manager' } : t);
     notify({
       target_roles: ['purchase_manager', 'admin'],
-      title: `Procured — upload bill: ${selectedStoreReq.part_name}`,
-      body: `BUSY ref: ${busyRef}${total != null ? ` · ₹${total.toLocaleString('en-IN')}` : ''} — Purchase Manager to upload the supplier bill and mark the part en route to store.`,
+      title: `Procured — Purchase Manager to bill: ${selectedStoreReq.part_name}`,
+      body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to enter the price, upload the bill, and mark en route.`,
       type: 'info', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
-    setBusyRef(''); setUnitPrice(''); await loadData();
+    // Screen the chosen supplier against the blacklist (vendor risk).
+    if (supplier) {
+      const hits = await screenBlacklist(
+        [{ value: supplier, label: 'Supplier' }],
+        { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment },
+      );
+      if (hits.length) {
+        const h = hits[0];
+        toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      }
+    }
+    setBusyRef(''); setSupplierName(''); await loadData();
   }
 
   // Purchase Manager: upload the supplier bill photo + mark the part en route.
@@ -806,6 +927,8 @@ export function Maintenance() {
       await updateRows('maintenance_store_requests', { handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total })
         .eq('id', selectedStoreReq.id);
       setSelectedStoreReq((sr) => sr ? { ...sr, handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total } : sr);
+      // The Purchase Orders page derives this external buy directly from the
+      // store request (single source of truth) — no separate PO row to insert.
       await updateTicketStatus(selectedTicket.id, 'pending_handover');
       setSelectedTicket((t) => t ? { ...t, status: 'pending_handover' } : t);
       notify({
@@ -900,21 +1023,125 @@ export function Maintenance() {
     finally { setUploading(false); }
   }
 
-  async function handleAddSchedule() {
+  const EMPTY_SCHEDULE_FORM = { title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' };
+
+  // Open the panel to create a brand-new schedule.
+  function openAddSchedule() {
+    setEditingSchedule(null);
+    setScheduleForm(EMPTY_SCHEDULE_FORM);
+    setShowSchedulePanel(true);
+  }
+
+  // Open the panel pre-filled to revise an existing schedule — reassign owner,
+  // change frequency, reschedule next due, edit the checklist, etc.
+  function openEditSchedule(s: ScheduleRow) {
+    setEditingSchedule(s);
+    setScheduleForm({
+      title: s.title,
+      equipment: s.equipment,
+      plant: s.plants?.name || '',
+      frequency: s.frequency,
+      description: s.description || '',
+      firstDue: s.next_due_at ? s.next_due_at.split('T')[0] : today,
+      assignedTo: s.assigned_to || '',
+    });
+    setShowSchedulePanel(true);
+  }
+
+  // Clone an existing schedule into a new draft (calendar-style "duplicate event").
+  function openDuplicateSchedule(s: ScheduleRow) {
+    setEditingSchedule(null);
+    setScheduleForm({
+      title: `${s.title} (copy)`,
+      equipment: s.equipment,
+      plant: s.plants?.name || '',
+      frequency: s.frequency,
+      description: s.description || '',
+      firstDue: today,
+      assignedTo: s.assigned_to || '',
+    });
+    setShowSchedulePanel(true);
+  }
+
+  function closeSchedulePanel() {
+    setShowSchedulePanel(false); setScheduleSaved(false); setEditingSchedule(null);
+  }
+
+  // Pause (snooze) or resume a recurring schedule without deleting it — paused
+  // schedules stop auto-generating tickets. Useful when an owner leaves and the
+  // task needs a temporary hold until it's reassigned.
+  async function toggleScheduleActive(s: ScheduleRow) {
+    if (!isAdmin) return;
+    const next = !s.is_active;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await updateRows('maintenance_schedules', { is_active: next }).eq('id', s.id);
+    if (error) { toast.error(`Failed: ${error.message}`); return; }
+    setSchedules(prev => prev.map(x => (x.id === s.id ? { ...x, is_active: next } : x)));
+    toast.success(next ? 'Schedule resumed' : 'Schedule paused');
+  }
+
+  // Delete a schedule.
+  //  • Pending (still 'open', un-started) auto-tickets it generated are DELETED
+  //    alongside it — so KPI counters (Due today / Overdue) and the tab badge
+  //    drop back to reality immediately.
+  //  • Tickets that were actually worked on (in_progress … closed) are KEPT but
+  //    unlinked (schedule_id → null) so the maintenance history stays intact.
+  async function handleDeleteSchedule(s: ScheduleRow) {
+    if (!isAdmin || deletingScheduleId) return;
+    if (!window.confirm(`Delete schedule "${s.title}"? This stops auto-ticket generation and removes any pending tickets it created (started/completed ones are kept for history). This cannot be undone.`)) return;
+    setDeletingScheduleId(s.id);
+    try {
+      const pendingIds = tickets.filter(t => t.schedule_id === s.id && t.status === 'open').map(t => t.id);
+      if (pendingIds.length) {
+        // Remove dependent store-request rows first (FK: maintenance_store_requests.ticket_id).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().in('ticket_id', pendingIds);
+        if (srErr) { toast.error(`Delete failed: ${srErr.message}`); return; }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: tdErr } = await (supabase.from('maintenance_tickets') as any).delete().in('id', pendingIds);
+        if (tdErr) { toast.error(`Delete failed: ${tdErr.message}`); return; }
+      }
+      // Unlink any remaining (worked-on/closed) tickets so the FK clears but history survives.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: tErr } = await (supabase.from('maintenance_tickets') as any).update({ schedule_id: null }).eq('schedule_id', s.id);
+      if (tErr) { toast.error(`Delete failed: ${tErr.message}`); return; }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.from('maintenance_schedules') as any).delete().eq('id', s.id);
+      if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+      setSchedules(prev => prev.filter(x => x.id !== s.id));
+      // Update local tickets so the periodic KPIs recompute instantly.
+      setTickets(prev => prev
+        .filter(t => !pendingIds.includes(t.id))
+        .map(t => (t.schedule_id === s.id ? { ...t, schedule_id: null } : t)));
+      toast.success('Schedule deleted');
+    } finally {
+      setDeletingScheduleId(null);
+    }
+  }
+
+  async function handleSaveSchedule() {
     if (!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule) return;
     setSavingSchedule(true);
     try {
     const plant = dbPlants.find(p => p.name === scheduleForm.plant);
-    const { error } = await insertRows('maintenance_schedules', {
+    const payload = {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
       plant_id: plant?.id || null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
-      description: scheduleForm.description || null, is_active: true,
+      description: scheduleForm.description || null,
       assigned_to: scheduleForm.assignedTo || null,
       next_due_at: scheduleForm.firstDue ? new Date(scheduleForm.firstDue).toISOString() : null,
-    });
-    if (error) { toast.error(`Failed: ${error.message}`); return; }
+    };
+    const reassigned = !!editingSchedule && (editingSchedule.assigned_to || '') !== scheduleForm.assignedTo;
+    if (editingSchedule) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await updateRows('maintenance_schedules', payload).eq('id', editingSchedule.id);
+      if (error) { toast.error(`Failed: ${error.message}`); return; }
+    } else {
+      const { error } = await insertRows('maintenance_schedules', { ...payload, is_active: true });
+      if (error) { toast.error(`Failed: ${error.message}`); return; }
+    }
     // If the assignee is restricted, alert admin + unit head immediately.
-    if (scheduleForm.assignedTo) {
+    if (scheduleForm.assignedTo && (!editingSchedule || reassigned)) {
       const entry = isPersonBlacklisted(scheduleForm.assignedTo);
       if (entry) notifyActivity(entry, `assigned the recurring task "${scheduleForm.title}" (${FREQ_LABEL[scheduleForm.frequency] || scheduleForm.frequency})`);
     }
@@ -924,8 +1151,8 @@ export function Maintenance() {
     setScheduleSaved(true);
     await loadData();
     setTimeout(() => {
-      setShowSchedulePanel(false); setScheduleSaved(false);
-      setScheduleForm({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
+      setShowSchedulePanel(false); setScheduleSaved(false); setEditingSchedule(null);
+      setScheduleForm(EMPTY_SCHEDULE_FORM);
     }, 1400);
     } finally { setSavingSchedule(false); }
   }
@@ -963,10 +1190,10 @@ export function Maintenance() {
         if (sr) body = <>{line('Unit head decision', sr.unit_head_approval)}{line('Part availability', sr.store_decision)}</>;
         break;
       case 'pending_purchase':
-        if (sr) body = <>{line('BUSY transaction ref', sr.busy_transaction_ref)}{line('Unit price', sr.unit_price != null ? `₹ ${Number(sr.unit_price).toLocaleString('en-IN')}` : null)}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement by unit head.</div></>;
+        if (sr) body = <>{line('BUSY transaction ref', sr.busy_transaction_ref)}{line('Supplier', sr.supplier_name)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement by unit head (price entered by Purchase Manager).</div></>;
         break;
       case 'pending_purchase_manager':
-        if (sr) body = <>{line('Bill uploaded', sr.bill_verified ? 'Yes' : '—')}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}{photo(sr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
+        if (sr) body = <>{line('Supplier', sr.supplier_name)}{line('Unit price', sr.unit_price != null ? `₹ ${Number(sr.unit_price).toLocaleString('en-IN')}` : null)}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}{line('Bill uploaded', sr.bill_verified ? 'Yes' : '—')}{photo(sr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
         break;
       case 'pending_handover':
         if (sr) body = <>{line('Receipt confirmed', sr.handover_confirmed_at ? formatDate(sr.handover_confirmed_at) : '—')}{line('Notes', sr.handover_notes)}{photo(sr.handover_invoice_url, 'Bill / invoice')}{photo(sr.handover_photo_url, 'Part received photo')}</>;
@@ -1203,14 +1430,10 @@ export function Maintenance() {
               <PanelField label="BUSY transaction reference *">
                 <PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" />
               </PanelField>
-              <PanelRow>
-                <PanelField label="Unit price (₹)">
-                  <PanelInput type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder="e.g. 4500" />
-                </PanelField>
-                <PanelField label={`Total (× ${selectedStoreReq?.quantity || 1})`}>
-                  <PanelInput value={unitPrice.trim() ? `₹ ${((parseFloat(unitPrice.replace(/[^0-9.]/g, '')) || 0) * (selectedStoreReq?.quantity || 1)).toLocaleString('en-IN')}` : '—'} disabled />
-                </PanelField>
-              </PanelRow>
+              <PanelField label="Supplier / vendor (bought from)">
+                <PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals · recorded as a PO" />
+              </PanelField>
+              <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>The Purchase Manager enters the price from the supplier bill at the next step.</div>
               <button onClick={markPurchased} disabled={!busyRef.trim()} style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#7C3AED', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: !busyRef.trim() ? 0.5 : 1 }}>
                 Mark as purchased — send to Purchase Manager
               </button>
@@ -1574,7 +1797,7 @@ export function Maintenance() {
               <div className="text-xs text-slate-500">Define recurring tasks — auto-tickets fire when due</div>
             </div>
             {isAdmin && (
-              <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setShowSchedulePanel(true)}>
+              <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAddSchedule}>
                 + Add schedule
               </button>
             )}
@@ -1582,22 +1805,40 @@ export function Maintenance() {
           <div className="overflow-x-auto scroll-x">
             <table className="dt">
               <thead>
-                <tr><th>Task title</th><th>Equipment</th><th>Plant</th><th>Frequency</th><th>Next due</th><th>Status</th></tr>
+                <tr>
+                  <th>Task title</th><th>Equipment</th><th>Plant</th><th>Frequency</th>
+                  <th>Assigned to</th><th>Next due</th><th>Status</th>
+                  {isAdmin && <th>Actions</th>}
+                </tr>
               </thead>
               <tbody>
                 {schedules.length === 0 && (
-                  <tr><td colSpan={6} className="text-center text-slate-400 py-6 text-sm">No schedules defined yet</td></tr>
+                  <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">No schedules defined yet</td></tr>
                 )}
                 {schedules.map(s => {
                   const due = dueDateLabel(daysFromNow(s.next_due_at));
+                  const paused = !s.is_active;
                   return (
-                    <tr key={s.id}>
+                    <tr key={s.id} style={paused ? { opacity: 0.6 } : undefined}>
                       <td className="font-semibold">{s.title}</td>
                       <td>{s.equipment}</td>
                       <td>{s.plants?.name || '—'}</td>
                       <td>{FREQ_LABEL[s.frequency] || s.frequency}</td>
-                      <td style={{ color: due.color, fontWeight: 600 }}>{due.text}</td>
-                      <td><span className="badge" style={{ background: s.is_active ? '#DCFCE7' : '#F1F5F9', color: s.is_active ? '#16A34A' : '#94A3B8' }}>{s.is_active ? 'Active' : 'Inactive'}</span></td>
+                      <td>{s.assigned_to || <span className="text-slate-400">Unassigned</span>}</td>
+                      <td style={{ color: paused ? '#94A3B8' : due.color, fontWeight: 600 }}>{paused ? 'Paused' : due.text}</td>
+                      <td><span className="badge" style={{ background: s.is_active ? '#DCFCE7' : '#F1F5F9', color: s.is_active ? '#16A34A' : '#94A3B8' }}>{s.is_active ? 'Active' : 'Paused'}</span></td>
+                      {isAdmin && (
+                        <td>
+                          <ScheduleRowMenu
+                            isActive={s.is_active}
+                            deleting={deletingScheduleId === s.id}
+                            onRevise={() => openEditSchedule(s)}
+                            onToggle={() => toggleScheduleActive(s)}
+                            onDuplicate={() => openDuplicateSchedule(s)}
+                            onDelete={() => handleDeleteSchedule(s)}
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -1663,7 +1904,7 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
       >
@@ -1735,8 +1976,8 @@ export function Maintenance() {
         )}
       </SlidePanel>
 
-      {/* ── PANEL: Add schedule ──────────────────────────────────────────── */}
-      <SlidePanel open={showSchedulePanel} onClose={() => { setShowSchedulePanel(false); setScheduleSaved(false); }} title="Add maintenance schedule" subtitle="Schedule Setup · Maintenance">
+      {/* ── PANEL: Add / revise schedule ─────────────────────────────────── */}
+      <SlidePanel open={showSchedulePanel} onClose={closeSchedulePanel} title={editingSchedule ? 'Revise maintenance schedule' : 'Add maintenance schedule'} subtitle="Schedule Setup · Maintenance">
         <PanelField label="Task title *">
           <PanelInput value={scheduleForm.title} onChange={e => setScheduleForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Boiler bearing check, Filter replacement" />
         </PanelField>
@@ -1757,16 +1998,25 @@ export function Maintenance() {
           </PanelField>
         </PanelRow>
         <PanelRow>
-          <PanelField label="First due date">
+          <PanelField label={editingSchedule ? 'Next due date' : 'First due date'}>
             <PanelInput type="date" value={scheduleForm.firstDue} onChange={e => setScheduleForm(f => ({ ...f, firstDue: e.target.value }))} />
           </PanelField>
           <PanelField label="Assign to">
             <PanelSelect value={scheduleForm.assignedTo} onChange={e => setScheduleForm(f => ({ ...f, assignedTo: e.target.value }))}>
               <option value="">— Unassigned —</option>
               {ASSIGNABLE_STAFF.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
+              {/* Keep a current assignee selectable even if they're no longer in the standard staff list. */}
+              {scheduleForm.assignedTo && !ASSIGNABLE_STAFF.some(s => s.name === scheduleForm.assignedTo) && (
+                <option value={scheduleForm.assignedTo}>{scheduleForm.assignedTo} (current)</option>
+              )}
             </PanelSelect>
           </PanelField>
         </PanelRow>
+        {editingSchedule && (
+          <div style={{ background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: '#0369A1' }}>
+            Reassign the owner here if the current person has left — the schedule and its history stay intact. Use <b>Pause</b> on the row to put it on hold instead.
+          </div>
+        )}
         {scheduleForm.assignedTo && blacklistReady && isPersonBlacklisted(scheduleForm.assignedTo) && (
           <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: '#B91C1C', fontWeight: 600 }}>
             🚫 {scheduleForm.assignedTo} is on the active blacklist. Admin &amp; Unit Head will be notified on save.
@@ -1776,7 +2026,7 @@ export function Maintenance() {
           <PanelTextarea value={scheduleForm.description} onChange={e => setScheduleForm(f => ({ ...f, description: e.target.value }))} placeholder="Steps to complete, tools needed, safety precautions…" />
         </PanelField>
         <PanelDivider />
-        <PanelFooter saved={scheduleSaved} onCancel={() => setShowSchedulePanel(false)} onSave={handleAddSchedule} saveLabel={savingSchedule ? 'Saving…' : 'Save schedule'} successLabel="Schedule created" successSub="Ticket will auto-generate on due date" disabled={!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule} requiredHint="Fill in title and equipment to create schedule" />
+        <PanelFooter saved={scheduleSaved} onCancel={closeSchedulePanel} onSave={handleSaveSchedule} saveLabel={savingSchedule ? 'Saving…' : (editingSchedule ? 'Save changes' : 'Save schedule')} successLabel={editingSchedule ? 'Schedule updated' : 'Schedule created'} successSub={editingSchedule ? 'Changes saved · next ticket uses new settings' : 'Ticket will auto-generate on due date'} disabled={!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule} requiredHint="Fill in title and equipment to create schedule" />
       </SlidePanel>
 
       {/* ── PANEL: Create maintenance report (CSV) ───────────────────────────── */}

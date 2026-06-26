@@ -198,6 +198,14 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
     MONITORING_PATHS.some((p) => location.pathname.startsWith(p))
   );
 
+  // Technical Team (factory_operator) navigates via 3 dropdowns: Batch / Operations / Logs.
+  const isOperator = activeProfile.id === 'factory_operator';
+  const [batchOpen, setBatchOpen] = useState(true);
+  const [opsOpen, setOpsOpen] = useState(
+    location.pathname === '/dashboard/batches' || location.pathname === '/dashboard/stock'
+  );
+  const [logsOpen, setLogsOpen] = useState(location.pathname === '/dashboard/daily-log');
+
   /** True if the active profile can access this exact route (or its children). */
   const canSee = (route: string) => profileCanAccess(activeProfile, route);
 
@@ -277,6 +285,11 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
     if (path === '/dashboard') return location.pathname === '/dashboard';
     return location.pathname.startsWith(path);
   };
+
+  // Batch logger tab (?tab=) — used to highlight the operator's Batch/Logs sub-items.
+  const currentTab = new URLSearchParams(location.search).get('tab') || 'reading';
+  const isBatchTab = (t: string) =>
+    location.pathname === '/dashboard/batch-entry' && currentTab === t;
 
   function navTo(path: string) {
     navigate(path);
@@ -366,6 +379,61 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
 
       {/* ── OPERATIONS ────────────────────────────────────────────────────── */}
       {showOperations && <SectionHeader label="Operations" />}
+
+      {/* Technical Team: 3 dropdowns (Batch / Operations / Logs) like the Purchase accordion */}
+      {isOperator ? (
+      <nav className="flex flex-col gap-1">
+
+        {/* Batch dropdown */}
+        <a
+          className={`nav-link${location.pathname === '/dashboard/batch-entry' ? ' active' : ''}`}
+          onClick={() => { setBatchOpen((o) => !o); if (!batchOpen) navTo('/dashboard/batch-entry?tab=reading'); }}
+        >
+          <IconBatch />
+          <span>Batch</span>
+          <svg className="ml-auto transition-transform duration-200" style={{ transform: batchOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        {batchOpen && (
+          <div className="nav-sub">
+            <a className={`nav-link${isBatchTab('reading') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=reading')}>Log Reading</a>
+            <a className={`nav-link${isBatchTab('new-batch') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=new-batch')}>New Batch</a>
+            <a className={`nav-link${isBatchTab('upload') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=upload')}>Upload Batch Sheet</a>
+          </div>
+        )}
+
+        {/* Operations dropdown */}
+        <a
+          className={`nav-link${(isActive('/dashboard/batches') || isActive('/dashboard/stock')) ? ' active' : ''}`}
+          onClick={() => { setOpsOpen((o) => !o); if (!opsOpen) navTo('/dashboard/batches'); }}
+        >
+          <IconFlask />
+          <span>Operations</span>
+          <svg className="ml-auto transition-transform duration-200" style={{ transform: opsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        {opsOpen && (
+          <div className="nav-sub">
+            <a className={`nav-link${isActive('/dashboard/batches') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batches')}>Batch Sheet</a>
+            <a className={`nav-link${isActive('/dashboard/stock') ? ' active' : ''}`} onClick={() => navTo('/dashboard/stock')}>CPM Stock</a>
+          </div>
+        )}
+
+        {/* Logs dropdown */}
+        <a
+          className={`nav-link${(isActive('/dashboard/daily-log') || isBatchTab('history')) ? ' active' : ''}`}
+          onClick={() => { setLogsOpen((o) => !o); if (!logsOpen) navTo('/dashboard/daily-log'); }}
+        >
+          <IconClipboard />
+          <span>Logs</span>
+          <svg className="ml-auto transition-transform duration-200" style={{ transform: logsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        {logsOpen && (
+          <div className="nav-sub">
+            <a className={`nav-link${isActive('/dashboard/daily-log') ? ' active' : ''}`} onClick={() => navTo('/dashboard/daily-log')}>Daily Unit Log</a>
+            <a className={`nav-link${isBatchTab('history') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=history')}>Reading History</a>
+          </div>
+        )}
+      </nav>
+      ) : (
       <nav className="flex flex-col gap-1">
 
         {/* Batch Sheet — production tracking */}
@@ -451,6 +519,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
           </a>
         )}
       </nav>
+      )}
 
       {/* ── FINANCE ───────────────────────────────────────────────────────── */}
       {showFinance && <SectionHeader label="Finance" />}

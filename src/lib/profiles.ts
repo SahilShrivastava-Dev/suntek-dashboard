@@ -145,12 +145,19 @@ export const MOCK_PROFILES: MockProfile[] = [
     avatarFrom: 'from-purple-400',
     avatarTo: 'to-purple-600',
     plant: 'Rehla',
-    homeRoute: '/dashboard/batch-entry',       // Embedded in the dashboard layout
+    homeRoute: '/dashboard/batch-entry',       // Lands on the Batch dropdown (Log Reading)
     allowedDashboardRoutes: [
-      '/dashboard/batch-entry',               // Only the batch logger page
+      // Batch dropdown — Log Reading / New Batch / Upload Batch Sheet / Reading
+      // History all live on the batch logger page (switched via ?tab=).
+      '/dashboard/batch-entry',
+      // Operations dropdown
+      '/dashboard/batches',                   // Batch Sheet board
+      '/dashboard/stock',                     // CPM Stock
+      // Logs dropdown
+      '/dashboard/daily-log',                 // Daily Unit Log (OCR)
     ],
     standaloneOnly: false,
-    accessNote: 'Batch logger only · no other dashboard access',
+    accessNote: 'Batch logging, operations boards & daily logs · no sales/purchase/finance',
   },
 
   // ── L2: Store Manager (Maintenance) — spare parts store for maintenance ─────

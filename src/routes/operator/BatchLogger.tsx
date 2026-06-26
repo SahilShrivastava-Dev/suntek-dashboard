@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { insertRows, upsertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
 import type { Database } from '../../lib/database.types';
 import { BatchSheetUpload } from '../../components/BatchSheetUpload';
 import { BatchSheetReview } from '../../components/BatchSheetReview';
-import { SalesUploadPanel, PurchaseUploadPanel, SalesReviewPanel, PurchaseReviewPanel } from './uploadPanels';
 import type { ExtractedBatchSheet } from '../../lib/nvidiaOcr';
-import { resizeImageToDataUrl, extractSalesSheet, extractPurchaseSheet } from '../../lib/nvidiaOcr';
-import { useBlacklistGuard } from '../../lib/blacklist/guard';
-import type { ExtractedSalesSheet, ExtractedPurchaseSheet } from '../../lib/nvidiaOcr';
+// Sales/Purchase OCR upload moved to the Sales & Purchase pages (admin/unit-head/
+// accountant only). The Technical Team's batch logger no longer carries them.
 
 type BatchRow = Database['public']['Tables']['active_batches']['Row'];
 type ReadingDbRow = Database['public']['Tables']['batch_readings']['Row'] & { profiles?: { name: string | null } | null };
@@ -106,7 +105,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
             if (sess.temp_input) setTemp(sess.temp_input);
             if (sess.cp_gravity_input) setCpGravity(sess.cp_gravity_input);
             if (sess.cl2_press_input) setCl2Press(sess.cl2_press_input);
-            if (sess.active_tab) setActiveTab(sess.active_tab);
+            if (sess.active_tab && ['reading','new-batch','upload','history'].includes(sess.active_tab)) setActiveTab(sess.active_tab);
             if (sess.new_batch_no_input) setNewBatchNo(sess.new_batch_no_input);
             if (sess.new_recipe_input) setNewRecipe(sess.new_recipe_input);
             if (sess.new_target_qty_input) setNewTargetQty(sess.new_target_qty_input);
@@ -137,7 +136,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
               if (data.temp_input) setTemp(data.temp_input);
               if (data.cp_gravity_input) setCpGravity(data.cp_gravity_input);
               if (data.cl2_press_input) setCl2Press(data.cl2_press_input);
-              if (data.active_tab) setActiveTab(data.active_tab as typeof activeTab);
+              if (data.active_tab && ['reading','new-batch','upload','history'].includes(data.active_tab)) setActiveTab(data.active_tab as typeof activeTab);
               if (data.new_batch_no_input) setNewBatchNo(data.new_batch_no_input);
               if (data.new_recipe_input) setNewRecipe(data.new_recipe_input);
               if (data.new_target_qty_input) setNewTargetQty(data.new_target_qty_input);
@@ -163,13 +162,17 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
     imageUrl: string;
   } | null>(null);
 
-  // Sales / Purchase upload state (simple inline review panels)
-  const [salesUpload, setSalesUpload]     = useState<{ stage: 'idle' | 'loading' | 'done' | 'error'; data?: ExtractedSalesSheet; imageUrl?: string; error?: string }>({ stage: 'idle' });
-  const [purchaseUpload, setPurchaseUpload] = useState<{ stage: 'idle' | 'loading' | 'done' | 'error'; data?: ExtractedPurchaseSheet; imageUrl?: string; error?: string }>({ stage: 'idle' });
-  const screenBlacklist = useBlacklistGuard();
-
-  // Tab State
-  const [activeTab, setActiveTab] = useState<'reading' | 'new-batch' | 'upload' | 'upload-sales' | 'upload-purchase'>('reading');
+  // Tab State — driven by the sidebar (?tab=) when embedded in the dashboard.
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'reading' | 'new-batch' | 'upload' | 'history'>('reading');
+  // When embedded, the 3 sidebar dropdowns select the active panel via ?tab=.
+  useEffect(() => {
+    if (!embedded) return;
+    const t = searchParams.get('tab');
+    if (t && ['reading', 'new-batch', 'upload', 'history'].includes(t)) {
+      setActiveTab(t as 'reading' | 'new-batch' | 'upload' | 'history');
+    }
+  }, [searchParams, embedded]);
   const [newBatchNo, setNewBatchNo] = useState('');
   const [newRecipe, setNewRecipe] = useState('1400');
   const [newTargetQty, setNewTargetQty] = useState('1400');
@@ -431,7 +434,9 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
               Batch Actions
             </h2>
 
-            {/* Segmented Control / Tab Switch */}
+            {/* Segmented control — standalone app only. In the dashboard the 3
+                sidebar dropdowns (Batch / Operations / Logs) drive navigation. */}
+            {!embedded && (
             <div className="flex gap-1 mb-4 bg-slate-100 p-1 rounded-xl border shrink-0">
               <button
                 type="button"
@@ -468,44 +473,29 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('upload-sales')}
+                onClick={() => setActiveTab('history')}
                 className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${
-                  activeTab === 'upload-sales'
-                    ? 'bg-white text-green-600 shadow-sm border border-slate-200/50'
+                  activeTab === 'history'
+                    ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Sales
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('upload-purchase')}
-                className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${
-                  activeTab === 'upload-purchase'
-                    ? 'bg-white text-red-600 shadow-sm border border-slate-200/50'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Purchase
+                History
               </button>
             </div>
+            )}
 
-            {/* Tab sub-labels for Upload tabs */}
-            {(activeTab === 'upload' || activeTab === 'upload-sales' || activeTab === 'upload-purchase') && (
+            {/* Tab sub-label for the Batch Sheet upload tab */}
+            {activeTab === 'upload' && (
               <div className="flex items-center gap-2 mb-3 px-1">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={activeTab === 'upload-purchase' ? '#dc2626' : activeTab === 'upload-sales' ? '#16a34a' : '#7c3aed'} strokeWidth="2.5">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="17 8 12 3 7 8" />
                   <line x1="12" y1="3" x2="12" y2="15" />
                 </svg>
-                <span className="text-xs font-bold" style={{ color: activeTab === 'upload-purchase' ? '#dc2626' : activeTab === 'upload-sales' ? '#16a34a' : '#7c3aed' }}>
-                  {activeTab === 'upload' ? 'Add Batch Sheet' : activeTab === 'upload-sales' ? 'Add Sales' : 'Add Purchase'}
+                <span className="text-xs font-bold" style={{ color: '#7c3aed' }}>
+                  Add Batch Sheet
                 </span>
-                {activeTab === 'upload-purchase' && (
-                  <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-500">
-                    locked after upload
-                  </span>
-                )}
               </div>
             )}
 
@@ -517,56 +507,30 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                 docLabel="Batch Sheet"
                 accentColor="#7c3aed"
               />
-            ) : activeTab === 'upload-sales' ? (
-              <SalesUploadPanel
-                state={salesUpload}
-                onFileSelect={async (file) => {
-                  const url = URL.createObjectURL(file);
-                  setSalesUpload({ stage: 'loading', imageUrl: url });
-                  try {
-                    const dataUrl = await resizeImageToDataUrl(file);
-                    const data = await extractSalesSheet(dataUrl);
-                    setSalesUpload({ stage: 'done', data, imageUrl: url });
-                    // Screen OCR-extracted parties against the blacklist.
-                    screenBlacklist(
-                      [
-                        { value: data.customerName ?? '', label: 'Customer' },
-                        { value: data.vehicleNumber ?? '', label: 'Vehicle' },
-                        { value: data.driverName ?? '', label: 'Driver' },
-                      ],
-                      { workflow: 'Sales Sheet OCR', source: 'ocr', entityLabel: data.dcNumber ? `DC ${data.dcNumber}` : 'Sales sheet' },
-                    );
-                  } catch (e) {
-                    setSalesUpload({ stage: 'error', error: e instanceof Error ? e.message : String(e), imageUrl: url });
-                  }
-                }}
-                onReset={() => setSalesUpload({ stage: 'idle' })}
-              />
-            ) : activeTab === 'upload-purchase' ? (
-              <PurchaseUploadPanel
-                state={purchaseUpload}
-                onFileSelect={async (file) => {
-                  const url = URL.createObjectURL(file);
-                  setPurchaseUpload({ stage: 'loading', imageUrl: url });
-                  try {
-                    const dataUrl = await resizeImageToDataUrl(file);
-                    const data = await extractPurchaseSheet(dataUrl);
-                    setPurchaseUpload({ stage: 'done', data, imageUrl: url });
-                    // Screen OCR-extracted supplier/GSTIN/buyer against the blacklist.
-                    screenBlacklist(
-                      [
-                        { value: data.supplierName ?? '', label: 'Supplier' },
-                        { value: data.supplierGstin ?? '', label: 'GSTIN' },
-                        { value: data.buyerName ?? '', label: 'Buyer' },
-                      ],
-                      { workflow: 'Purchase Sheet OCR', source: 'ocr', entityLabel: data.invoiceNumber ? `Invoice ${data.invoiceNumber}` : 'Purchase sheet' },
-                    );
-                  } catch (e) {
-                    setPurchaseUpload({ stage: 'error', error: e instanceof Error ? e.message : String(e), imageUrl: url });
-                  }
-                }}
-                onReset={() => setPurchaseUpload({ stage: 'idle' })}
-              />
+            ) : activeTab === 'history' ? (
+              <div className="flex-1 flex flex-col gap-4">
+                {/* Batch selector — choose which batch's reading history to view */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
+                    Select Batch
+                  </label>
+                  <select
+                    value={batchId}
+                    onChange={e => setBatchId(e.target.value)}
+                    className="w-full p-3 border-2 border-slate-200 rounded-xl font-bold text-base bg-slate-50 focus:border-blue-500 focus:outline-none"
+                  >
+                    {batches.map(b => (
+                      <option key={b.id} value={b.id}>
+                        BATCH #{b.batch_no} ({b.recipe ? `${b.recipe} Density` : 'Generic'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="rounded-xl bg-blue-50 border border-blue-100 p-4 text-sm text-slate-600 leading-relaxed">
+                  Read-only view. The full reading log for the selected batch is shown
+                  on the right. To add a new reading, use <span className="font-semibold text-blue-700">Log Reading</span>.
+                </div>
+              </div>
             ) : activeTab === 'reading' ? (
               <form onSubmit={handleSave} className="space-y-5 flex-1 flex flex-col justify-between">
                 <div className="space-y-4">
@@ -724,32 +688,9 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
               onCancel={() => setUploadReview(null)}
             />
           </div>
-        ) : activeTab === 'upload-sales' && salesUpload.stage === 'done' && salesUpload.data ? (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <SalesReviewPanel
-              data={salesUpload.data}
-              imageUrl={salesUpload.imageUrl!}
-              onSaved={() => {
-                setSalesUpload({ stage: 'idle' });
-                toast.success('Sales sheet saved!');
-              }}
-              onCancel={() => setSalesUpload({ stage: 'idle' })}
-            />
-          </div>
-        ) : activeTab === 'upload-purchase' && purchaseUpload.stage === 'done' && purchaseUpload.data ? (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <PurchaseReviewPanel
-              data={purchaseUpload.data}
-              imageUrl={purchaseUpload.imageUrl!}
-              onClose={() => setPurchaseUpload({ stage: 'idle' })}
-            />
-          </div>
         ) : null}
         <div className={`flex-1 bg-white rounded-2xl flex flex-col overflow-hidden shadow-sm${
-          (activeTab === 'upload' && uploadReview)
-          || (activeTab === 'upload-sales' && salesUpload.stage === 'done')
-          || (activeTab === 'upload-purchase' && purchaseUpload.stage === 'done')
-            ? ' hidden' : ''
+          (activeTab === 'upload' && uploadReview) ? ' hidden' : ''
         }`}>
           {/* Table header bar */}
           <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 rounded-t-2xl shrink-0">

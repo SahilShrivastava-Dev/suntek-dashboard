@@ -7,6 +7,10 @@ import { KpiInfoButton } from '../../components/KpiInfoButton';
 import { exportToXlsx } from '../../lib/utils/exportXlsx';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useToast } from '../../components/ui/toast';
+import { OcrUploadCard } from '../../components/OcrUploadCard';
+
+// Sales sheet OCR upload is available to management/finance roles only.
+const CAN_UPLOAD_SHEET = ['admin', 'unit_head', 'accountant_delhi', 'accountant_other'];
 
 interface NewContractForm {
   customer: string;
@@ -106,6 +110,9 @@ export function Sales() {
 
   return (
     <>
+      {/* Sales sheet OCR upload — management/finance only */}
+      {CAN_UPLOAD_SHEET.includes(activeProfile.id) && <OcrUploadCard kind="sales" />}
+
       {/* KPIs — live from BUSY — blue tiles */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>

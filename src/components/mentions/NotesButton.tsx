@@ -1,16 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { SlidePanel } from '../SlidePanel';
 import { MentionTextarea } from './MentionTextarea';
 import { MentionText } from './MentionText';
 import { CcSelect } from './CcSelect';
+import { ReadReceipt } from './ReadReceipt';
 import { supabase } from '../../lib/supabase';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { useToast } from '../ui/toast';
 import {
-  useDirectory, getNotes, getNotesCount, getWatchers, postNote, addWatchers, truncate,
-  type EntityNote,
+  useDirectory, getNotes, getNotesCount, getWatchers, getReceipts, markNoteSeen,
+  postNote, addWatchers, truncate, seenProfileIds, tickState,
+  type EntityNote, type NoteReceipt,
 } from '../../lib/mentions';
 
 /**
@@ -19,6 +21,10 @@ import {
  * a note, @-tag people, and CC watchers. Tagged people are notified instantly;
  * CC'd people are persisted as watchers so future workflow changes notify them
  * too (via notifyWatchers at the status-transition points).
+ *
+ * Each note carries WhatsApp-style receipts: a tick by the author (sent →
+ * delivered → seen, aggregated over everyone tagged) and per-person green
+ * @chips once that person scrolls the comment into view.
  */
 interface Props {
   entityType: string;
@@ -31,9 +37,26 @@ interface Props {
   iconOnly?: boolean;
 }
 
+type ReceiptMap = Record<string, NoteReceipt[]>;
+
+function groupReceipts(list: NoteReceipt[]): ReceiptMap {
+  const out: ReceiptMap = {};
+  for (const r of list) (out[r.note_id] ??= []).push(r);
+  return out;
+}
+
+/** Merge a single realtime/optimistic receipt row into the grouped map. */
+function mergeReceipt(map: ReceiptMap, r: NoteReceipt): ReceiptMap {
+  const existing = map[r.note_id] ?? [];
+  const next = existing.filter((x) => x.profile_id !== r.profile_id);
+  next.push(r);
+  return { ...map, [r.note_id]: next };
+}
+
 export function NotesButton({ entityType, entityId, entityLabel, route, triggerClassName = 'chip', iconOnly }: Props) {
   const [open, setOpen] = useState(false);
   const [notes, setNotes] = useState<EntityNote[]>([]);
+  const [receipts, setReceipts] = useState<ReceiptMap>({});
   const [loading, setLoading] = useState(false);
   const [body, setBody] = useState('');
   const [mentionIds, setMentionIds] = useState<string[]>([]);
@@ -55,19 +78,22 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
     setNotes(n);
     setCount(n.length);
     setCc(w.filter((x) => x.kind === 'cc').map((x) => x.profile_id));
+    setReceipts(groupReceipts(await getReceipts(n.map((x) => x.id))));
     setLoading(false);
   }
 
-  // Fetch the thread when the panel opens. State is updated after the awaited
-  // fetch resolves (not synchronously in the effect body), with a cancel guard.
+  // Fetch the thread (notes + watchers + receipts) when the panel opens.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    Promise.all([getNotes(entityType, entityId), getWatchers(entityType, entityId)]).then(([n, w]) => {
+    Promise.all([getNotes(entityType, entityId), getWatchers(entityType, entityId)]).then(async ([n, w]) => {
       if (cancelled) return;
       setNotes(n);
       setCount(n.length);
       setCc(w.filter((x) => x.kind === 'cc').map((x) => x.profile_id));
+      const r = await getReceipts(n.map((x) => x.id));
+      if (cancelled) return;
+      setReceipts(groupReceipts(r));
       setLoading(false);
     });
     return () => { cancelled = true; };
@@ -98,6 +124,36 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [open, entityType, entityId]);
+
+  // Real-time: receipts (delivery + seen) for this entity → live ticks & chips.
+  useEffect(() => {
+    if (!open) return;
+    const channel = supabase
+      .channel(`entity_note_receipts:${entityType}:${entityId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'entity_note_receipts' }, (payload) => {
+        const r = payload.new as (NoteReceipt & { entity_type?: string; entity_id?: string });
+        if (!r?.note_id || r.entity_type !== entityType || r.entity_id !== entityId) return;
+        setReceipts((prev) => mergeReceipt(prev, {
+          note_id: r.note_id, profile_id: r.profile_id, delivered_at: r.delivered_at, seen_at: r.seen_at,
+        }));
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [open, entityType, entityId]);
+
+  // A tagged note scrolled into the viewer's view → mark it seen (once).
+  function handleSeen(noteId: string) {
+    markNoteSeen(noteId, activeProfile.id);
+    setReceipts((prev) => {
+      const row = (prev[noteId] ?? []).find((r) => r.profile_id === activeProfile.id);
+      return mergeReceipt(prev, {
+        note_id: noteId,
+        profile_id: activeProfile.id,
+        delivered_at: row?.delivered_at ?? new Date().toISOString(),
+        seen_at: new Date().toISOString(),
+      });
+    });
+  }
 
   async function post() {
     if (!body.trim()) return;
@@ -156,13 +212,7 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
             {notes.map((n) => (
-              <div key={n.id} style={{ border: '1px solid #F1F5F9', borderRadius: 12, padding: '10px 12px', background: '#FCFCFD' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#0F172A' }}>{n.author_name}</span>
-                  <span style={{ fontSize: 10, color: '#94A3B8' }}>{fmtTime(n.created_at)}</span>
-                </div>
-                <MentionText text={n.body} style={{ fontSize: 13, color: '#334155', lineHeight: 1.5 }} />
-              </div>
+              <NoteRow key={n.id} note={n} receipts={receipts[n.id] ?? []} viewerId={activeProfile.id} onSeen={handleSeen} />
             ))}
           </div>
         )}
@@ -200,6 +250,58 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
         </div>
       </SlidePanel>
     </>
+  );
+}
+
+/**
+ * One note in the thread. Owns its own IntersectionObserver: when the viewer is
+ * tagged and hasn't seen this note yet, scrolling it into view fires onSeen.
+ */
+function NoteRow({ note, receipts, viewerId, onSeen }: {
+  note: EntityNote;
+  receipts: NoteReceipt[];
+  viewerId: string;
+  onSeen: (noteId: string) => void;
+}) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const mentions = note.mentions ?? [];
+  const amTagged = mentions.includes(viewerId);
+  const alreadySeen = !!receipts.find((r) => r.profile_id === viewerId)?.seen_at;
+
+  useEffect(() => {
+    if (!amTagged || alreadySeen) return;
+    const el = rowRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      // No observer support → fall back to marking seen on render.
+      onSeen(note.id);
+      return;
+    }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        io.disconnect();
+        onSeen(note.id);
+      }
+    }, { threshold: 0.6 });
+    io.observe(el);
+    return () => io.disconnect();
+    // onSeen is stable enough for this lifecycle; re-run only when seen-state flips.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amTagged, alreadySeen, note.id]);
+
+  const seenIds = seenProfileIds(receipts);
+  const tick = mentions.length ? tickState(mentions, receipts) : null;
+
+  return (
+    <div ref={rowRef} style={{ border: '1px solid #F1F5F9', borderRadius: 12, padding: '10px 12px', background: '#FCFCFD' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#0F172A' }}>{note.author_name}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ fontSize: 10, color: '#94A3B8' }}>{fmtTime(note.created_at)}</span>
+          {tick && <ReadReceipt state={tick} />}
+        </span>
+      </div>
+      <MentionText text={note.body} seenIds={seenIds} style={{ fontSize: 13, color: '#334155', lineHeight: 1.5 }} />
+    </div>
   );
 }
 

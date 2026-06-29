@@ -9,10 +9,10 @@ import { MOCK_PROFILES } from '../../../lib/profiles';
 import { useBlacklist } from '../../../contexts/BlacklistContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
-import { MentionText, NotesButton } from '../../../components/mentions';
+import { MentionText, NotesButton, ReadReceipt } from '../../../components/mentions';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
-import { useDirectory, useMentionNotifier, extractMentionIds, addWatchers, notifyWatchers, truncate } from '../../../lib/mentions';
+import { useDirectory, useMentionNotifier, notifyWatchers, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import type { AppNotification } from '../../../contexts/NotificationsContext';
@@ -287,8 +287,11 @@ export function Maintenance() {
   });
   const actorObj = () => ({ id: activeProfile.id, name: activeProfile.name, role: activeProfile.roleLabel });
   // Insert directly (mirrors the module's role-based notify) so it doesn't depend on context tableReady.
-  const addNote = async (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => {
-    await insertRows('notifications', { ...n, read_by: [] }).then(() => {}, () => {});
+  // Returns whether the row was created (delivered) so receipts can be stamped.
+  const addNote = async (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>): Promise<boolean> => {
+    let ok = false;
+    await insertRows('notifications', { ...n, read_by: [] }).then(() => { ok = true; }, () => {});
+    return ok;
   };
   // Ping everyone tagged / CC'd on a ticket that its workflow moved.
   async function notifyTicketWatchers(t: TicketRow, title: string, body: string, type: AppNotification['type'] = 'info') {
@@ -521,21 +524,17 @@ export function Maintenance() {
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
 
-    // Notify anyone @-tagged in the description and make them watchers of this
-    // ticket, so they also get pinged as it moves through the workflow.
+    // Anyone @-tagged in the description becomes a watcher AND gets a realtime
+    // ping, and the description is persisted as the ticket's FIRST note so it
+    // shows in the Notes thread with delivery/read ticks. Same single path the
+    // edit / store-req / handover flows use (notifyMentions writes the
+    // entity_notes row + watchers + receipts + notification together).
     if (newTicket) {
-      const mentionIds = extractMentionIds(raiseForm.description || '', people).filter(id => id !== activeProfile.id);
-      if (mentionIds.length) {
-        const tagged = people.filter(p => mentionIds.includes(p.id));
-        await addWatchers(ticketRef(newTicket), tagged.map(p => ({ id: p.id, name: p.name })), 'mention', activeProfile.id);
-        notify({
-          target_roles: mentionIds,
-          title: `${activeProfile.name} tagged you in a maintenance ticket`,
-          body: `${raiseForm.equipment}: “${truncate(raiseForm.description || '')}”`,
-          type: 'urgent', route: `/dashboard/purchase/maint?ticket=${newTicket.id}`,
-          actor_name: activeProfile.name, actor_role: role, read_by: [],
-        });
-      }
+      await notifyMentions(raiseForm.description, {
+        entityType: 'maintenance_ticket', entityId: newTicket.id,
+        entityLabel: raiseForm.equipment,
+        route: `/dashboard/purchase/maint?ticket=${newTicket.id}`,
+      });
     }
 
     // Screen the equipment/description against the blacklist.
@@ -1915,7 +1914,7 @@ export function Maintenance() {
                 {selectedTicket.assigned_to && <> · Assigned to {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
                 {selectedTicket.unit && <> · <span style={{ color: '#A21CAF', fontWeight: 700 }}>{UNIT_LABELS[selectedTicket.unit as Unit] || selectedTicket.unit}</span></>}
               </div>
-              {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><MentionText text={selectedTicket.description} /></div>}
+              {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><TicketDescription entityId={selectedTicket.id} text={selectedTicket.description} /></div>}
             </div>
 
             {/* Notes are visible to everyone on the ticket; edit/delete are admin-only. */}
@@ -2077,6 +2076,42 @@ export function Maintenance() {
         </div>
       </SlidePanel>
     </>
+  );
+}
+
+/**
+ * The ticket description shown in the detail panel. The raise description is
+ * persisted as the ticket's first note, so we mirror that note's read-receipt
+ * here: @names go green per-person as they're seen, and a WhatsApp-style tick
+ * (sent / delivered / seen) sits beside the line. Degrades to plain highlighted
+ * text when no matching note/receipt exists (e.g. tickets raised before this).
+ */
+function TicketDescription({ entityId, text }: { entityId: string; text: string }) {
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
+  const [tick, setTick] = useState<ReturnType<typeof tickState>>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const notes = await getNotes('maintenance_ticket', entityId);
+      const target = (text || '').trim();
+      // The raise note: earliest note whose body matches the description and
+      // that actually tagged someone (so there's a receipt to show).
+      const note = notes.find((n) => (n.body || '').trim() === target && (n.mentions?.length ?? 0) > 0);
+      if (!note) { if (!cancelled) { setSeenIds(new Set()); setTick(null); } return; }
+      const recs = await getReceipts([note.id]);
+      if (cancelled) return;
+      setSeenIds(seenProfileIds(recs));
+      setTick(tickState(note.mentions || [], recs));
+    })();
+    return () => { cancelled = true; };
+  }, [entityId, text]);
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <MentionText text={text} seenIds={seenIds} />
+      {tick && <ReadReceipt state={tick} />}
+    </span>
   );
 }
 

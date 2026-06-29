@@ -14,7 +14,7 @@
  */
 import { useCallback, useMemo } from 'react';
 import { supabase } from './supabase';
-import { insertRows } from './db';
+import { insertRows, updateRows } from './db';
 import { useRoleContext } from '../contexts/RoleContext';
 import type { AppNotification } from '../contexts/NotificationsContext';
 
@@ -26,7 +26,9 @@ export interface TaggablePerson {
   plant?: string;
 }
 
-type AddNotification = (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => Promise<void>;
+// Returns whether the notification row was created (delivered) so callers can
+// stamp read-receipts and surface pipeline failures.
+type AddNotification = (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => Promise<boolean>;
 
 export interface EntityRef {
   entityType: string;
@@ -59,6 +61,22 @@ export interface Watcher {
   profile_name: string;
   kind: string;
 }
+
+/** A delivery/read receipt for one tagged person on one note. */
+export interface NoteReceipt {
+  note_id: string;
+  profile_id: string;
+  delivered_at: string | null;
+  seen_at: string | null;
+}
+
+/**
+ * Aggregate receipt state for a comment, mirroring WhatsApp:
+ *   'sent'      → single grey tick  (posted, not delivered to all → pipeline issue)
+ *   'delivered' → double grey tick  (notification created for everyone tagged)
+ *   'seen'      → double blue tick  (every tagged person has viewed it)
+ */
+export type TickState = 'sent' | 'delivered' | 'seen';
 
 /** The deduped, sorted directory of people who can be tagged or CC'd. */
 export function useDirectory(): TaggablePerson[] {
@@ -98,7 +116,9 @@ export function useMentionNotifier() {
       const ids = extractMentionIds(text || '', people).filter((id) => id !== activeProfile.id);
       if (!ids.length) return;
       // Direct insert (mirrors the app's other notify() helpers) so it works
-      // regardless of NotificationsContext readiness.
+      // regardless of NotificationsContext readiness. `delivered` drives the
+      // receipt tick — false means the notification pipeline errored.
+      let delivered = false;
       await insertRows('notifications', {
         target_roles: ids,
         title: `${activeProfile.name} mentioned you`,
@@ -108,20 +128,26 @@ export function useMentionNotifier() {
         actor_name: activeProfile.name,
         actor_role: activeProfile.roleLabel,
         read_by: [],
-      }).then(() => {}, () => {});
+      }).then(() => { delivered = true; }, () => {});
       // When the tag is attached to a record, leave a persistent trace in that
       // record's Notes thread (so the tagged person can see what was said) and
       // make the tagged people watchers for future changes.
       if (ref.entityType && ref.entityId) {
-        await insertRows('entity_notes', {
-          entity_type: ref.entityType,
-          entity_id: ref.entityId,
-          author_id: activeProfile.id,
-          author_name: activeProfile.name,
-          author_role: activeProfile.roleLabel,
-          body: text || '',
-          mentions: ids,
-        }).then(() => {}, () => {});
+        let noteId: string | null = null;
+        try {
+          const { data } = await insertRows('entity_notes', {
+            entity_type: ref.entityType,
+            entity_id: ref.entityId,
+            author_id: activeProfile.id,
+            author_name: activeProfile.name,
+            author_role: activeProfile.roleLabel,
+            body: text || '',
+            mentions: ids,
+          }).select('id').single();
+          noteId = (data as { id: string } | null)?.id ?? null;
+        } catch {
+          /* persistence unavailable — notification above still fired */
+        }
         const tagged = people.filter((p) => ids.includes(p.id));
         await addWatchers(
           { entityType: ref.entityType, entityId: ref.entityId, entityLabel: ref.entityLabel, route: ref.route },
@@ -129,6 +155,9 @@ export function useMentionNotifier() {
           'mention',
           activeProfile.id,
         );
+        if (noteId) {
+          await createReceipts({ noteId, entityType: ref.entityType, entityId: ref.entityId, mentionIds: ids, delivered });
+        }
       }
     },
     [people, activeProfile],
@@ -268,10 +297,11 @@ export async function postNote(opts: {
     await addWatchers(ref, mentioned.map((p) => ({ id: p.id, name: p.name })), 'mention', actor.id);
   }
 
-  // Immediate notification to everyone tagged (except yourself).
+  // Immediate notification to everyone tagged (except yourself), then a receipt
+  // per tagged person so the comment can show delivery / read ticks.
   const targets = mentionIds.filter((id) => id !== actor.id);
   if (targets.length) {
-    await addNotification({
+    const delivered = await addNotification({
       target_roles: targets,
       title: `${actor.name} mentioned you`,
       body: `${ref.entityLabel}: “${truncate(body)}”`,
@@ -280,6 +310,9 @@ export async function postNote(opts: {
       actor_name: actor.name,
       actor_role: actor.role,
     });
+    if (note?.id) {
+      await createReceipts({ noteId: note.id, entityType: ref.entityType, entityId: ref.entityId, mentionIds: targets, delivered });
+    }
   }
 
   return note;
@@ -314,4 +347,91 @@ export async function notifyWatchers(opts: {
     actor_name: opts.actor.name,
     actor_role: opts.actor.role,
   });
+}
+
+// ── Read / delivery receipts ────────────────────────────────────────────────
+
+/**
+ * Create one receipt row per tagged person for a freshly-posted note.
+ * `delivered` reflects whether the mention notification was actually written
+ * (false → the comment shows a single grey tick, flagging a pipeline failure).
+ * Idempotent: re-posting / retries won't duplicate (unique note_id+profile_id).
+ */
+export async function createReceipts(opts: {
+  noteId: string;
+  entityType: string;
+  entityId: string;
+  mentionIds: string[];
+  delivered: boolean;
+}): Promise<void> {
+  if (!opts.noteId || !opts.mentionIds.length) return;
+  const stamp = opts.delivered ? new Date().toISOString() : null;
+  const rows = opts.mentionIds.map((pid) => ({
+    note_id: opts.noteId,
+    entity_type: opts.entityType,
+    entity_id: opts.entityId,
+    profile_id: pid,
+    delivered_at: stamp,
+    seen_at: null,
+  }));
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from('entity_note_receipts') as any)
+      .upsert(rows, { onConflict: 'note_id,profile_id', ignoreDuplicates: true });
+  } catch {
+    /* table missing — receipts degrade to "no ticks", thread still works */
+  }
+}
+
+/** Fetch all receipts for a set of notes (for the open thread). */
+export async function getReceipts(noteIds: string[]): Promise<NoteReceipt[]> {
+  if (!noteIds.length) return [];
+  try {
+    const { data, error } = await supabase
+      .from('entity_note_receipts')
+      .select('note_id, profile_id, delivered_at, seen_at')
+      .in('note_id', noteIds)
+      .returns<NoteReceipt[]>();
+    if (error) return [];
+    return data ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Mark a note seen by a person (first view wins — only stamps when seen_at is
+ * still null, so the "seen" time and the green chip don't keep moving).
+ */
+export async function markNoteSeen(noteId: string, profileId: string): Promise<void> {
+  if (!noteId || !profileId) return;
+  try {
+    await updateRows('entity_note_receipts', { seen_at: new Date().toISOString() })
+      .eq('note_id', noteId)
+      .eq('profile_id', profileId)
+      .is('seen_at', null)
+      .then(() => {}, () => {});
+  } catch {
+    /* table missing — skip silently */
+  }
+}
+
+/** Profile ids who have seen a note (drives the per-person green @chip). */
+export function seenProfileIds(receipts: NoteReceipt[]): Set<string> {
+  return new Set(receipts.filter((r) => r.seen_at).map((r) => r.profile_id));
+}
+
+/**
+ * Aggregate tick state for a comment over the people it tagged. Returns null
+ * when nobody was tagged (no recipients → no ticks). A tagged person with no
+ * receipt row yet counts as not-delivered, keeping the comment at single-grey.
+ */
+export function tickState(mentionIds: string[], receipts: NoteReceipt[]): TickState | null {
+  if (!mentionIds.length) return null;
+  const byId = new Map(receipts.map((r) => [r.profile_id, r]));
+  const allDelivered = mentionIds.every((id) => byId.get(id)?.delivered_at);
+  const allSeen = mentionIds.every((id) => byId.get(id)?.seen_at);
+  if (allSeen) return 'seen';
+  if (allDelivered) return 'delivered';
+  return 'sent';
 }

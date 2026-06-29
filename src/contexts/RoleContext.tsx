@@ -6,7 +6,7 @@ import type { Database } from '../lib/database.types';
 
 type DbUser = Pick<
   Database['public']['Tables']['user_accounts']['Row'],
-  'id' | 'name' | 'role_id' | 'role_label' | 'plant_name' | 'access_note'
+  'id' | 'name' | 'role_id' | 'role_label' | 'plant_name' | 'access_note' | 'auth_user_id'
 >;
 
 /**
@@ -27,6 +27,13 @@ const LOCKED_FALLBACK: MockProfile = {
 interface RoleContextValue {
   /** The profile whose access/views are currently in effect. */
   activeProfile: MockProfile;
+  /**
+   * Every id the active profile answers to for notifications/tagging: their
+   * primary id, their role-template id, and their per-person `db_<uuid>` twin
+   * if one exists in the directory. A notification addressed to ANY of these
+   * belongs to this person. Always non-empty (at least `[activeProfile.id]`).
+   */
+  activeIdentityIds: string[];
   /** The logged-in user's own profile (who they actually are). */
   authProfile: MockProfile | null;
   allProfiles: MockProfile[];
@@ -39,6 +46,25 @@ interface RoleContextValue {
 
 const RoleContext = createContext<RoleContextValue | null>(null);
 
+/**
+ * All ids a person answers to: their own id, their role-template id, and the
+ * per-person `db_<uuid>` twin that the taggable directory exposes for them
+ * (matched by name). This bridges the two identity spaces — a user resolved to
+ * a role-template id at login still receives notifications tagged to their
+ * personal directory id, and vice-versa.
+ */
+function identitiesFor(profile: MockProfile, directory: MockProfile[]): string[] {
+  const ids = new Set<string>([profile.id]);
+  if (profile.baseRoleId) ids.add(profile.baseRoleId);
+  const key = profile.name.trim().toLowerCase();
+  const twin = directory.find((p) => p.name.trim().toLowerCase() === key);
+  if (twin) {
+    ids.add(twin.id);
+    if (twin.baseRoleId) ids.add(twin.baseRoleId);
+  }
+  return [...ids];
+}
+
 export function RoleProvider({ children }: { children: React.ReactNode }) {
   // The logged-in user's locked identity, resolved from their profiles row.
   // null = no session yet (loading, signed out, or the dev bypass).
@@ -46,12 +72,16 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   // Admin-only "preview as" selection. null = view as self.
   const [previewProfileId, setPreviewProfileId] = useState<string | null>(null);
   const [extraProfiles, setExtraProfiles] = useState<MockProfile[]>([]);
+  // The logged-in Supabase auth user id — the exact link to this person's
+  // directory (db) identity, used to bridge notification ids. null = no session.
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
 
   // ── Resolve the logged-in user → locked MockProfile ────────────────────────
   useEffect(() => {
     let cancelled = false;
 
     async function resolveFromSession(userId: string | null) {
+      if (!cancelled) setSessionUserId(userId);
       if (!userId) {
         if (!cancelled) setAuthProfile(null);
         return;
@@ -88,7 +118,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     async function loadDbUsers() {
       const { data } = await supabase
         .from('user_accounts')
-        .select('id, name, role_id, role_label, plant_name, access_note')
+        .select('id, name, role_id, role_label, plant_name, access_note, auth_user_id')
         .eq('is_active', true)
         .returns<DbUser[]>();
       if (!data?.length) return;
@@ -105,6 +135,8 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         extras.push({
           ...template,
           id: `db_${u.id}`,
+          baseRoleId: template.id, // keep the role link so role-targeted notifications still reach this person
+          authUserId: u.auth_user_id ?? undefined, // exact session ↔ directory link
           name: u.name,
           initials,
           roleLabel: u.role_label || template.roleLabel,
@@ -137,6 +169,22 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     return selfProfile;
   }, [canSwitch, previewProfileId, allProfiles, selfProfile]);
 
+  // Every id the active person answers to (self id + role id + db twin id).
+  const activeIdentityIds = useMemo(() => {
+    const ids = new Set(identitiesFor(activeProfile, extraProfiles));
+    // Exact bridge for the logged-in self: map this auth session straight to its
+    // directory `db_<uuid>` identity (name-independent, the robust link). Only
+    // when viewing as self — an admin previewing someone else keeps their ids.
+    if (sessionUserId && activeProfile.id === selfProfile.id) {
+      const mine = extraProfiles.find((p) => p.authUserId === sessionUserId);
+      if (mine) {
+        ids.add(mine.id);
+        if (mine.baseRoleId) ids.add(mine.baseRoleId);
+      }
+    }
+    return [...ids];
+  }, [activeProfile, extraProfiles, sessionUserId, selfProfile]);
+
   function switchProfile(profileId: string) {
     if (!canSwitch) return; // locked users cannot change their role
     // Switching back to self clears the preview.
@@ -147,6 +195,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     <RoleContext.Provider
       value={{
         activeProfile,
+        activeIdentityIds,
         authProfile,
         allProfiles,
         switchProfile,

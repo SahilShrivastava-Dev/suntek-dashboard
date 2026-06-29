@@ -753,6 +753,24 @@ export interface Database {
         Insert: OptionalNulls<Omit<Database['public']['Tables']['entity_watchers']['Row'], 'id' | 'created_at'>>;
         Update: Partial<Database['public']['Tables']['entity_watchers']['Insert']>;
       };
+
+      // Read / delivery receipts on note mentions (one row per note × tagged
+      // person). delivered_at = notification created OK; seen_at = comment
+      // scrolled into view. See 23_note_receipts.sql.
+      entity_note_receipts: {
+        Row: {
+          id: string;
+          note_id: string;
+          entity_type: string;
+          entity_id: string;
+          profile_id: string;
+          delivered_at: string | null;
+          seen_at: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['entity_note_receipts']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['entity_note_receipts']['Insert']>;
+      };
     };
   };
 }

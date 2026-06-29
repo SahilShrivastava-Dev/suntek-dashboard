@@ -24,7 +24,8 @@ interface NotificationsContextValue {
   markAllRead: () => void;
   /** Remove every notification from THIS profile's view (read or unread). */
   clearAll: () => void;
-  addNotification: (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => Promise<void>;
+  /** Insert a notification; resolves true when the row was created (delivered). */
+  addNotification: (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => Promise<boolean>;
   tableReady: boolean;
 }
 
@@ -34,7 +35,7 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   markRead: () => {},
   markAllRead: () => {},
   clearAll: () => {},
-  addNotification: async () => {},
+  addNotification: async () => false,
   tableReady: false,
 });
 
@@ -60,19 +61,25 @@ function addCleared(roleId: string, ids: string[]) {
 }
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
-  const { activeProfile } = useRoleContext();
+  const { activeProfile, activeIdentityIds } = useRoleContext();
+  // The id used for per-person bookkeeping (read/cleared pointers).
   const roleId = activeProfile?.id ?? 'admin';
+  // Every id this person answers to — they own a notification addressed to ANY
+  // of these (their role id, their personal db id, etc.). Stable string key for
+  // effect deps. Falls back to the primary id if the set hasn't resolved yet.
+  const identityIds = activeIdentityIds?.length ? activeIdentityIds : [roleId];
+  const identityKey = identityIds.join(',');
 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [tableReady, setTableReady] = useState(false);
 
-  // Load notifications for the current role from Supabase
+  // Load notifications addressed to any of this person's identities.
   const loadNotifications = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .contains('target_roles', [roleId])
+        .overlaps('target_roles', identityIds)
         .order('created_at', { ascending: false })
         .limit(50)
         .returns<AppNotification[]>();
@@ -90,15 +97,20 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     } catch {
       setTableReady(false);
     }
-  }, [roleId]);
+    // identityKey is the stable string form of identityIds (every id we query
+    // for); roleId drives the cleared filter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identityKey, roleId]);
 
   useEffect(() => {
     loadNotifications();
   }, [loadNotifications]);
 
-  // Supabase real-time subscription for new notifications
+  // Supabase real-time subscription for new notifications. A tag fires here the
+  // moment it's inserted — match on ANY of this person's identities.
   useEffect(() => {
     if (!tableReady) return;
+    const idSet = new Set(identityIds);
     const channel = supabase
       .channel(`notifications:${roleId}`)
       .on('postgres_changes', {
@@ -107,13 +119,14 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         table: 'notifications',
       }, (payload) => {
         const n = payload.new as AppNotification;
-        if (n.target_roles?.includes(roleId) && !getClearedSet(roleId).has(n.id)) {
-          setNotifications(prev => [n, ...prev]);
+        if (n.target_roles?.some((id) => idSet.has(id)) && !getClearedSet(roleId).has(n.id)) {
+          setNotifications(prev => (prev.some((x) => x.id === n.id) ? prev : [n, ...prev]));
         }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [roleId, tableReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identityKey, roleId, tableReady]);
 
   const unreadCount = notifications.filter(n => !n.read_by?.includes(roleId)).length;
 
@@ -158,12 +171,14 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     });
   }
 
-  async function addNotification(n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) {
-    if (!tableReady) return;
+  async function addNotification(n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>): Promise<boolean> {
+    if (!tableReady) return false;
+    let ok = false;
     await insertRows('notifications', {
       ...n,
       read_by: [],
-    }).then(() => {}, () => {});
+    }).then(() => { ok = true; }, () => { ok = false; });
+    return ok;
   }
 
   return (

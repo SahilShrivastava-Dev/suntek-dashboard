@@ -13,6 +13,20 @@
 export interface MockProfile {
   id: string;
   name: string;
+  /**
+   * The underlying role-template id this profile derives its permissions from.
+   * For built-in role archetypes this equals `id`. For DB-provisioned users
+   * (whose `id` is a per-person `db_<uuid>`) this is the role they were created
+   * under — so notifications addressed to either the person OR their role both
+   * reach them. Unset on the static archetypes (treated as === id).
+   */
+  baseRoleId?: string;
+  /**
+   * The Supabase auth user id (auth.users.id) backing this directory entry, when
+   * it's a provisioned login. Lets the logged-in session map itself exactly to
+   * its `db_<uuid>` directory identity without relying on name matching.
+   */
+  authUserId?: string;
   role: string;
   roleLabel: string;
   roleDescription: string;

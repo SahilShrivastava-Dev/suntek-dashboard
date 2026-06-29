@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
@@ -33,7 +34,7 @@ type UnifiedRow = {
 };
 
 const ticketRef = (id: string) => id.slice(0, 8);
-const t = (ts: string | null | undefined) => (ts ? new Date(ts).getTime() : 0);
+const toMs = (ts: string | null | undefined) => (ts ? new Date(ts).getTime() : 0);
 const fmtDate = (d: string | null | undefined) =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
@@ -120,6 +121,7 @@ function deriveMaintenanceEvents(tickets: TicketRow[], srs: StoreReqRow[]): Unif
 }
 
 export function ActivityLog() {
+  const { t } = useTranslation();
   const toast = useToast();
   const people = useDirectory();
   const { activeProfile } = useRoleContext();
@@ -186,7 +188,7 @@ export function ActivityLog() {
     }));
     const derived = deriveMaintenanceEvents(tickets, storeReqs);
     const all = showManualOnly ? manual : [...manual, ...derived];
-    return all.sort((a, b) => t(b.date) - t(a.date));
+    return all.sort((a, b) => toMs(b.date) - toMs(a.date));
   }, [logs, tickets, storeReqs, showManualOnly]);
 
   const fromMaintenance = rows.filter(r => r.source === 'maintenance').length;
@@ -210,7 +212,7 @@ export function ActivityLog() {
     }).select('*, plants(name)').single();
 
     if (error) {
-      toast.error(`Save failed: ${error.message}`);
+      toast.error(t('activity.saveFailed', { message: error.message }));
       return;
     }
     if (data) setLogs(prev => [data as ActivityRow, ...prev]);
@@ -220,7 +222,7 @@ export function ActivityLog() {
     if (mentionIds.length) {
       await addNotification({
         target_roles: mentionIds,
-        title: `${activeProfile.name} tagged you in an activity log`,
+        title: t('activity.taggedTitle', { name: activeProfile.name }),
         body: `${form.equipment}: “${truncate(form.notes)}”`,
         type: 'info',
         route: '/dashboard/purchase/activity',
@@ -240,7 +242,7 @@ export function ActivityLog() {
     );
     if (hits.length) {
       const h = hits[0];
-      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      toast.error(t('activity.blacklistHit', { value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
     }
 
     setSaved(true);
@@ -255,23 +257,23 @@ export function ActivityLog() {
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'All activity events', what: 'Every activity across all plants — manual log entries PLUS milestones auto-fed from the maintenance workflow (raised, procured, handed over, completed, defective decided). The single overall record.', source: 'Derived', note: 'Manual activity_logs + maintenance_tickets / maintenance_store_requests milestones.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Activity events · total</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('activity.kpiTotal')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{rows.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{fromMaintenance} from maintenance</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('activity.kpiFromMaintenance', { count: fromMaintenance })}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Verified', what: 'Activity events that carry a verifier (supervisor / unit head sign-off, or the raising role on a completed maintenance ticket).', source: 'Derived' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Verified</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('activity.kpiVerified')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-green-600">{verified}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Pending verification', what: 'Events with no verifier yet. These need supervisor sign-off.', source: 'Derived' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Pending verification</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('activity.kpiPending')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{rows.length - verified}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Photo proof coverage', what: 'Percentage of activity events that carry photo proof — manual uploads plus the completion / handover / defective-part photos captured through the maintenance workflow.', source: 'Derived' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">With photo proof</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('activity.kpiPhotoProof')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{withPhoto}%</div>
         </div>
       </div>
@@ -281,25 +283,25 @@ export function ActivityLog() {
         <KpiInfoButton info={{ title: 'Activity log book', what: 'The overall record of activity across all plants. Maintenance milestones flow in automatically and are tagged with their ticket #; ad-hoc work is added with "+ Log activity". Every row aims to carry photo proof.', source: 'Derived', note: 'Auto-fed from the maintenance workflow + manual activity_logs entries.' }} />
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">Activity log book</div>
-            <div className="text-xs text-slate-500">Maintenance milestones auto-flow in (tagged with ticket #) · ad-hoc work added manually · photos on file</div>
+            <div className="text-base font-bold">{t('activity.logBookTitle')}</div>
+            <div className="text-xs text-slate-500">{t('activity.logBookSubtitle')}</div>
           </div>
           <div className="flex items-center gap-2">
             <button
               className={`pill px-3 py-2 text-xs font-semibold ${showManualOnly ? 'btn-ghost' : 'btn-ghost'}`}
               style={{ border: '1px solid #E2E8F0', background: showManualOnly ? '#fff' : '#0F172A', color: showManualOnly ? '#475569' : '#fff' }}
               onClick={() => setShowManualOnly(v => !v)}
-              title="Toggle auto-fed maintenance events"
+              title={t('activity.toggleFeedTitle')}
             >
-              {showManualOnly ? 'Show maintenance feed' : 'Manual only'}
+              {showManualOnly ? t('activity.showMaintenanceFeed') : t('activity.manualOnly')}
             </button>
             <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-              + Log activity
+              {t('activity.logActivityBtn')}
             </button>
           </div>
         </div>
         {loadError ? (
-          <ErrorState title="Couldn't load the activity log" message="The activity records failed to load."
+          <ErrorState title={t('activity.errorTitle')} message={t('activity.errorMessage')}
             onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
         ) : loading ? (
           <SkeletonRows rows={6} />
@@ -308,8 +310,8 @@ export function ActivityLog() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Equipment</th><th>Activity</th><th>Ticket</th><th>Date</th>
-                <th>Done by</th><th>Verified by</th><th>Plant</th><th>Pic</th>
+                <th>{t('activity.colEquipment')}</th><th>{t('activity.colActivity')}</th><th>{t('activity.colTicket')}</th><th>{t('activity.colDate')}</th>
+                <th>{t('activity.colDoneBy')}</th><th>{t('activity.colVerifiedBy')}</th><th>{t('activity.colPlant')}</th><th>{t('activity.colPic')}</th>
               </tr>
             </thead>
             <tbody>
@@ -319,7 +321,7 @@ export function ActivityLog() {
                   <td className="text-slate-600">
                     {a.type}
                     {a.source === 'maintenance' && (
-                      <span className="badge" style={{ marginLeft: 6, background: '#E0F2FE', color: '#0369A1', fontWeight: 700, fontSize: 10 }}>auto</span>
+                      <span className="badge" style={{ marginLeft: 6, background: '#E0F2FE', color: '#0369A1', fontWeight: 700, fontSize: 10 }}>{t('activity.autoBadge')}</span>
                     )}
                   </td>
                   <td>{a.ticketRef ? <span className="num text-xs text-slate-500">#{a.ticketRef}</span> : <span className="text-slate-300">—</span>}</td>
@@ -331,7 +333,7 @@ export function ActivityLog() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">No activity yet — maintenance events will appear here automatically, or add one manually</td></tr>
+                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{t('activity.emptyState')}</td></tr>
               )}
             </tbody>
           </table>
@@ -340,22 +342,22 @@ export function ActivityLog() {
       </div>
 
       {/* Slide panel */}
-      <SlidePanel open={open} onClose={handleClose} title="Log an activity" subtitle="Activity Log · Purchase">
-        <PanelField label="Equipment / asset *">
-          <PanelInput placeholder="e.g. Cooling tower motor, Air compressor" value={form.equipment} onChange={e => set('equipment', e.target.value)} />
+      <SlidePanel open={open} onClose={handleClose} title={t('activity.panelTitle')} subtitle={t('activity.panelSubtitle')}>
+        <PanelField label={t('activity.fieldEquipment')}>
+          <PanelInput placeholder={t('activity.phEquipment')} value={form.equipment} onChange={e => set('equipment', e.target.value)} />
         </PanelField>
 
         <PanelRow>
-          <PanelField label="Activity type">
+          <PanelField label={t('activity.fieldActivityType')}>
             <PanelSelect value={form.type} onChange={e => set('type', e.target.value)}>
-              <option>Regular</option>
-              <option>Repair</option>
-              <option>Scrap</option>
-              <option>Inspection</option>
-              <option>Calibration</option>
+              <option value="Regular">{t('activity.typeRegular')}</option>
+              <option value="Repair">{t('activity.typeRepair')}</option>
+              <option value="Scrap">{t('activity.typeScrap')}</option>
+              <option value="Inspection">{t('activity.typeInspection')}</option>
+              <option value="Calibration">{t('activity.typeCalibration')}</option>
             </PanelSelect>
           </PanelField>
-          <PanelField label="Plant">
+          <PanelField label={t('activity.fieldPlant')}>
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
               {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
@@ -363,27 +365,27 @@ export function ActivityLog() {
         </PanelRow>
 
         <PanelRow>
-          <PanelField label="Date *">
+          <PanelField label={t('activity.fieldDate')}>
             <PanelInput type="date" value={form.date} onChange={e => set('date', e.target.value)} />
           </PanelField>
-          <PanelField label="Done by *">
-            <PanelInput placeholder="Name of person" value={form.doneBy} onChange={e => set('doneBy', e.target.value)} />
+          <PanelField label={t('activity.fieldDoneBy')}>
+            <PanelInput placeholder={t('activity.phDoneBy')} value={form.doneBy} onChange={e => set('doneBy', e.target.value)} />
           </PanelField>
         </PanelRow>
 
-        <PanelField label="Verified by">
-          <PanelInput placeholder="Supervisor / unit head (optional)" value={form.verifiedBy} onChange={e => set('verifiedBy', e.target.value)} />
+        <PanelField label={t('activity.fieldVerifiedBy')}>
+          <PanelInput placeholder={t('activity.phVerifiedBy')} value={form.verifiedBy} onChange={e => set('verifiedBy', e.target.value)} />
         </PanelField>
 
-        <PanelField label="Notes">
-          <PanelTextarea placeholder="What was done, parts replaced, observations…" value={form.notes} onChange={e => set('notes', e.target.value)} />
+        <PanelField label={t('activity.fieldNotes')}>
+          <PanelTextarea placeholder={t('activity.phNotes')} value={form.notes} onChange={e => set('notes', e.target.value)} />
         </PanelField>
 
         <PanelDivider />
 
         <OcrUpload
-          label="Pic proof"
-          hint="Photo of work done — AI reads equipment ID, work type, completion status"
+          label={t('activity.ocrLabel')}
+          hint={t('activity.ocrHint')}
           fields={[
             { key: 'equipment', label: 'Equipment ID',  value: 'Atlas Copco GA18 — SHD-AC-04' },
             { key: 'type',      label: 'Activity type', value: 'Repair' },
@@ -400,11 +402,11 @@ export function ActivityLog() {
           saved={saved}
           onCancel={handleClose}
           onSave={handleSave}
-          saveLabel="Save log entry"
-          successLabel="Activity logged"
-          successSub="Entry saved · photo uploading to OneDrive"
+          saveLabel={t('activity.saveLabel')}
+          successLabel={t('activity.successLabel')}
+          successSub={t('activity.successSub')}
           disabled={!form.equipment.trim() || !form.doneBy.trim()}
-          requiredHint="Fill in Equipment and Done by to save"
+          requiredHint={t('activity.requiredHint')}
         />
       </SlidePanel>
     </>

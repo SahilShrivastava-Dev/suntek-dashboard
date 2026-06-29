@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { insertRows, upsertRows } from '../../lib/db';
@@ -31,6 +32,7 @@ interface BatchLoggerProps {
 }
 
 export function BatchLogger({ embedded = false }: BatchLoggerProps) {
+  const { t } = useTranslation();
   const toast = useToast();
   const ocr = useOcrJobs();
   const [batchId, setBatchId] = useState('');
@@ -171,9 +173,9 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
   // When embedded, the 3 sidebar dropdowns select the active panel via ?tab=.
   useEffect(() => {
     if (!embedded) return;
-    const t = searchParams.get('tab');
-    if (t && ['reading', 'new-batch', 'upload', 'history'].includes(t)) {
-      setActiveTab(t as 'reading' | 'new-batch' | 'upload' | 'history');
+    const tabParam = searchParams.get('tab');
+    if (tabParam && ['reading', 'new-batch', 'upload', 'history'].includes(tabParam)) {
+      setActiveTab(tabParam as 'reading' | 'new-batch' | 'upload' | 'history');
     }
   }, [searchParams, embedded]);
   const [newBatchNo, setNewBatchNo] = useState('');
@@ -289,7 +291,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
     e.preventDefault();
     if (!temp && !cpGravity && !cl2Press) return;
     if (!batchId) {
-      toast.error('No active batch selected');
+      toast.error(t('batchEntry.noActiveBatch'));
       return;
     }
 
@@ -340,7 +342,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
       }
     } catch (e) {
       console.error(e);
-      toast.error(`Failed to save reading: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('batchEntry.saveReadingFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -358,7 +360,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
       }).select().single();
 
       if (error) {
-        toast.error(`Batch creation failed: ${error.message}. Please check your connection and try again.`);
+        toast.error(t('batchEntry.batchCreationFailed', { error: error.message }));
         return;
       }
 
@@ -386,7 +388,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
         setNewTargetQty('1400');
         setActiveTab('reading');
 
-        toast.success(`Batch #${newBatch.batch_no} started successfully!`);
+        toast.success(t('batchEntry.batchStartedSuccess', { batchNo: newBatch.batch_no }));
       }
     } catch (err) {
       console.error(err);
@@ -411,14 +413,14 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-xl">S</div>
             <div>
-              <div className="text-xs font-bold text-blue-300 uppercase tracking-wider">Factory Console (L1)</div>
-              <div className="text-lg font-bold">Batch Logger</div>
+              <div className="text-xs font-bold text-blue-300 uppercase tracking-wider">{t('batchEntry.factoryConsole')}</div>
+              <div className="text-lg font-bold">{t('batchEntry.batchLogger')}</div>
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <div className="text-sm font-bold">Operator: Shyam</div>
-              <div className="text-xs text-slate-400">Shift: 6 AM – 2 PM</div>
+              <div className="text-sm font-bold">{t('batchEntry.operatorLabel')}: Shyam</div>
+              <div className="text-xs text-slate-400">{t('batchEntry.shiftLabel')}: 6 AM – 2 PM</div>
             </div>
           </div>
         </header>
@@ -434,7 +436,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2.5">
                 <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
               </svg>
-              Batch Actions
+              {t('batchEntry.batchActions')}
             </h2>
 
             {/* Segmented control — standalone app only. In the dashboard the 3
@@ -450,7 +452,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Log
+                {t('batchEntry.tabLog')}
               </button>
               <button
                 type="button"
@@ -461,7 +463,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                New Batch
+                {t('batchEntry.tabNewBatch')}
               </button>
               <button
                 type="button"
@@ -472,7 +474,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Batch
+                {t('batchEntry.tabBatch')}
               </button>
               <button
                 type="button"
@@ -483,7 +485,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                History
+                {t('batchEntry.tabHistory')}
               </button>
             </div>
             )}
@@ -497,7 +499,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                   <line x1="12" y1="3" x2="12" y2="15" />
                 </svg>
                 <span className="text-xs font-bold" style={{ color: '#7c3aed' }}>
-                  Add Batch Sheet
+                  {t('batchEntry.addBatchSheet')}
                 </span>
               </div>
             )}
@@ -506,7 +508,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
               <BatchSheetUpload
                 channel="batch"
                 reviewing={!!uploadReview}
-                docLabel="Batch Sheet"
+                docLabel={t('batchEntry.batchSheet')}
                 accentColor="#7c3aed"
               />
             ) : activeTab === 'history' ? (
@@ -514,7 +516,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                 {/* Batch selector — choose which batch's reading history to view */}
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                    Select Batch
+                    {t('batchEntry.selectBatch')}
                   </label>
                   <select
                     value={batchId}
@@ -523,14 +525,13 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                   >
                     {batches.map(b => (
                       <option key={b.id} value={b.id}>
-                        BATCH #{b.batch_no} ({b.recipe ? `${b.recipe} Density` : 'Generic'})
+                        {t('batchEntry.batchPrefix')} #{b.batch_no} ({b.recipe ? t('batchEntry.densityValue', { recipe: b.recipe }) : t('batchEntry.generic')})
                       </option>
                     ))}
                   </select>
                 </div>
                 <div className="rounded-xl bg-blue-50 border border-blue-100 p-4 text-sm text-slate-600 leading-relaxed">
-                  Read-only view. The full reading log for the selected batch is shown
-                  on the right. To add a new reading, use <span className="font-semibold text-blue-700">Log Reading</span>.
+                  {t('batchEntry.historyHintPre')}<span className="font-semibold text-blue-700">{t('batchEntry.logReadingLink')}</span>.
                 </div>
               </div>
             ) : activeTab === 'reading' ? (
@@ -539,7 +540,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                   {/* Batch selector */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                      Select Active Batch
+                      {t('batchEntry.selectActiveBatch')}
                     </label>
                     <select
                       value={batchId}
@@ -548,7 +549,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                     >
                       {batches.map(b => (
                         <option key={b.id} value={b.id}>
-                          BATCH #{b.batch_no} ({b.recipe ? `${b.recipe} Density` : 'Generic'})
+                          {t('batchEntry.batchPrefix')} #{b.batch_no} ({b.recipe ? t('batchEntry.densityValue', { recipe: b.recipe }) : t('batchEntry.generic')})
                         </option>
                       ))}
                     </select>
@@ -557,7 +558,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                   {/* Temperature */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                      Temperature (°C)
+                      {t('batchEntry.temperature')}
                     </label>
                     <div className="relative">
                       <input
@@ -574,7 +575,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                   {/* CP Gravity */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                      CP Gravity
+                      {t('batchEntry.cpGravity')}
                     </label>
                     <input
                       type="number"
@@ -588,7 +589,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                   {/* Cl2 Pressure */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                      Cl₂ Pressure
+                      {t('batchEntry.cl2Pressure')}
                     </label>
                     <div className="relative">
                       <input
@@ -609,7 +610,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                   className="w-full text-white font-bold py-4 rounded-xl text-lg shadow-lg transition-all mt-4"
                   style={{ background: saved ? '#10B981' : '#2563EB', boxShadow: '0 8px 20px -4px rgba(37,99,235,0.35)' }}
                 >
-                  {saved ? '✓ Reading Saved!' : 'Save Reading'}
+                  {saved ? t('batchEntry.readingSaved') : t('batchEntry.saveReading')}
                 </button>
               </form>
             ) : (
@@ -617,37 +618,37 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                      New Batch Number *
+                      {t('batchEntry.newBatchNumber')}
                     </label>
                     <input
                       type="text"
                       required
                       value={newBatchNo}
                       onChange={e => setNewBatchNo(e.target.value)}
-                      placeholder="e.g. 1236"
+                      placeholder={t('batchEntry.newBatchNumberPlaceholder')}
                       className="w-full p-3.5 border-2 border-slate-200 rounded-xl font-bold text-base bg-slate-50 focus:border-blue-500 focus:outline-none"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                      Recipe / Density *
+                      {t('batchEntry.recipeDensity')}
                     </label>
                     <select
                       value={newRecipe}
                       onChange={e => setNewRecipe(e.target.value)}
                       className="w-full p-3.5 border-2 border-slate-200 rounded-xl font-bold text-base bg-slate-50 focus:border-blue-500 focus:outline-none"
                     >
-                      <option value="1300">1300 Density</option>
-                      <option value="1400">1400 Density</option>
-                      <option value="1450">1450 Density</option>
-                      <option value="1500">1500 Density</option>
+                      <option value="1300">{t('batchEntry.densityValue', { recipe: '1300' })}</option>
+                      <option value="1400">{t('batchEntry.densityValue', { recipe: '1400' })}</option>
+                      <option value="1450">{t('batchEntry.densityValue', { recipe: '1450' })}</option>
+                      <option value="1500">{t('batchEntry.densityValue', { recipe: '1500' })}</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
-                      Target Quantity (kg) *
+                      {t('batchEntry.targetQuantity')}
                     </label>
                     <input
                       type="number"
@@ -666,7 +667,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                   className="w-full text-white font-bold py-4 rounded-xl text-lg shadow-lg transition-all bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 mt-6"
                   style={{ boxShadow: '0 8px 20px -4px rgba(37,99,235,0.35)' }}
                 >
-                  {creating ? 'Starting Batch...' : 'Start New Batch'}
+                  {creating ? t('batchEntry.startingBatch') : t('batchEntry.startNewBatch')}
                 </button>
               </form>
             )}
@@ -685,7 +686,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
                 ocr.reset('batch');
                 loadBatches();
                 setActiveTab('reading');
-                toast.success(`Batch #${savedBatchNo} sheet saved to database!`);
+                toast.success(t('batchEntry.batchSheetSaved', { batchNo: savedBatchNo }));
               }}
               onCancel={() => ocr.reset('batch')}
             />
@@ -697,14 +698,14 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
           {/* Table header bar */}
           <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 rounded-t-2xl shrink-0">
             <div>
-              <h3 className="font-bold text-lg">Batch {batchLabel ? `#${batchLabel}` : 'Log'} Log</h3>
-              <div className="text-xs text-slate-500">Started: 22/02/26 10 PM</div>
+              <h3 className="font-bold text-lg">{t('batchEntry.batchLogTitle', { label: batchLabel ? `#${batchLabel}` : t('batchEntry.logWord') })}</h3>
+              <div className="text-xs text-slate-500">{t('batchEntry.started')}: 22/02/26 10 PM</div>
             </div>
             <div
               className="font-bold px-3 py-1 rounded-full text-sm"
               style={{ background: '#D1FAE5', color: '#065F46' }}
             >
-              Running ({elapsed})
+              {t('batchEntry.running', { elapsed })}
             </div>
           </div>
 
@@ -713,11 +714,11 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-100 sticky top-0 text-xs uppercase text-slate-500 font-bold">
                 <tr>
-                  <th className="p-4 border-b">Time</th>
-                  <th className="p-4 border-b">Temp</th>
-                  <th className="p-4 border-b">CP Gravity</th>
-                  <th className="p-4 border-b">Cl₂ Press.</th>
-                  <th className="p-4 border-b">Operator</th>
+                  <th className="p-4 border-b">{t('batchEntry.colTime')}</th>
+                  <th className="p-4 border-b">{t('batchEntry.colTemp')}</th>
+                  <th className="p-4 border-b">{t('batchEntry.colCpGravity')}</th>
+                  <th className="p-4 border-b">{t('batchEntry.colCl2Press')}</th>
+                  <th className="p-4 border-b">{t('batchEntry.colOperator')}</th>
                 </tr>
               </thead>
               <tbody className="text-sm font-medium">
@@ -743,14 +744,14 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
           {/* Close batch footer */}
           <div className="p-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
             <div className="text-xs text-slate-500">
-              {visibleReadings.length} reading{visibleReadings.length !== 1 ? 's' : ''} logged this batch
+              {t('batchEntry.readingsLogged', { count: visibleReadings.length })}
             </div>
             <button
               className="text-xs font-bold px-4 py-2 rounded-xl border transition-colors hover:bg-red-50"
               style={{ borderColor: '#FCA5A5', color: '#DC2626' }}
-              onClick={() => toast.info('Close batch → QC check will run automatically.')}
+              onClick={() => toast.info(t('batchEntry.closeBatchInfo'))}
             >
-              Close Batch & Run QC
+              {t('batchEntry.closeBatchRunQc')}
             </button>
           </div>
         </div>

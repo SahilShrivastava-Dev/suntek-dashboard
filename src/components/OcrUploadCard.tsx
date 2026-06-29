@@ -6,6 +6,7 @@ import type { ExtractedSalesSheet, ExtractedPurchaseSheet } from '../lib/nvidiaO
 import { extractSalesSheet, extractPurchaseSheet } from '../lib/nvidiaOcr';
 import { useOcrJobs, type OcrStatus } from '../contexts/OcrJobsContext';
 import { useBlacklistGuard } from '../lib/blacklist/guard';
+import { useTranslation } from 'react-i18next';
 import { useToast } from './ui/toast';
 
 type Kind = 'sales' | 'purchase';
@@ -24,6 +25,7 @@ function panelStage(status: OcrStatus): 'idle' | 'loading' | 'done' | 'error' {
  * and reconnects if the user navigates away mid-extraction.
  */
 export function OcrUploadCard({ kind }: { kind: Kind }) {
+  const { t } = useTranslation();
   const toast = useToast();
   const screenBlacklist = useBlacklistGuard();
   const ocr = useOcrJobs();
@@ -33,7 +35,7 @@ export function OcrUploadCard({ kind }: { kind: Kind }) {
   const isSales = kind === 'sales';
   const channel = `ocr-${kind}`;
   const accent = isSales ? '#16a34a' : '#dc2626';
-  const title = isSales ? 'Upload sales sheet (OCR)' : 'Upload purchase sheet (OCR)';
+  const title = isSales ? t('ocr.uploadSalesTitle') : t('ocr.uploadPurchaseTitle');
 
   const job = isSales
     ? ocr.getJob<ExtractedSalesSheet>(channel)
@@ -92,7 +94,7 @@ export function OcrUploadCard({ kind }: { kind: Kind }) {
           <div className="text-left">
             <div className="text-[14px] font-bold text-slate-800">{title}</div>
             <div className="text-[11px] text-slate-500">
-              {job.status === 'processing' ? 'Extracting… (keeps running if you switch tabs)' : 'Snap or upload a sheet — OCR extracts the fields for review'}
+              {job.status === 'processing' ? t('ocr.extracting') : t('ocr.snapHint')}
             </div>
           </div>
         </div>
@@ -106,7 +108,7 @@ export function OcrUploadCard({ kind }: { kind: Kind }) {
               <SalesReviewPanel
                 data={job.result as ExtractedSalesSheet}
                 imageUrl={job.previewUrl!}
-                onSaved={() => { reset(); toast.success('Sales sheet saved!'); }}
+                onSaved={() => { reset(); toast.success(t('ocr.salesSheetSaved')); }}
                 onCancel={reset}
               />
             ) : (

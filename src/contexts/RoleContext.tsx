@@ -1,12 +1,13 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { MOCK_PROFILES, DEFAULT_PROFILE } from '../lib/profiles';
 import type { MockProfile } from '../lib/profiles';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
+import { applyLanguage, hasStoredLanguage } from '../i18n';
 
 type DbUser = Pick<
   Database['public']['Tables']['user_accounts']['Row'],
-  'id' | 'name' | 'role_id' | 'role_label' | 'plant_name' | 'access_note' | 'auth_user_id'
+  'id' | 'name' | 'role_id' | 'role_label' | 'plant_name' | 'access_note' | 'auth_user_id' | 'created_at'
 >;
 
 /**
@@ -34,6 +35,20 @@ interface RoleContextValue {
    * belongs to this person. Always non-empty (at least `[activeProfile.id]`).
    */
   activeIdentityIds: string[];
+  /**
+   * The active person's SINGLE personal identity — their `db_<uuid>` when they
+   * are a provisioned user, otherwise their profile id. Unlike `activeProfile.id`
+   * (which is the shared role-template id for provisioned users), this is unique
+   * per person, so it's what "is this note mine / mark it seen / don't tag
+   * myself" must key on. Two different technicians get two different personIds.
+   */
+  activePersonId: string;
+  /**
+   * When the active person's account was created — notifications older than this
+   * are hidden so a freshly-provisioned user doesn't inherit the whole backlog.
+   * null for the static archetypes / dev (they see everything).
+   */
+  activeAccountFloor: string | null;
   /** The logged-in user's own profile (who they actually are). */
   authProfile: MockProfile | null;
   allProfiles: MockProfile[];
@@ -75,6 +90,11 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   // The logged-in Supabase auth user id — the exact link to this person's
   // directory (db) identity, used to bridge notification ids. null = no session.
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  // The auth user whose saved language we've already applied this session. Auth
+  // events (token refresh, tab focus) fire resolveFromSession repeatedly — we
+  // must apply the DB language only ONCE per login, never re-apply it, so it
+  // can't clobber a language the user switched to at runtime.
+  const langAppliedForRef = useRef<string | null>(null);
 
   // ── Resolve the logged-in user → locked MockProfile ────────────────────────
   useEffect(() => {
@@ -83,16 +103,26 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     async function resolveFromSession(userId: string | null) {
       if (!cancelled) setSessionUserId(userId);
       if (!userId) {
+        langAppliedForRef.current = null; // signed out → re-apply on next login
         if (!cancelled) setAuthProfile(null);
         return;
       }
       const { data } = await supabase
         .from('profiles')
-        .select('role, plant_id, name')
+        .select('role, plant_id, name, preferred_language')
         .eq('id', userId)
         .maybeSingle()
-        .returns<{ role: string | null; plant_id: string | null; name: string | null }>();
+        .returns<{ role: string | null; plant_id: string | null; name: string | null; preferred_language: string | null }>();
       if (cancelled) return;
+
+      // Language source of truth = the user's local choice (localStorage). The
+      // DB preference only SEEDS the language on a fresh device that has no
+      // local choice yet — so a refresh/token-refresh/tab-focus can never
+      // override a language the user picked. Applied at most once per login.
+      if (langAppliedForRef.current !== userId) {
+        langAppliedForRef.current = userId;
+        if (!hasStoredLanguage()) applyLanguage(data?.preferred_language);
+      }
 
       const template = MOCK_PROFILES.find((p) => p.id === data?.role);
       if (!template) {
@@ -118,7 +148,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     async function loadDbUsers() {
       const { data } = await supabase
         .from('user_accounts')
-        .select('id, name, role_id, role_label, plant_name, access_note, auth_user_id')
+        .select('id, name, role_id, role_label, plant_name, access_note, auth_user_id, created_at')
         .eq('is_active', true)
         .returns<DbUser[]>();
       if (!data?.length) return;
@@ -137,6 +167,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
           id: `db_${u.id}`,
           baseRoleId: template.id, // keep the role link so role-targeted notifications still reach this person
           authUserId: u.auth_user_id ?? undefined, // exact session ↔ directory link
+          accountCreatedAt: u.created_at ?? undefined, // notification floor
           name: u.name,
           initials,
           roleLabel: u.role_label || template.roleLabel,
@@ -185,6 +216,28 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     return [...ids];
   }, [activeProfile, extraProfiles, sessionUserId, selfProfile]);
 
+  // The active person's unique personal id (their db twin if provisioned, else
+  // their profile id). NEVER the shared role id — used for "is this mine /
+  // mark seen / exclude self" so two same-role people stay distinct.
+  const activePersonId = useMemo(() => {
+    if (activeProfile.id.startsWith('db_')) return activeProfile.id; // already personal
+    if (sessionUserId && activeProfile.id === selfProfile.id) {
+      const mine = extraProfiles.find((p) => p.authUserId === sessionUserId);
+      if (mine) return mine.id; // exact auth link
+    }
+    const key = activeProfile.name.trim().toLowerCase();
+    const twin = extraProfiles.find((p) => p.name.trim().toLowerCase() === key);
+    return twin?.id ?? activeProfile.id; // name twin, else the (mock) profile id
+  }, [activeProfile, extraProfiles, sessionUserId, selfProfile]);
+
+  // The active person's provisioning date (notification floor). Resolved from
+  // whichever directory entry matches their personal id; null for archetypes.
+  const activeAccountFloor = useMemo(() => {
+    if (activeProfile.accountCreatedAt) return activeProfile.accountCreatedAt;
+    const mine = extraProfiles.find((p) => p.id === activePersonId);
+    return mine?.accountCreatedAt ?? null;
+  }, [activeProfile, extraProfiles, activePersonId]);
+
   function switchProfile(profileId: string) {
     if (!canSwitch) return; // locked users cannot change their role
     // Switching back to self clears the preview.
@@ -196,6 +249,8 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       value={{
         activeProfile,
         activeIdentityIds,
+        activePersonId,
+        activeAccountFloor,
         authProfile,
         allProfiles,
         switchProfile,

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { SkeletonRows, ErrorState, EmptyState } from '../../components/ui/states';
@@ -24,6 +25,7 @@ function fmtINR(v: number): string {
 }
 
 export function CostIntelligence() {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<CostConfig>({ ...DEFAULT_COST_CONFIG });
 
   const { data, isLoading, isError, refetch } = useQuery<BatchRow[]>({
@@ -76,30 +78,30 @@ export function CostIntelligence() {
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-4 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Avg landed cost / MT', what: 'Mean true landed cost per MT across closed batches — material + labour + energy + overhead. The foundation for margin and pricing checks.', source: 'Derived', note: 'computeBatchCost() over closed active_batches with the rates set on the right.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Avg landed cost · per MT</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('costIntel.kpiAvgLanded')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{summary.avgPerMT > 0 ? fmtINR(summary.avgPerMT) : '—'}</div>
-          <div className="text-[11px] text-slate-500 mt-1">across closed batches</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('costIntel.kpiAvgLandedSub')}</div>
         </div>
         <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total landed cost</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('costIntel.kpiTotalLanded')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{summary.totalLanded > 0 ? fmtINR(summary.totalLanded) : '—'}</div>
-          <div className="text-[11px] text-slate-500 mt-1">all costed batches</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('costIntel.kpiTotalLandedSub')}</div>
         </div>
         <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Batches costed</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('costIntel.kpiBatchesCosted')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{summary.count}</div>
-          <div className="text-[11px] text-slate-500 mt-1">status = closed</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('costIntel.kpiBatchesCostedSub')}</div>
         </div>
       </div>
 
       {/* Rate config */}
       <div className="card p-5 mb-5">
-        <div className="text-base font-bold mb-1">Cost rates</div>
-        <div className="text-xs text-slate-500 mb-4">Indicative defaults — adjust per plant. The table recomputes live.</div>
+        <div className="text-base font-bold mb-1">{t('costIntel.costRatesTitle')}</div>
+        <div className="text-xs text-slate-500 mb-4">{t('costIntel.costRatesSub')}</div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {RATE_FIELDS.map(f => (
             <div key={f.key}>
-              <div className="text-[11px] font-semibold text-slate-500 mb-1">{f.label} <span className="text-slate-400">({f.suffix})</span></div>
+              <div className="text-[11px] font-semibold text-slate-500 mb-1">{t(`costIntel.rate_${f.key}`)} <span className="text-slate-400">({f.suffix})</span></div>
               <input
                 type="number"
                 value={config[f.key]}
@@ -113,21 +115,21 @@ export function CostIntelligence() {
 
       {/* Per-batch table */}
       <div className="card p-6">
-        <div className="text-base font-bold mb-3">Landed cost per batch</div>
+        <div className="text-base font-bold mb-3">{t('costIntel.tableTitle')}</div>
         {isLoading ? (
           <SkeletonRows rows={6} />
         ) : isError ? (
-          <ErrorState title="Couldn't load batches" onRetry={() => refetch()} />
+          <ErrorState title={t('costIntel.errorLoad')} onRetry={() => refetch()} />
         ) : costed.length === 0 ? (
-          <EmptyState title="No closed batches yet" message="Cost per batch is computed once batches close with output and weight recorded." />
+          <EmptyState title={t('costIntel.emptyTitle')} message={t('costIntel.emptyMessage')} />
         ) : (
           <div className="overflow-x-auto scroll-x">
             <table className="dt">
               <thead>
                 <tr>
-                  <th>Batch</th><th>Plant</th><th className="num">Output (MT)</th><th className="num">Reactor hrs</th>
-                  <th className="num">Material</th><th className="num">Labour</th><th className="num">Energy</th>
-                  <th className="num">Overhead</th><th className="num">Landed</th><th className="num">Cost / MT</th>
+                  <th>{t('costIntel.colBatch')}</th><th>{t('costIntel.colPlant')}</th><th className="num">{t('costIntel.colOutput')}</th><th className="num">{t('costIntel.colReactorHrs')}</th>
+                  <th className="num">{t('costIntel.colMaterial')}</th><th className="num">{t('costIntel.colLabour')}</th><th className="num">{t('costIntel.colEnergy')}</th>
+                  <th className="num">{t('costIntel.colOverhead')}</th><th className="num">{t('costIntel.colLanded')}</th><th className="num">{t('costIntel.colCostPerMT')}</th>
                 </tr>
               </thead>
               <tbody>

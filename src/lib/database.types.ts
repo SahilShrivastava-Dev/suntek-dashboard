@@ -348,12 +348,14 @@ export interface Database {
           actor_role: string | null;
           read_by: string[];
           cleared_by: string[];
+          scope: string; // 'personal' | 'broadcast' — see 24_notification_scope.sql
           created_at: string;
         };
-        // read_by / cleared_by have DB defaults ('{}'), so they're optional on insert.
-        Insert: OptionalNulls<Omit<Database['public']['Tables']['notifications']['Row'], 'id' | 'created_at' | 'read_by' | 'cleared_by'>> & {
+        // read_by / cleared_by / scope have DB defaults, so they're optional on insert.
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['notifications']['Row'], 'id' | 'created_at' | 'read_by' | 'cleared_by' | 'scope'>> & {
           read_by?: string[];
           cleared_by?: string[];
+          scope?: string;
         };
         Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
       };

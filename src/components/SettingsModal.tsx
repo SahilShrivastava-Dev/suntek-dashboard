@@ -5,6 +5,7 @@ import { useToast } from './ui/toast';
 import { useRoleContext } from '../contexts/RoleContext';
 import { useNotifications } from '../contexts/NotificationsContext';
 import { LANGUAGE_OPTIONS, logUserAccountEvent } from '../lib/userEvents';
+import { applyLanguage } from '../i18n';
 
 /**
  * Centered self-service settings modal, opened from the avatar dropdown.
@@ -93,6 +94,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       if (pwErr) { toast.error(`Password change failed: ${pwErr.message}`); setSaving(false); return; }
     }
 
+    // Apply the chosen language to the interface immediately.
+    applyLanguage(language);
+
     if (changes.length === 0) { toast.info('No changes to save'); setSaving(false); onClose(); return; }
 
     const summary = changes.join(', ');
@@ -145,7 +149,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             <select value={language} onChange={(e) => setLanguage(e.target.value)} style={{ ...inputStyle, background: '#fff' }}>
               {LANGUAGE_OPTIONS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
             </select>
-            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>Stored as your preference. (Interface stays in English for now.)</div>
+            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>Applies to the interface as more screens are translated (Hindi available now).</div>
           </Field>
 
           <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: 16 }}>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { OIL_RATIO_SUNTEK, OIL_RATIO_MANAV } from '../../data/mockData';
 
 type Variant = 'suntek' | 'manav';
@@ -10,6 +11,7 @@ function varianceColor(vr: number): string {
 }
 
 export function OilRatioTable() {
+  const { t } = useTranslation();
   const [variant, setVariant] = useState<Variant>('suntek');
   const [selectedDensity, setSelectedDensity] = useState<number | null>(null);
   const data = variant === 'suntek' ? OIL_RATIO_SUNTEK : OIL_RATIO_MANAV;
@@ -28,16 +30,16 @@ export function OilRatioTable() {
           <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
             <div>
               <div className="text-base font-bold flex items-center gap-2">
-                Oil Ratio Table{' '}
+                {t('oilRatio.title')}{' '}
                 <span
                   className="text-xs font-semibold px-2 py-0.5 rounded-full"
                   style={{ background: 'var(--accent-soft)', color: 'var(--accent-deep)' }}
                 >
-                  the brain
+                  {t('oilRatio.theBrain')}
                 </span>
               </div>
               <div className="text-xs text-slate-500">
-                Per-density coefficients · per company variant · versioned · click any row to inspect
+                {t('oilRatio.subtitle')}
               </div>
             </div>
 
@@ -58,7 +60,7 @@ export function OilRatioTable() {
                     border: '1px solid var(--border)',
                   }}
                 >
-                  {v === 'suntek' ? 'Suntek baseline' : 'Manav & KG (Feb)'}
+                  {v === 'suntek' ? t('oilRatio.suntekBaseline') : t('oilRatio.manavKgFeb')}
                 </button>
               ))}
             </div>
@@ -69,13 +71,13 @@ export function OilRatioTable() {
             <table className="dt w-full">
               <thead>
                 <tr>
-                  <th>Density</th>
-                  <th className="text-right">NP / kg CP</th>
-                  <th className="text-right">Waxol / kg CP</th>
-                  <th className="text-right">Cl₂ / kg CP</th>
-                  <th className="text-right">HCL produced</th>
-                  <th className="text-right">Last variance</th>
-                  <th>Status</th>
+                  <th>{t('oilRatio.colDensity')}</th>
+                  <th className="text-right">{t('oilRatio.colNp')}</th>
+                  <th className="text-right">{t('oilRatio.colWaxol')}</th>
+                  <th className="text-right">{t('oilRatio.colCl2')}</th>
+                  <th className="text-right">{t('oilRatio.colHcl')}</th>
+                  <th className="text-right">{t('oilRatio.colLastVariance')}</th>
+                  <th>{t('oilRatio.colStatus')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -103,11 +105,11 @@ export function OilRatioTable() {
                       <td>
                         {row.ok ? (
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#DCFCE7', color: '#16A34A' }}>
-                            in tolerance
+                            {t('oilRatio.inTolerance')}
                           </span>
                         ) : (
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#FEE2E2', color: '#DC2626' }}>
-                            flag
+                            {t('oilRatio.flag')}
                           </span>
                         )}
                       </td>
@@ -119,7 +121,7 @@ export function OilRatioTable() {
           </div>
 
           <div className="text-[11px] text-slate-400 mt-4">
-            Click a density row to inspect its full coefficient breakdown →
+            {t('oilRatio.clickRowHint')}
           </div>
         </div>
 
@@ -129,7 +131,7 @@ export function OilRatioTable() {
             <div className="flex items-start justify-between mb-5">
               <div>
                 <div className="text-[10px] font-bold tracking-[0.18em] text-slate-400 uppercase mb-1">
-                  {variant === 'suntek' ? 'Suntek baseline' : 'Manav & KG (Feb)'}
+                  {variant === 'suntek' ? t('oilRatio.suntekBaseline') : t('oilRatio.manavKgFeb')}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="density-pill text-lg px-3 py-1">{selectedRow.d}</span>
@@ -140,7 +142,7 @@ export function OilRatioTable() {
                       : { background: '#FEE2E2', color: '#DC2626' }
                     }
                   >
-                    {selectedRow.ok ? 'in tolerance' : 'flagged'}
+                    {selectedRow.ok ? t('oilRatio.inTolerance') : t('oilRatio.flagged')}
                   </span>
                 </div>
               </div>
@@ -157,10 +159,10 @@ export function OilRatioTable() {
             {/* Coefficient cards */}
             <div className="space-y-3">
               {[
-                { label: 'NP per kg CP', value: selectedRow.np, icon: '🧪', desc: 'Normal paraffin input' },
-                { label: 'Waxol per kg CP', value: selectedRow.wx, icon: '💧', desc: 'Waxol solvent input' },
-                { label: 'Cl₂ per kg CP', value: selectedRow.cl, icon: '⚗️', desc: 'Chlorine gas input' },
-                { label: 'HCL produced', value: `${selectedRow.hcl} kg`, icon: '📦', desc: 'Byproduct per kg CP' },
+                { label: t('oilRatio.npPerKgCp'), value: selectedRow.np, icon: '🧪', desc: t('oilRatio.npDesc') },
+                { label: t('oilRatio.waxolPerKgCp'), value: selectedRow.wx, icon: '💧', desc: t('oilRatio.waxolDesc') },
+                { label: t('oilRatio.cl2PerKgCp'), value: selectedRow.cl, icon: '⚗️', desc: t('oilRatio.cl2Desc') },
+                { label: t('oilRatio.hclProduced'), value: `${selectedRow.hcl} kg`, icon: '📦', desc: t('oilRatio.hclDesc') },
               ].map(item => (
                 <div key={item.label} className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl">
                   <div className="text-xl w-8 text-center">{item.icon}</div>
@@ -179,16 +181,16 @@ export function OilRatioTable() {
               >
                 <div className="text-xl w-8 text-center">📊</div>
                 <div className="flex-1">
-                  <div className="text-xs text-slate-500">Last batch variance</div>
+                  <div className="text-xs text-slate-500">{t('oilRatio.lastBatchVariance')}</div>
                   <div className="font-bold text-xl num" style={{ color: varianceColor(selectedRow.vr) }}>
                     {selectedRow.vr >= 0 ? '+' : ''}{selectedRow.vr.toFixed(1)}%
                   </div>
                   <div className="text-[10px] text-slate-500">
                     {Math.abs(selectedRow.vr) > 1.5
-                      ? 'Outside tolerance — review batch conditions'
+                      ? t('oilRatio.outsideTolerance')
                       : Math.abs(selectedRow.vr) > 1
-                        ? 'Near tolerance limit — monitor closely'
-                        : 'Within normal range'}
+                        ? t('oilRatio.nearTolerance')
+                        : t('oilRatio.withinNormal')}
                   </div>
                 </div>
               </div>
@@ -196,14 +198,14 @@ export function OilRatioTable() {
 
             {/* Compare note */}
             <div className="mt-4 p-3 bg-orange-50 rounded-2xl text-xs text-orange-700">
-              <span className="font-semibold">Compare variant:</span>{' '}
+              <span className="font-semibold">{t('oilRatio.compareVariant')}</span>{' '}
               <button
                 className="underline hover:text-orange-900"
                 onClick={() => setVariant(v => v === 'suntek' ? 'manav' : 'suntek')}
               >
-                Switch to {variant === 'suntek' ? 'Manav & KG' : 'Suntek baseline'}
+                {t('oilRatio.switchTo', { variant: variant === 'suntek' ? t('oilRatio.manavKg') : t('oilRatio.suntekBaseline') })}
               </button>{' '}
-              to see coefficient differences for d{selectedRow.d}.
+              {t('oilRatio.toSeeDiffs', { d: selectedRow.d })}
             </div>
           </div>
         )}

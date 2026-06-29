@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import type { AuthUser } from '../../hooks/useAuth';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useAnomalies } from '../../contexts/AnomalyContext';
@@ -12,14 +13,14 @@ interface SidebarProps {
 
 /**
  * Purchase sub-tabs — order matters (first visible tab is the accordion default).
- * Each tab maps to /dashboard/purchase/{tab}
+ * Each tab maps to /dashboard/purchase/{tab}. `key` is the i18n label key.
  */
 const PURCHASE_TABS = [
-  { label: 'FAR · Fixed Assets', tab: 'far'      },
-  { label: 'Maintenance',        tab: 'maint'     },
-  { label: 'Activity Log',       tab: 'activity'  },
-  { label: 'Store Req',          tab: 'storereq'  },
-  { label: 'Purchase orders',    tab: 'purchase'  },
+  { key: 'nav.far',            tab: 'far'      },
+  { key: 'nav.maintenance',    tab: 'maint'     },
+  { key: 'nav.activityLog',    tab: 'activity'  },
+  { key: 'nav.storeReq',       tab: 'storereq'  },
+  { key: 'nav.purchaseOrders', tab: 'purchase'  },
 ];
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -177,6 +178,7 @@ function SectionHeader({ label }: { label: string }) {
 export function Sidebar({ user, onSignOut }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
   const { criticalCount } = useAnomalies();
 
@@ -267,13 +269,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
   // accordion default target). Anomaly Detection is intentionally NOT here;
   // it stays a peer of the accordion below.
   const INTELLIGENCE_TABS = [
-    { label: 'Predictive QC',     path: '/dashboard/predictive-qc',     show: canSee('/dashboard/predictive-qc')     },
-    { label: 'Cost & Margin',     path: '/dashboard/cost-intelligence', show: canSee('/dashboard/cost-intelligence') },
-    { label: 'Working Capital',   path: '/dashboard/working-capital',   show: canSee('/dashboard/working-capital')   },
-    { label: 'Benchmarking',      path: '/dashboard/benchmarking',      show: canSee('/dashboard/benchmarking')      },
-    { label: 'Owner Intelligence',path: '/dashboard/owner',             show: showOwner                              },
-    { label: 'Anomaly Center',    path: '/dashboard/anomaly-center',    show: canSee('/dashboard/anomaly-center')    },
-  ].filter((t) => t.show);
+    { key: 'nav.predictiveQc',      path: '/dashboard/predictive-qc',     show: canSee('/dashboard/predictive-qc')     },
+    { key: 'nav.costMargin',        path: '/dashboard/cost-intelligence', show: canSee('/dashboard/cost-intelligence') },
+    { key: 'nav.workingCapital',    path: '/dashboard/working-capital',   show: canSee('/dashboard/working-capital')   },
+    { key: 'nav.benchmarking',      path: '/dashboard/benchmarking',      show: canSee('/dashboard/benchmarking')      },
+    { key: 'nav.ownerIntelligence', path: '/dashboard/owner',             show: showOwner                              },
+    { key: 'nav.anomalyCenter',     path: '/dashboard/anomaly-center',    show: canSee('/dashboard/anomaly-center')    },
+  ].filter((it) => it.show);
 
   const showIntelligence = INTELLIGENCE_TABS.length > 0;
 
@@ -317,12 +319,12 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
         onClick={() => {}}
       >
         <IconSearch />
-        <span>Quick search</span>
+        <span>{t('nav.quickSearch')}</span>
         <kbd className="bg-white/15 border-white/15 text-white">⌘ K</kbd>
       </button>
 
       {/* ── WORKSPACE ─────────────────────────────────────────────────────── */}
-      {showWorkspace && <SectionHeader label="Workspace" />}
+      {showWorkspace && <SectionHeader label={t('section.workspace')} />}
       <nav className="flex flex-col gap-1">
 
         {/* Overview */}
@@ -332,7 +334,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard')}
           >
             <IconGrid />
-            <span>Overview</span>
+            <span>{t('nav.overview')}</span>
           </a>
         )}
 
@@ -347,7 +349,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
               }}
             >
               <IconBox />
-              <span>Purchase</span>
+              <span>{t('nav.purchase')}</span>
               <svg
                 className="ml-auto transition-transform duration-200"
                 style={{ transform: purchaseOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
@@ -368,7 +370,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
                     }`}
                     onClick={() => navTo(`/dashboard/purchase/${pt.tab}`)}
                   >
-                    {pt.label}
+                    {t(pt.key)}
                   </a>
                 ))}
               </div>
@@ -378,7 +380,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       </nav>
 
       {/* ── OPERATIONS ────────────────────────────────────────────────────── */}
-      {showOperations && <SectionHeader label="Operations" />}
+      {showOperations && <SectionHeader label={t('section.operations')} />}
 
       {/* Technical Team: 3 dropdowns (Batch / Operations / Logs) like the Purchase accordion */}
       {isOperator ? (
@@ -390,14 +392,14 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
           onClick={() => { setBatchOpen((o) => !o); if (!batchOpen) navTo('/dashboard/batch-entry?tab=reading'); }}
         >
           <IconBatch />
-          <span>Batch</span>
+          <span>{t('nav.batch')}</span>
           <svg className="ml-auto transition-transform duration-200" style={{ transform: batchOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
         </a>
         {batchOpen && (
           <div className="nav-sub">
-            <a className={`nav-link${isBatchTab('reading') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=reading')}>Log Reading</a>
-            <a className={`nav-link${isBatchTab('new-batch') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=new-batch')}>New Batch</a>
-            <a className={`nav-link${isBatchTab('upload') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=upload')}>Upload Batch Sheet</a>
+            <a className={`nav-link${isBatchTab('reading') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=reading')}>{t('nav.logReading')}</a>
+            <a className={`nav-link${isBatchTab('new-batch') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=new-batch')}>{t('nav.newBatch')}</a>
+            <a className={`nav-link${isBatchTab('upload') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=upload')}>{t('nav.uploadBatchSheet')}</a>
           </div>
         )}
 
@@ -407,13 +409,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
           onClick={() => { setOpsOpen((o) => !o); if (!opsOpen) navTo('/dashboard/batches'); }}
         >
           <IconFlask />
-          <span>Operations</span>
+          <span>{t('nav.operations')}</span>
           <svg className="ml-auto transition-transform duration-200" style={{ transform: opsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
         </a>
         {opsOpen && (
           <div className="nav-sub">
-            <a className={`nav-link${isActive('/dashboard/batches') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batches')}>Batch Sheet</a>
-            <a className={`nav-link${isActive('/dashboard/stock') ? ' active' : ''}`} onClick={() => navTo('/dashboard/stock')}>CPM Stock</a>
+            <a className={`nav-link${isActive('/dashboard/batches') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batches')}>{t('nav.batchSheet')}</a>
+            <a className={`nav-link${isActive('/dashboard/stock') ? ' active' : ''}`} onClick={() => navTo('/dashboard/stock')}>{t('nav.cpmStock')}</a>
           </div>
         )}
 
@@ -423,13 +425,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
           onClick={() => { setLogsOpen((o) => !o); if (!logsOpen) navTo('/dashboard/daily-log'); }}
         >
           <IconClipboard />
-          <span>Logs</span>
+          <span>{t('nav.logs')}</span>
           <svg className="ml-auto transition-transform duration-200" style={{ transform: logsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
         </a>
         {logsOpen && (
           <div className="nav-sub">
-            <a className={`nav-link${isActive('/dashboard/daily-log') ? ' active' : ''}`} onClick={() => navTo('/dashboard/daily-log')}>Daily Unit Log</a>
-            <a className={`nav-link${isBatchTab('history') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=history')}>Reading History</a>
+            <a className={`nav-link${isActive('/dashboard/daily-log') ? ' active' : ''}`} onClick={() => navTo('/dashboard/daily-log')}>{t('nav.dailyUnitLog')}</a>
+            <a className={`nav-link${isBatchTab('history') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batch-entry?tab=history')}>{t('nav.readingHistory')}</a>
           </div>
         )}
       </nav>
@@ -443,7 +445,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/batches')}
           >
             <IconFlask />
-            <span>Batch Sheet</span>
+            <span>{t('nav.batchSheet')}</span>
             <span className="pill-count">1</span>
           </a>
         )}
@@ -455,7 +457,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/night-manager')}
           >
             <IconMoon />
-            <span>Night Manager</span>
+            <span>{t('nav.nightManager')}</span>
             <span className="pill-count" style={{ background: '#DBEAFE', color: '#2563EB' }}>new</span>
           </a>
         )}
@@ -467,7 +469,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/stock')}
           >
             <IconStock />
-            <span>CPM Stock</span>
+            <span>{t('nav.cpmStock')}</span>
           </a>
         )}
 
@@ -478,7 +480,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/warehouse-entry')}
           >
             <IconWarehouse />
-            <span>Warehouse Console</span>
+            <span>{t('nav.warehouseConsole')}</span>
             <span className="pill-count" style={{ background: '#F0FDF4', color: '#16A34A' }}>entry</span>
           </a>
         )}
@@ -490,7 +492,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/night-entry')}
           >
             <IconMoon />
-            <span>Night Check-in</span>
+            <span>{t('nav.nightCheckin')}</span>
             <span className="pill-count" style={{ background: '#EEF2FF', color: '#4F46E5' }}>entry</span>
           </a>
         )}
@@ -502,7 +504,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/batch-entry')}
           >
             <IconBatch />
-            <span>Log Reading</span>
+            <span>{t('nav.logReading')}</span>
             <span className="pill-count" style={{ background: '#FAF5FF', color: '#7C3AED' }}>entry</span>
           </a>
         )}
@@ -514,7 +516,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/daily-log')}
           >
             <IconClipboard />
-            <span>Daily Unit Log</span>
+            <span>{t('nav.dailyUnitLog')}</span>
             <span className="pill-count" style={{ background: '#FFFBEB', color: '#D97706' }}>OCR</span>
           </a>
         )}
@@ -522,7 +524,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       )}
 
       {/* ── FINANCE ───────────────────────────────────────────────────────── */}
-      {showFinance && <SectionHeader label="Finance" />}
+      {showFinance && <SectionHeader label={t('section.finance')} />}
       <nav className="flex flex-col gap-1">
 
         {/* Sales contracts & dispatch */}
@@ -532,7 +534,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/sales')}
           >
             <IconCart />
-            <span>Sales</span>
+            <span>{t('nav.sales')}</span>
             <span className="pill-count">2</span>
           </a>
         )}
@@ -544,14 +546,14 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/customers')}
           >
             <IconUsers />
-            <span>Customer History</span>
+            <span>{t('nav.customerHistory')}</span>
             <span className="pill-count" style={{ background: '#DBEAFE', color: '#2563EB' }}>new</span>
           </a>
         )}
       </nav>
 
       {/* ── REFERENCE ─────────────────────────────────────────────────────── */}
-      {showReference && <SectionHeader label="Reference" />}
+      {showReference && <SectionHeader label={t('section.reference')} />}
       <nav className="flex flex-col gap-1">
         {showOilRatio && (
           <a
@@ -559,7 +561,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/oil-ratio')}
           >
             <IconFile />
-            <span>Oil Ratio Table</span>
+            <span>{t('nav.oilRatioTable')}</span>
             <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>brain</span>
           </a>
         )}
@@ -569,13 +571,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/audit')}
           >
             <IconAudit />
-            <span>Audit log</span>
+            <span>{t('nav.auditLog')}</span>
           </a>
         )}
       </nav>
 
       {/* ── MONITORING ────────────────────────────────────────────────────── */}
-      {(showIntelligence || showAnomalies) && <SectionHeader label="Monitoring" />}
+      {(showIntelligence || showAnomalies) && <SectionHeader label={t('section.monitoring')} />}
       {(showIntelligence || showAnomalies) && (
         <nav className="flex flex-col gap-1">
 
@@ -590,7 +592,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
                 }}
               >
                 <IconActivity />
-                <span>Intelligence</span>
+                <span>{t('nav.intelligence')}</span>
                 <svg
                   className="ml-auto transition-transform duration-200"
                   style={{ transform: monitoringOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
@@ -603,13 +605,13 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
 
               {monitoringOpen && (
                 <div className="nav-sub">
-                  {INTELLIGENCE_TABS.map((t) => (
+                  {INTELLIGENCE_TABS.map((it) => (
                     <a
-                      key={t.path}
-                      className={`nav-link${isActive(t.path) ? ' active' : ''}`}
-                      onClick={() => navTo(t.path)}
+                      key={it.path}
+                      className={`nav-link${isActive(it.path) ? ' active' : ''}`}
+                      onClick={() => navTo(it.path)}
                     >
-                      {t.label}
+                      {t(it.key)}
                     </a>
                   ))}
                 </div>
@@ -624,7 +626,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
               onClick={() => navTo('/dashboard/anomalies')}
             >
               <IconAlert />
-              <span>Anomaly Detection</span>
+              <span>{t('nav.anomalyDetection')}</span>
               {criticalCount > 0 && (
                 <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>
                   {criticalCount > 9 ? '9+' : criticalCount}
@@ -636,7 +638,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       )}
 
       {/* ── ADMIN ─────────────────────────────────────────────────────────── */}
-      {(showAdmin || showBlacklist) && <SectionHeader label="Admin" />}
+      {(showAdmin || showBlacklist) && <SectionHeader label={t('section.admin')} />}
       <nav className="flex flex-col gap-1">
         {showAdmin && (
           <a
@@ -644,7 +646,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/users')}
           >
             <IconUserPlus />
-            <span>User Management</span>
+            <span>{t('nav.userManagement')}</span>
             <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>admin</span>
           </a>
         )}
@@ -654,7 +656,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
             onClick={() => navTo('/dashboard/blacklist')}
           >
             <IconBan />
-            <span>Blacklist</span>
+            <span>{t('nav.blacklist')}</span>
             <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>restrict</span>
           </a>
         )}

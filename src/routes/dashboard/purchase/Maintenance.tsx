@@ -12,6 +12,7 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRo
 import { MentionText, NotesButton, ReadReceipt } from '../../../components/mentions';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { useTranslation } from 'react-i18next';
 import { useDirectory, useMentionNotifier, notifyWatchers, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
@@ -273,6 +274,7 @@ export function Maintenance() {
   const { activeProfile } = useRoleContext();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const toast = useToast();
+  const { t } = useTranslation();
   const people = useDirectory();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
@@ -1581,14 +1583,14 @@ export function Maintenance() {
     <>
       {/* Tab bar */}
       <div className="flex gap-2 mb-5 flex-wrap">
-        {(['periodic', 'emergency'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`chip${tab === t ? ' active' : ''}`} style={{ textTransform: 'capitalize' }}>
-            {t === 'periodic' ? '🔄 Periodic' : '⚡ Emergency'}
+        {(['periodic', 'emergency'] as const).map(tb => (
+          <button key={tb} onClick={() => setTab(tb)} className={`chip${tab === tb ? ' active' : ''}`}>
+            {tb === 'periodic' ? `🔄 ${t('maint.periodic')}` : `⚡ ${t('maint.emergency')}`}
           </button>
         ))}
         {!isTechnician && !isStoreManager && (
           <button onClick={() => setTab('schedule')} className={`chip${tab === 'schedule' ? ' active' : ''}`}>
-            📋 Schedule Setup
+            📋 {t('maint.scheduleSetup')}
           </button>
         )}
       </div>
@@ -1609,66 +1611,66 @@ export function Maintenance() {
         <>
           <div className="grid grid-cols-12 gap-5 mb-5">
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Due today</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.dueToday')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{dueToday}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Due this week</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.dueThisWeek')}</div>
               <div className="text-[28px] font-extrabold mt-1 num">{dueWeek}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Overdue</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.overdue')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-red-600">{overdue}</div>
-              <div className="text-[11px] text-red-600 mt-1">needs immediate attention</div>
+              <div className="text-[11px] text-red-600 mt-1">{t('maint.needsAttention')}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Completed MTD</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.completedMtd')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-green-600">{closedPeriodicMTD}</div>
             </div>
           </div>
           <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
-            <div className="text-base font-bold mb-1">Periodic maintenance schedule</div>
-            <div className="text-xs text-slate-500 mb-4">Recurring tasks — auto-ticket generated when due</div>
+            <div className="text-base font-bold mb-1">{t('maint.periodicScheduleTitle')}</div>
+            <div className="text-xs text-slate-500 mb-4">{t('maint.periodicScheduleSub')}</div>
             <div className="overflow-x-auto scroll-x">
               <table className="dt">
                 <thead>
                   <tr>
-                    <th>Task</th><th>Equipment</th><th>Plant</th><th>Frequency</th>
-                    <th>Last done</th><th>Next due</th><th>Status</th>
-                    {(isTechnician || isAdmin || isUnitHead) && <th>Action</th>}
+                    <th>{t('maint.colTask')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
+                    <th>{t('maint.colLastDone')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
+                    {(isTechnician || isAdmin || isUnitHead) && <th>{t('maint.colAction')}</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {schedules.length === 0 && (
                     <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">
-                      No schedules yet — {!isTechnician ? 'add one in Schedule Setup tab' : 'admin will set up the schedule'}
+                      {!isTechnician ? t('maint.noSchedulesAddSelf') : t('maint.noSchedulesAdmin')}
                     </td></tr>
                   )}
                   {schedules.map(s => {
                     const linkedTicket = tickets.find(t => t.schedule_id === s.id && t.status !== 'closed');
                     const days = daysFromNow(s.next_due_at);
                     const due = dueDateLabel(days);
-                    let statusLabel = 'On track'; let statusBg = '#DCFCE7'; let statusColor = '#16A34A';
-                    if (linkedTicket) { statusLabel = 'Ticket open'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
-                    else if (days !== null && days < 0) { statusLabel = 'Overdue'; statusBg = '#FEE2E2'; statusColor = '#DC2626'; }
-                    else if (days !== null && days <= 3) { statusLabel = 'Due soon'; statusBg = '#FEF3C7'; statusColor = '#D97706'; }
+                    let statusKey = 'maint.schedStatusOnTrack'; let statusBg = '#DCFCE7'; let statusColor = '#16A34A';
+                    if (linkedTicket) { statusKey = 'maint.schedStatusTicketOpen'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
+                    else if (days !== null && days < 0) { statusKey = 'maint.schedStatusOverdue'; statusBg = '#FEE2E2'; statusColor = '#DC2626'; }
+                    else if (days !== null && days <= 3) { statusKey = 'maint.schedStatusDueSoon'; statusBg = '#FEF3C7'; statusColor = '#D97706'; }
                     return (
                       <tr key={s.id}>
                         <td className="font-semibold">{s.title}</td>
                         <td>{s.equipment}</td>
                         <td>{s.plants?.name || '—'}</td>
-                        <td className="text-slate-500">{FREQ_LABEL[s.frequency] || s.frequency}</td>
+                        <td className="text-slate-500">{t('maint.freq_' + s.frequency, FREQ_LABEL[s.frequency] || s.frequency)}</td>
                         <td className="text-slate-500 text-xs">{s.last_completed_at ? formatDate(s.last_completed_at) : '—'}</td>
                         <td style={{ color: due.color, fontWeight: 600, fontSize: 12 }}>{due.text}</td>
-                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{statusLabel}</span></td>
+                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{t(statusKey)}</span></td>
                         {(isTechnician || isAdmin || isUnitHead) && (
                           <td>
                             {(linkedTicket || (days !== null && days <= 0)) ? (
                               <button onClick={() => setCompletingSchedule(s)} className="btn-accent pill px-3 py-1.5 font-semibold text-xs">
-                                Mark complete
+                                {t('maint.markComplete')}
                               </button>
                             ) : (
-                              <span className="text-xs text-slate-400">Not due</span>
+                              <span className="text-xs text-slate-400">{t('maint.notDue')}</span>
                             )}
                           </td>
                         )}
@@ -1687,27 +1689,27 @@ export function Maintenance() {
         <>
           <div className="grid grid-cols-12 gap-5 mb-5">
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Open tickets</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.openTickets')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-red-600">{openEmergency}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Pending store / approval</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.pendingStoreApproval')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{pendingStore}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Purchase / handover</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.purchaseHandover')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-purple-600">{pendingPurchase}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Closed MTD</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.closedMtd')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-green-600">{closedMTD}</div>
             </div>
           </div>
           <div className="card p-6" style={{ background: 'var(--red-soft)', border: '1px solid #fecaca' }}>
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <div>
-                <div className="text-base font-bold">Emergency maintenance tickets</div>
-                <div className="text-xs text-slate-500">Breakdown repairs · click any row for full workflow</div>
+                <div className="text-base font-bold">{t('maint.emergencyTitle')}</div>
+                <div className="text-xs text-slate-500">{t('maint.emergencySub')}</div>
               </div>
               <div className="flex items-center gap-2">
                 {isAdmin && emergencyTickets.length > 0 && (
@@ -1717,16 +1719,16 @@ export function Maintenance() {
                     disabled={deletingAll}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: '#DC2626', borderColor: '#FECACA' }}
                   >
-                    🗑 {deletingAll ? 'Deleting…' : `Delete all (${emergencyTickets.length})`}
+                    🗑 {deletingAll ? t('maint.deleting') : t('maint.deleteAll', { count: emergencyTickets.length })}
                   </button>
                 )}
                 {(isAdmin || isUnitHead) && (
                   <button className="chip" onClick={() => setShowReport(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    📄 Create report
+                    📄 {t('maint.createReport')}
                   </button>
                 )}
                 <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setShowRaisePanel(true)}>
-                  + Raise ticket
+                  + {t('maint.raiseTicket')}
                 </button>
               </div>
             </div>
@@ -1734,14 +1736,14 @@ export function Maintenance() {
               <table className="dt">
                 <thead>
                   <tr>
-                    <th>Ticket #</th><th>Equipment</th><th>Plant</th><th>Issue</th>
-                    <th>Status</th><th>Raised by</th><th>Created</th>
+                    <th>{t('maint.colTicketNo')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colIssue')}</th>
+                    <th>{t('maint.colStatus')}</th><th>{t('maint.colRaisedBy')}</th><th>{t('maint.colCreated')}</th>
                     {isAdmin && <th></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {emergencyTickets.length === 0 && (
-                    <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">No emergency tickets raised yet</td></tr>
+                    <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noEmergencyTickets')}</td></tr>
                   )}
                   {emergencyTickets.map(t => (
                     <tr key={t.id} onClick={() => setSelectedTicket(t)} style={{ cursor: 'pointer' }}>
@@ -1775,12 +1777,12 @@ export function Maintenance() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <div>
-              <div className="text-base font-bold">Maintenance schedules</div>
-              <div className="text-xs text-slate-500">Define recurring tasks — auto-tickets fire when due</div>
+              <div className="text-base font-bold">{t('maint.schedulesTitle')}</div>
+              <div className="text-xs text-slate-500">{t('maint.schedulesSub')}</div>
             </div>
             {isAdmin && (
               <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAddSchedule}>
-                + Add schedule
+                {t('maint.addSchedule')}
               </button>
             )}
           </div>
@@ -1788,14 +1790,14 @@ export function Maintenance() {
             <table className="dt">
               <thead>
                 <tr>
-                  <th>Task title</th><th>Equipment</th><th>Plant</th><th>Frequency</th>
-                  <th>Assigned to</th><th>Next due</th><th>Status</th>
-                  {isAdmin && <th>Actions</th>}
+                  <th>{t('maint.colTaskTitle')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
+                  <th>{t('maint.colAssignedTo')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
+                  {isAdmin && <th>{t('maint.colActions')}</th>}
                 </tr>
               </thead>
               <tbody>
                 {schedules.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">No schedules defined yet</td></tr>
+                  <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noSchedulesDefined')}</td></tr>
                 )}
                 {schedules.map(s => {
                   const due = dueDateLabel(daysFromNow(s.next_due_at));
@@ -1805,10 +1807,10 @@ export function Maintenance() {
                       <td className="font-semibold">{s.title}</td>
                       <td>{s.equipment}</td>
                       <td>{s.plants?.name || '—'}</td>
-                      <td>{FREQ_LABEL[s.frequency] || s.frequency}</td>
-                      <td>{s.assigned_to || <span className="text-slate-400">Unassigned</span>}</td>
-                      <td style={{ color: paused ? '#94A3B8' : due.color, fontWeight: 600 }}>{paused ? 'Paused' : due.text}</td>
-                      <td><span className="badge" style={{ background: s.is_active ? '#DCFCE7' : '#F1F5F9', color: s.is_active ? '#16A34A' : '#94A3B8' }}>{s.is_active ? 'Active' : 'Paused'}</span></td>
+                      <td>{t('maint.freq_' + s.frequency, FREQ_LABEL[s.frequency] || s.frequency)}</td>
+                      <td>{s.assigned_to || <span className="text-slate-400">{t('maint.unassigned')}</span>}</td>
+                      <td style={{ color: paused ? '#94A3B8' : due.color, fontWeight: 600 }}>{paused ? t('maint.paused') : due.text}</td>
+                      <td><span className="badge" style={{ background: s.is_active ? '#DCFCE7' : '#F1F5F9', color: s.is_active ? '#16A34A' : '#94A3B8' }}>{s.is_active ? t('maint.active') : t('maint.paused')}</span></td>
                       {isAdmin && (
                         <td>
                           <ScheduleRowMenu
@@ -1834,38 +1836,38 @@ export function Maintenance() {
       )}
 
       {/* ── PANEL: Raise ticket ──────────────────────────────────────────── */}
-      <SlidePanel open={showRaisePanel} onClose={() => { setShowRaisePanel(false); setRaiseSaved(false); }} title="Raise maintenance ticket" subtitle="Emergency · Maintenance">
-        <PanelField label="Equipment / asset *">
-          <PanelInput value={raiseForm.equipment} onChange={e => setRaiseForm(f => ({ ...f, equipment: e.target.value }))} placeholder="e.g. Reactor R-1, Cooling tower pump" />
+      <SlidePanel open={showRaisePanel} onClose={() => { setShowRaisePanel(false); setRaiseSaved(false); }} title={t('maint.raisePanelTitle')} subtitle={t('maint.raisePanelSubtitle')}>
+        <PanelField label={t('maint.equipmentAsset')}>
+          <PanelInput value={raiseForm.equipment} onChange={e => setRaiseForm(f => ({ ...f, equipment: e.target.value }))} placeholder={t('maint.equipmentPlaceholder')} />
         </PanelField>
         <PanelRow>
-          <PanelField label="Plant">
+          <PanelField label={t('common.plant')}>
             <PanelSelect value={raiseForm.plant} onChange={e => setRaiseForm(f => ({ ...f, plant: e.target.value }))}>
-              <option value="">— Select plant —</option>
+              <option value="">{t('maint.selectPlant')}</option>
               {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
           </PanelField>
-          <PanelField label="Procurement unit (Jharkhand)">
+          <PanelField label={t('maint.procurementUnit')}>
             <PanelSelect value={raiseForm.unit} onChange={e => setRaiseForm(f => ({ ...f, unit: e.target.value }))}>
-              <option value="">— Not Jharkhand / N/A —</option>
+              <option value="">{t('maint.notJharkhand')}</option>
               <option value="chlorides">Suntek Chlorides</option>
               <option value="plasticiser">Suntek Plasticiser</option>
             </PanelSelect>
           </PanelField>
         </PanelRow>
-        <PanelField label="Issue description">
-          <PanelTextarea value={raiseForm.description} onChange={e => setRaiseForm(f => ({ ...f, description: e.target.value }))} placeholder="What broke? What symptoms? What was the impact?" />
+        <PanelField label={t('maint.issueDescription')}>
+          <PanelTextarea value={raiseForm.description} onChange={e => setRaiseForm(f => ({ ...f, description: e.target.value }))} placeholder={t('maint.issuePlaceholder')} />
         </PanelField>
-        <PanelField label="Initial assessment">
+        <PanelField label={t('maint.initialAssessment')}>
           <PanelSelect value={raiseForm.assessment} onChange={e => setRaiseForm(f => ({ ...f, assessment: e.target.value }))}>
-            <option value="repairable">Can repair in-house</option>
-            <option value="needs_part">Need a part from store</option>
+            <option value="repairable">{t('maint.canRepair')}</option>
+            <option value="needs_part">{t('maint.needPart')}</option>
           </PanelSelect>
         </PanelField>
-        <PhotoUploader onBlobReady={setRaisePhotoBlob} label="Defective item photo (optional)" hint="Photo of the broken / defective item(s) — helps the team assess" />
+        <PhotoUploader onBlobReady={setRaisePhotoBlob} label={t('maint.defectivePhoto')} hint={t('maint.defectivePhotoHint')} />
         {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
         <PanelDivider />
-        <PanelFooter saved={raiseSaved} onCancel={() => setShowRaisePanel(false)} onSave={handleRaiseTicket} saveLabel={raising ? 'Raising…' : 'Raise ticket'} successLabel="Ticket raised" successSub="Store manager, admin and unit head notified" disabled={!raiseForm.equipment.trim() || raising} requiredHint="Fill in equipment name to raise ticket" />
+        <PanelFooter saved={raiseSaved} onCancel={() => setShowRaisePanel(false)} onSave={handleRaiseTicket} saveLabel={raising ? t('maint.raising') : t('maint.raiseTicket')} successLabel={t('maint.ticketRaised')} successSub={t('maint.ticketRaisedSub')} disabled={!raiseForm.equipment.trim() || raising} requiredHint={t('maint.raiseRequiredHint')} />
       </SlidePanel>
 
       {/* ── PANEL: Complete periodic ─────────────────────────────────────── */}

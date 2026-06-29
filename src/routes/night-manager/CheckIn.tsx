@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MentionTextarea } from '../../components/mentions';
 import { validateGeofence } from '../../lib/algorithms/geofencing';
 import { uploadCheckinPhoto } from '../../lib/cloudinary';
@@ -34,6 +35,7 @@ interface CheckInProps {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export function CheckIn({ embedded = false }: CheckInProps) {
+  const { t } = useTranslation();
   // Camera
   const [cameraState, setCameraState]   = useState<CameraState>('idle');
   const [cameraError, setCameraError]   = useState<string | null>(null);
@@ -99,8 +101,8 @@ export function CheckIn({ embedded = false }: CheckInProps) {
       setCameraState('cam_error');
       setCameraError(
         (err instanceof Error && err.name === 'NotAllowedError')
-          ? 'Camera permission denied. Please allow camera access and try again.'
-          : 'Could not access camera. Using file picker instead.'
+          ? t('checkin.errCameraDenied')
+          : t('checkin.errCameraAccess')
       );
       // Auto-fallback: open file picker
       setTimeout(() => fileRef.current?.click(), 400);
@@ -162,7 +164,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
   function fetchGps() {
     if (!navigator.geolocation) {
       setGpsState('error');
-      setGpsError('Geolocation not supported by this browser.');
+      setGpsError(t('checkin.errGeoUnsupported'));
       return;
     }
     setGpsState('loading');
@@ -294,12 +296,12 @@ export function CheckIn({ embedded = false }: CheckInProps) {
               <path d="M20 6 9 17l-5-5"/>
             </svg>
           </div>
-          <h2 className="text-xl font-extrabold mb-1">Shift Logged ✓</h2>
+          <h2 className="text-xl font-extrabold mb-1">{t('checkin.shiftLogged')}</h2>
           <p className="text-sm text-slate-500 mb-1">
             {PLANT_NAME} · {gpsData?.timestamp.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
           </p>
           <div style={{ margin: '10px 0 14px', padding: '10px 14px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, fontSize: 12, color: '#15803D', textAlign: 'left' }}>
-            ✓ Record saved to database · Admin notified
+            {t('checkin.recordSaved')}
           </div>
           {cloudinaryUrl && (
             <a
@@ -308,7 +310,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
               rel="noopener noreferrer"
               className="text-xs text-blue-500 underline mb-5 inline-block"
             >
-              View uploaded photo ↗
+              {t('checkin.viewUploadedPhoto')}
             </a>
           )}
           <div className="h-4" />
@@ -329,7 +331,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
             className="w-full py-3 rounded-xl font-bold text-white"
             style={{ background: '#0F172A' }}
           >
-            Submit Another Check-in
+            {t('checkin.submitAnother')}
           </button>
         </div>
       </div>
@@ -347,7 +349,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
         <header className="bg-white p-5 sticky top-0 z-10 border-b border-slate-100 shadow-sm flex items-center justify-between">
           <div>
             <div className="text-xs font-bold tracking-wider text-blue-600 uppercase mb-0.5">Suntek L1</div>
-            <div className="text-lg font-extrabold leading-tight">Night Manager</div>
+            <div className="text-lg font-extrabold leading-tight">{t('checkin.nightManager')}</div>
           </div>
           <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center font-bold text-sm">
             AM
@@ -371,13 +373,13 @@ export function CheckIn({ embedded = false }: CheckInProps) {
               style={{ background: gpsData?.isOnSite ? '#16A34A' : '#F59E0B' }}
             />
             <div className="font-bold" style={{ color: gpsData?.isOnSite ? '#166534' : '#92400E' }}>
-              {gpsData?.isOnSite ? 'On Site — Ready to submit' : 'Pending Check-in'}
+              {gpsData?.isOnSite ? t('checkin.onSiteReady') : t('checkin.pending')}
             </div>
           </div>
           <div className="text-sm" style={{ color: gpsData?.isOnSite ? '#15803D' : '#B45309' }}>
             {gpsData
               ? gpsData.statusLabel
-              : 'Your hourly geo-tagged photo is required for compliance audit.'}
+              : t('checkin.complianceHint')}
           </div>
         </div>
 
@@ -418,10 +420,10 @@ export function CheckIn({ embedded = false }: CheckInProps) {
                 </svg>
                 <div className="text-sm font-medium text-slate-400">
                   {cameraState === 'requesting'
-                    ? 'Requesting camera access…'
+                    ? t('checkin.requestingCamera')
                     : cameraState === 'cam_error'
                       ? cameraError
-                      : 'Camera not started'}
+                      : t('checkin.cameraNotStarted')}
                 </div>
               </div>
             )}
@@ -430,7 +432,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
             {cameraState === 'live' && (
               <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/50 text-white text-[11px] font-bold px-2.5 py-1 rounded-full">
                 <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                LIVE
+                {t('checkin.live')}
               </div>
             )}
 
@@ -444,7 +446,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
                 }}
               >
                 <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                {gpsData.isOnSite ? 'On Site' : 'Out of Zone'}
+                {gpsData.isOnSite ? t('checkin.onSite') : t('checkin.outOfZone')}
               </div>
             )}
           </div>
@@ -474,14 +476,14 @@ export function CheckIn({ embedded = false }: CheckInProps) {
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                   <circle cx="12" cy="13" r="4"/>
                 </svg>
-                Start Camera
+                {t('checkin.startCamera')}
               </button>
             )}
 
             {cameraState === 'requesting' && (
               <div className="w-full py-4 flex items-center justify-center gap-2 text-slate-500 text-sm font-semibold">
                 <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                Requesting camera permission…
+                {t('checkin.requestingPermission')}
               </div>
             )}
 
@@ -492,7 +494,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
                 style={{ background: 'linear-gradient(135deg, #ef4444, #dc2626)', boxShadow: '0 8px 20px -4px rgba(220,38,38,0.4)' }}
               >
                 <div className="w-5 h-5 rounded-full bg-white/30 border-2 border-white" />
-                Capture Photo
+                {t('checkin.capturePhoto')}
               </button>
             )}
 
@@ -505,7 +507,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/>
                 </svg>
-                Retake Photo
+                {t('checkin.retakePhoto')}
               </button>
             )}
 
@@ -518,7 +520,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
                 </svg>
-                Choose Photo from Gallery
+                {t('checkin.chooseFromGallery')}
               </button>
             )}
           </div>
@@ -534,12 +536,12 @@ export function CheckIn({ embedded = false }: CheckInProps) {
               <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
               <circle cx="12" cy="10" r="3"/>
             </svg>
-            GPS Location
+            {t('checkin.gpsLocation')}
           </h3>
 
           <div className="space-y-3">
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-              <div className="text-xs text-slate-500 mb-1">Timestamp</div>
+              <div className="text-xs text-slate-500 mb-1">{t('checkin.timestamp')}</div>
               <div className="font-medium font-mono text-sm">
                 {gpsData ? gpsData.timestamp.toLocaleString('en-IN') : '--:--:--'}
               </div>
@@ -547,13 +549,13 @@ export function CheckIn({ embedded = false }: CheckInProps) {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                <div className="text-xs text-slate-500 mb-1">Latitude</div>
+                <div className="text-xs text-slate-500 mb-1">{t('checkin.latitude')}</div>
                 <div className="font-medium font-mono text-sm">
                   {gpsData ? `${gpsData.lat.toFixed(5)}°N` : '--.-----'}
                 </div>
               </div>
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                <div className="text-xs text-slate-500 mb-1">Longitude</div>
+                <div className="text-xs text-slate-500 mb-1">{t('checkin.longitude')}</div>
                 <div className="font-medium font-mono text-sm">
                   {gpsData ? `${gpsData.lng.toFixed(5)}°E` : '--.-----'}
                 </div>
@@ -562,7 +564,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
 
             {gpsData && (
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                <div className="text-xs text-slate-500 mb-1">GPS Accuracy</div>
+                <div className="text-xs text-slate-500 mb-1">{t('checkin.gpsAccuracy')}</div>
                 <div className="font-medium font-mono text-sm">± {gpsData.accuracy} m</div>
               </div>
             )}
@@ -572,7 +574,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
               {gpsState === 'loading' && (
                 <>
                   <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                  <div className="text-sm font-medium text-blue-600">Fetching GPS…</div>
+                  <div className="text-sm font-medium text-blue-600">{t('checkin.fetchingGps')}</div>
                 </>
               )}
               {gpsState === 'error' && (
@@ -598,14 +600,14 @@ export function CheckIn({ embedded = false }: CheckInProps) {
               {gpsState === 'idle' && (
                 <>
                   <div className="w-2 h-2 rounded-full bg-slate-300 shrink-0" />
-                  <div className="text-sm font-medium text-slate-400">Waiting for photo…</div>
+                  <div className="text-sm font-medium text-slate-400">{t('checkin.waitingForPhoto')}</div>
                 </>
               )}
             </div>
 
             {cameraState === 'captured' && gpsState !== 'loading' && (
               <button onClick={fetchGps} className="text-xs text-blue-600 font-semibold hover:underline">
-                ↺ Refresh GPS
+                ↺ {t('checkin.refreshGps')}
               </button>
             )}
           </div>
@@ -614,13 +616,13 @@ export function CheckIn({ embedded = false }: CheckInProps) {
         {/* ── Note ── */}
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
           <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wide">
-            Note (optional)
+            {t('checkin.noteOptional')}
           </label>
           <MentionTextarea
             value={note}
             onChange={setNote}
             rows={2}
-            placeholder="Any observations for this shift… type @ to tag"
+            placeholder={t('checkin.notePlaceholder')}
             className="w-full p-3 text-sm border border-slate-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
           />
         </div>
@@ -631,11 +633,11 @@ export function CheckIn({ embedded = false }: CheckInProps) {
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-semibold text-slate-700">
                 {submitState === 'uploading'
-                  ? `Uploading photo to Cloudinary… ${uploadProgress}%`
-                  : 'Saving to database…'}
+                  ? t('checkin.uploadingPhoto', { pct: uploadProgress })
+                  : t('checkin.savingDb')}
               </div>
               <div className="text-xs text-slate-400">
-                {submitState === 'uploading' ? '1 of 2' : '2 of 2'}
+                {submitState === 'uploading' ? t('checkin.stepOf', { n: 1 }) : t('checkin.stepOf', { n: 2 })}
               </div>
             </div>
             <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
@@ -649,7 +651,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
             </div>
             {submitState === 'uploading' && (
               <div className="text-[11px] text-slate-400 mt-1">
-                📍 GPS metadata + plant tag attached to image
+                📍 {t('checkin.gpsMetaAttached')}
               </div>
             )}
           </div>
@@ -658,13 +660,13 @@ export function CheckIn({ embedded = false }: CheckInProps) {
         {/* ── Error state ── */}
         {submitState === 'error' && submitError && (
           <div className="bg-red-50 border border-red-200 p-4 rounded-2xl text-sm text-red-700">
-            <div className="font-semibold mb-1">Upload failed</div>
+            <div className="font-semibold mb-1">{t('checkin.uploadFailed')}</div>
             <div>{submitError}</div>
             <button
               onClick={() => { setSubmitState('idle'); setSubmitError(null); setUploadProgress(0); }}
               className="mt-2 text-xs font-bold text-red-600 underline"
             >
-              Try again
+              {t('common.tryAgain')}
             </button>
           </div>
         )}
@@ -682,19 +684,19 @@ export function CheckIn({ embedded = false }: CheckInProps) {
               boxShadow:  canSubmit ? '0 8px 20px -4px rgba(16,185,129,0.4)' : 'none',
             }}
           >
-            Submit Shift Report
+            {t('checkin.submitShiftReport')}
           </button>
         )}
 
         {/* Helper hints */}
         {cameraState === 'idle' && (
           <p className="text-center text-xs text-slate-400">
-            Tap "Start Camera" to open the live viewfinder.
+            {t('checkin.hintStartCamera')}
           </p>
         )}
         {cameraState === 'captured' && gpsState !== 'done' && (
           <p className="text-center text-xs text-slate-400">
-            Waiting for GPS lock before submission is enabled…
+            {t('checkin.hintWaitingGps')}
           </p>
         )}
 

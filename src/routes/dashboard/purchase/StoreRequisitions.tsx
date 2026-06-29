@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
@@ -21,15 +22,16 @@ interface RegisterRow {
   inStore: number; requested: number; remaining: number;
   ticketRef: string; hasPhoto: boolean;
 }
-function regStatus(remaining: number): { label: string; bg: string; color: string } {
-  if (remaining <= 0) return { label: 'Out of stock', bg: '#FEE2E2', color: '#DC2626' };
-  if (remaining <= 2) return { label: 'Low', bg: '#FEF3C7', color: '#D97706' };
-  return { label: 'In stock', bg: '#DCFCE7', color: '#16A34A' };
+function regStatus(remaining: number): { key: string; bg: string; color: string } {
+  if (remaining <= 0) return { key: 'stock_out', bg: '#FEE2E2', color: '#DC2626' };
+  if (remaining <= 2) return { key: 'stock_low', bg: '#FEF3C7', color: '#D97706' };
+  return { key: 'stock_in', bg: '#DCFCE7', color: '#16A34A' };
 }
 
 function PicBadge({ has }: { has: boolean }) {
+  const { t } = useTranslation();
   return (
-    <span className={`pic-badge${has ? '' : ' missing'}`} title={has ? 'Pic on file' : 'No pic yet'}>
+    <span className={`pic-badge${has ? '' : ' missing'}`} title={has ? t('storereq.pic_on_file') : t('storereq.no_pic_yet')}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
         <circle cx="12" cy="13" r="4"/>
@@ -64,6 +66,7 @@ const STATUS_STAGE: Record<string, { bg: string; color: string; label: string }>
 };
 
 export function StoreRequisitions() {
+  const { t } = useTranslation();
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
@@ -151,7 +154,7 @@ export function StoreRequisitions() {
     }).select('*, plants(name)').single();
 
     if (error) {
-      toast.error(`Save failed: ${error.message}`);
+      toast.error(t('storereq.save_failed', { message: error.message }));
       return;
     }
     if (data) {
@@ -159,8 +162,8 @@ export function StoreRequisitions() {
       // Notify admin and unit head
       insertRows('notifications', {
         target_roles: ['admin', 'unit_head'],
-        title: `Store req raised: ${form.item}`,
-        body: `${form.plant} · Qty: ${form.qty} ${form.unit} · ${form.priority}`,
+        title: t('storereq.notif_title', { item: form.item }),
+        body: `${form.plant} · ${t('storereq.qty_label')}: ${form.qty} ${form.unit} · ${form.priority}`,
         type: form.priority === 'Urgent' ? 'urgent' : 'info',
         route: '/dashboard/purchase/storereq',
         actor_name: form.plant,
@@ -169,7 +172,7 @@ export function StoreRequisitions() {
       }).then(() => {}, () => {});
       await notifyMentions(form.notes, {
         entityType: 'store_requisition', entityId: (data as ReqRow).id,
-        entityLabel: `Store req · ${form.item}`, route: '/dashboard/purchase/storereq',
+        entityLabel: t('storereq.entity_label', { item: form.item }), route: '/dashboard/purchase/storereq',
       });
     }
     const hits = await screenBlacklist(
@@ -178,7 +181,7 @@ export function StoreRequisitions() {
     );
     if (hits.length) {
       const h = hits[0];
-      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      toast.error(t('storereq.blacklist_alert', { value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
     }
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' }); }, 1600);
@@ -191,26 +194,26 @@ export function StoreRequisitions() {
       {/* Approval flow */}
       <div className="card p-6 mb-5" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Store Req Approval Flow', what: 'The 4-stage sign-off chain for any store/material requisition. Stage 4 (purchase approval by Vijay Ji) only triggers when the item is not in stock. This is a manual process tracked in this dashboard.', source: 'Form entry', formLabel: 'Raise request form', formPath: '/dashboard/purchase/storereq', note: 'Dummy flow diagram — actual stage tracking is in the STORE_REQ list below.' }} />
-        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">Approval flow</div>
+        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">{t('storereq.approval_flow')}</div>
         <div className="flex items-center gap-3 flex-wrap">
           <div className="tile flex-1 min-w-[160px]">
-            <div className="text-[11px] text-slate-500">1 · Raised by</div>
-            <div className="font-semibold text-sm mt-1">Plant / store keeper</div>
+            <div className="text-[11px] text-slate-500">1 · {t('storereq.flow_raised_by')}</div>
+            <div className="font-semibold text-sm mt-1">{t('storereq.flow_plant_keeper')}</div>
           </div>
           <ArrowRight />
           <div className="tile flex-1 min-w-[160px]">
-            <div className="text-[11px] text-slate-500">2 · Approved by</div>
-            <div className="font-semibold text-sm mt-1">Unit head</div>
+            <div className="text-[11px] text-slate-500">2 · {t('storereq.flow_approved_by')}</div>
+            <div className="font-semibold text-sm mt-1">{t('storereq.flow_unit_head')}</div>
           </div>
           <ArrowRight />
           <div className="tile flex-1 min-w-[160px]">
-            <div className="text-[11px] text-slate-500">3 · Stock check</div>
-            <div className="font-semibold text-sm mt-1">In stock → supply</div>
+            <div className="text-[11px] text-slate-500">3 · {t('storereq.flow_stock_check')}</div>
+            <div className="font-semibold text-sm mt-1">{t('storereq.flow_in_stock_supply')}</div>
           </div>
           <ArrowRight />
           <div className="tile flex-1 min-w-[160px]">
-            <div className="text-[11px] text-slate-500">4 · Otherwise</div>
-            <div className="font-semibold text-sm mt-1">Vijay Ji approves purchase</div>
+            <div className="text-[11px] text-slate-500">4 · {t('storereq.flow_otherwise')}</div>
+            <div className="font-semibold text-sm mt-1">Vijay Ji {t('storereq.flow_approves_purchase')}</div>
           </div>
         </div>
       </div>
@@ -219,20 +222,20 @@ export function StoreRequisitions() {
       <div className="card p-6 mb-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">Store register · spare parts</div>
-            <div className="text-xs text-slate-500">Live stock per store — fed by the maintenance flow · quantity drops when a part is issued</div>
+            <div className="text-base font-bold">{t('storereq.register_title')}</div>
+            <div className="text-xs text-slate-500">{t('storereq.register_subtitle')}</div>
           </div>
           <div className="flex items-center gap-3 text-[11px]">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#16A34A', display: 'inline-block' }} /> In stock</span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} /> Low</span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#DC2626', display: 'inline-block' }} /> Out</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#16A34A', display: 'inline-block' }} /> {t('storereq.legend_in_stock')}</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#D97706', display: 'inline-block' }} /> {t('storereq.legend_low')}</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: '50%', background: '#DC2626', display: 'inline-block' }} /> {t('storereq.legend_out')}</span>
           </div>
         </div>
 
         {/* Store filter — single / multi / all */}
         {stores.length > 0 && (
           <div className="flex gap-2 mb-4 flex-wrap">
-            <button onClick={() => setStoreFilter([])} className={`chip${storeFilter.length === 0 ? ' active' : ''}`}>All stores</button>
+            <button onClick={() => setStoreFilter([])} className={`chip${storeFilter.length === 0 ? ' active' : ''}`}>{t('storereq.all_stores')}</button>
             {stores.map(s => (
               <button key={s} onClick={() => toggleStore(s)} className={`chip${storeFilter.includes(s) ? ' active' : ''}`}>{s}</button>
             ))}
@@ -241,10 +244,10 @@ export function StoreRequisitions() {
 
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
-            <thead><tr><th>Ticket</th><th>Part</th><th>Equipment</th><th>Store</th><th className="num">In store</th><th className="num">Requested</th><th className="num">Remaining</th><th>Status</th><th>Pic</th></tr></thead>
+            <thead><tr><th>{t('storereq.col_ticket')}</th><th>{t('storereq.col_part')}</th><th>{t('storereq.col_equipment')}</th><th>{t('storereq.col_store')}</th><th className="num">{t('storereq.col_in_store')}</th><th className="num">{t('storereq.col_requested')}</th><th className="num">{t('storereq.col_remaining')}</th><th>{t('storereq.col_status')}</th><th>{t('storereq.col_pic')}</th></tr></thead>
             <tbody>
               {shownReg.length === 0 && (
-                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">No in-store parts yet — fills when a store manager marks a maintenance part “in stock”.</td></tr>
+                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">{t('storereq.register_empty')}</td></tr>
               )}
               {shownReg.map(r => {
                 const st = regStatus(r.remaining);
@@ -257,8 +260,8 @@ export function StoreRequisitions() {
                     <td className="num">{r.inStore}</td>
                     <td className="num">{r.requested}</td>
                     <td className="num font-bold" style={{ color: st.color }}>{r.remaining}</td>
-                    <td><span className="badge" style={{ background: st.bg, color: st.color, fontWeight: 700 }}>{st.label}</span></td>
-                    <td title="Photo of the part supplied to the technician"><PicBadge has={r.hasPhoto} /></td>
+                    <td><span className="badge" style={{ background: st.bg, color: st.color, fontWeight: 700 }}>{t('storereq.' + st.key)}</span></td>
+                    <td title={t('storereq.pic_supplied_title')}><PicBadge has={r.hasPhoto} /></td>
                   </tr>
                 );
               })}
@@ -272,15 +275,15 @@ export function StoreRequisitions() {
         <KpiInfoButton info={{ title: 'Open Store Requirements', what: 'All active store requisitions raised by plant/store keepers across SHD, Rehla, Ganjam, and HQ. Each row shows the approval stage, decision, and photo proof status. New requests are submitted via the "+ Raise request" button.', source: 'Mock data', formLabel: 'Raise request form', formPath: '/dashboard/purchase/storereq', note: 'Currently uses STORE_REQ mock data. Future: Supabase store_reqs table.' }} />
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">Open store requirements</div>
-            <div className="text-xs text-slate-500">Pic proof of need attached</div>
+            <div className="text-base font-bold">{t('storereq.open_req_title')}</div>
+            <div className="text-xs text-slate-500">{t('storereq.open_req_subtitle')}</div>
           </div>
           <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-            + Raise request
+            + {t('storereq.raise_request_btn')}
           </button>
         </div>
         {loadError ? (
-          <ErrorState title="Couldn't load requisitions" message="The store requisition records failed to load."
+          <ErrorState title={t('storereq.load_error_title')} message={t('storereq.load_error_msg')}
             onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
         ) : loading ? (
           <SkeletonRows rows={6} />
@@ -289,13 +292,14 @@ export function StoreRequisitions() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Req #</th><th>Item</th><th>Plant</th><th className="num">Qty</th>
-                <th>Stage</th><th>Awaiting</th><th>Decision</th><th>Pic</th>
+                <th>{t('storereq.col_req_no')}</th><th>{t('storereq.col_item')}</th><th>{t('storereq.col_plant')}</th><th className="num">{t('storereq.col_qty')}</th>
+                <th>{t('storereq.col_stage')}</th><th>{t('storereq.col_awaiting')}</th><th>{t('storereq.col_decision')}</th><th>{t('storereq.col_pic')}</th>
               </tr>
             </thead>
             <tbody>
               {items.map(r => {
                 const s = STATUS_STAGE[r.status] || STATUS_STAGE.pending;
+                const stageKey = STATUS_STAGE[r.status] ? r.status : 'pending';
                 return (
                   <tr key={r.id} style={{ cursor: 'pointer' }}>
                     <td className="font-bold text-xs text-slate-400">{r.id.slice(0, 8)}</td>
@@ -303,16 +307,16 @@ export function StoreRequisitions() {
                     <td>{r.plants?.name || '—'}</td>
                     <td className="num">{r.qty}</td>
                     <td>
-                      <span className="badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>
+                      <span className="badge" style={{ background: s.bg, color: s.color }}>{t('storereq.stage_' + stageKey)}</span>
                     </td>
-                    <td className="text-slate-500">{r.status === 'pending' ? 'Unit Head' : '—'}</td>
+                    <td className="text-slate-500">{r.status === 'pending' ? t('storereq.awaiting_unit_head') : '—'}</td>
                     <td className="font-semibold">{r.status}</td>
                     <td><PicBadge has={!!r.photo_url} /></td>
                   </tr>
                 );
               })}
               {items.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">No requisitions yet — raise the first one</td></tr>
+                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{t('storereq.open_req_empty')}</td></tr>
               )}
             </tbody>
           </table>
@@ -321,49 +325,49 @@ export function StoreRequisitions() {
       </div>
 
       {/* Slide panel */}
-      <SlidePanel open={open} onClose={handleClose} title="Raise store request" subtitle="Store Req · Purchase">
-        <PanelField label="Item / material *">
-          <PanelInput placeholder="e.g. PP Ball, NC Thinner, O-ring kit" value={form.item} onChange={e => set('item', e.target.value)} />
+      <SlidePanel open={open} onClose={handleClose} title={t('storereq.panel_title')} subtitle={t('storereq.panel_subtitle')}>
+        <PanelField label={t('storereq.field_item')}>
+          <PanelInput placeholder={t('storereq.ph_item')} value={form.item} onChange={e => set('item', e.target.value)} />
         </PanelField>
 
         <PanelRow>
-          <PanelField label="Plant *">
+          <PanelField label={t('storereq.field_plant')}>
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
               {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
           </PanelField>
-          <PanelField label="Priority">
+          <PanelField label={t('storereq.field_priority')}>
             <PanelSelect value={form.priority} onChange={e => set('priority', e.target.value)}>
-              <option>Normal</option>
-              <option>Urgent</option>
+              <option value="Normal">{t('storereq.opt_normal')}</option>
+              <option value="Urgent">{t('storereq.opt_urgent')}</option>
             </PanelSelect>
           </PanelField>
         </PanelRow>
 
         <PanelRow>
-          <PanelField label="Quantity *">
-            <PanelInput type="number" placeholder="e.g. 48" value={form.qty} onChange={e => set('qty', e.target.value)} />
+          <PanelField label={t('storereq.field_quantity')}>
+            <PanelInput type="number" placeholder={t('storereq.ph_qty')} value={form.qty} onChange={e => set('qty', e.target.value)} />
           </PanelField>
-          <PanelField label="Unit">
+          <PanelField label={t('storereq.field_unit')}>
             <PanelSelect value={form.unit} onChange={e => set('unit', e.target.value)}>
               {UNITS.map(u => <option key={u}>{u}</option>)}
             </PanelSelect>
           </PanelField>
         </PanelRow>
 
-        <PanelField label="Reason / notes">
-          <PanelTextarea placeholder="Why is this item needed? Any urgency context…" value={form.notes} onChange={e => set('notes', e.target.value)} />
+        <PanelField label={t('storereq.field_reason')}>
+          <PanelTextarea placeholder={t('storereq.ph_reason')} value={form.notes} onChange={e => set('notes', e.target.value)} />
         </PanelField>
 
         <PanelDivider />
 
         <OcrUpload
-          label="Pic proof of need"
-          hint="Photo of broken part, empty shelf — AI reads item and quantity"
+          label={t('storereq.ocr_label')}
+          hint={t('storereq.ocr_hint')}
           fields={[
-            { key: 'item',  label: 'Item identified', value: 'Mechanical seal — pump P-104' },
-            { key: 'qty',   label: 'Est. quantity',   value: '2' },
-            { key: 'notes', label: 'Condition note',  value: 'Worn seal causing leakage at flange joint' },
+            { key: 'item',  label: t('storereq.ocr_field_item'), value: 'Mechanical seal — pump P-104' },
+            { key: 'qty',   label: t('storereq.ocr_field_qty'),  value: '2' },
+            { key: 'notes', label: t('storereq.ocr_field_notes'), value: 'Worn seal causing leakage at flange joint' },
           ]}
           onExtracted={data => {
             if (data.item)  set('item',  data.item);
@@ -373,18 +377,18 @@ export function StoreRequisitions() {
         />
 
         <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 16 }}>
-          Auto-assigned Req # · enters approval queue at Unit Head stage
+          {t('storereq.panel_helper')}
         </div>
 
         <PanelFooter
           saved={saved}
           onCancel={handleClose}
           onSave={handleSave}
-          saveLabel="Submit request"
-          successLabel="Request raised"
-          successSub="Entering Unit Head approval queue"
+          saveLabel={t('storereq.save_label')}
+          successLabel={t('storereq.success_label')}
+          successSub={t('storereq.success_sub')}
           disabled={!form.item.trim() || !form.qty}
-          requiredHint="Fill in Item and Quantity to submit"
+          requiredHint={t('storereq.required_hint')}
         />
       </SlidePanel>
     </>

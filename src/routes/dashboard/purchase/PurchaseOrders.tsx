@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
@@ -49,6 +50,7 @@ const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 const UNITS  = ['nos', 'kg', 'MT', 'L', 'sets', 'boxes'];
 
 export function PurchaseOrders() {
+  const { t } = useTranslation();
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
@@ -121,7 +123,7 @@ export function PurchaseOrders() {
       port: form.destination,
     }).select('*').single();
 
-    if (error) { toast.error(`Save failed: ${error.message}`); return; }
+    if (error) { toast.error(t('po.toast_save_failed', { msg: error.message })); return; }
     if (data) setOrders(prev => [data as OrderRow, ...prev]);
     await notifyMentions(form.notes, {
       entityType: 'oil_contract', entityId: (data as OrderRow | undefined)?.id,
@@ -134,7 +136,7 @@ export function PurchaseOrders() {
     );
     if (hits.length) {
       const h = hits[0];
-      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      toast.error(t('po.toast_blacklist_hit', { value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
     }
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); setForm({ material: '', type: 'PO', supplier: '', destination: 'SHD', qty: '', unit: 'nos', value: '', notes: '' }); }, 1600);
@@ -172,28 +174,28 @@ export function PurchaseOrders() {
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Total Orders', what: 'Total count of oil/material purchase contracts on record.', source: 'Supabase', tables: ['oil_contracts'] }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total orders</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('po.kpi_total_orders')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{orders.length + maintPOs.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{orders.length} material/oil · {maintPOs.length} maintenance</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('po.kpi_total_sub', { a: orders.length, b: maintPOs.length })}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Total Booked Qty', what: 'Sum of all booked quantities (MT) across all purchase orders.', source: 'Supabase', tables: ['oil_contracts'] }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Booked qty (MT)</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('po.kpi_booked_qty')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">
             {orders.reduce((s, r) => s + (r.book_qty_mt || 0), 0).toFixed(0)}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">across all POs</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('po.kpi_across_all_pos')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Dispatched', what: 'Total quantity already dispatched from suppliers.', source: 'Supabase', tables: ['oil_contracts'] }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Dispatched (MT)</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('po.kpi_dispatched')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-green-600">
             {orders.reduce((s, r) => s + (r.dispatched_qty || 0), 0).toFixed(0)}
           </div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Pending Qty', what: 'Total quantity still pending dispatch from suppliers.', source: 'Supabase', tables: ['oil_contracts'] }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Pending (MT)</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('po.kpi_pending')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-amber-600">
             {orders.reduce((s, r) => s + (r.pending_qty || 0), 0).toFixed(0)}
           </div>
@@ -206,30 +208,30 @@ export function PurchaseOrders() {
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-base font-bold">Material &amp; oil purchases</span>
+              <span className="text-base font-bold">{t('po.section_material_oil')}</span>
               <span className="badge" style={{ background: '#E0E7FF', color: '#4338CA', fontWeight: 700, fontSize: 10 }}>⟳ BUSY API</span>
             </div>
-            <div className="text-xs text-slate-500">Oil &amp; raw-material vendor POs · synced from BUSY accounting — separate from the maintenance flow</div>
+            <div className="text-xs text-slate-500">{t('po.section_material_oil_sub')}</div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button className="btn-ghost pill px-4 py-2 font-semibold text-sm flex items-center gap-2" onClick={handleExport}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              Export
+              {t('po.btn_export')}
             </button>
             <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-              + New PO
+              {t('po.btn_new_po')}
             </button>
           </div>
         </div>
         {/* BUSY integration status — these POs will auto-sync from BUSY; manual entry is the stopgap until then. */}
         <div className="mb-4 rounded-xl px-3 py-2 text-[11px] flex items-center gap-2" style={{ background: '#EEF2FF', border: '1px solid #C7D2FE', color: '#4338CA' }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#F59E0B', display: 'inline-block' }} />
-          <span><b>BUSY sync: not connected yet.</b> Oil/material vendor POs will flow in automatically once the BUSY API is wired. Until then, add them manually with “+ New PO”.</span>
+          <span><b>{t('po.busy_sync_title')}</b> {t('po.busy_sync_body')}</span>
         </div>
         {loadError ? (
-          <ErrorState title="Couldn't load purchase orders" message="The purchase order records failed to load."
+          <ErrorState title={t('po.error_load_title')} message={t('po.error_load_msg')}
             onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
         ) : loading ? (
           <SkeletonRows rows={6} />
@@ -238,10 +240,10 @@ export function PurchaseOrders() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Oil / Material</th><th>Paraffin type</th><th>Company</th>
-                <th>Port / Dest</th><th className="num">Booked (MT)</th>
-                <th className="num">Dispatched (MT)</th><th className="num">Pending (MT)</th>
-                <th className="num">Price (₹)</th><th>Date</th>
+                <th>{t('po.col_oil_material')}</th><th>{t('po.col_paraffin_type')}</th><th>{t('po.col_company')}</th>
+                <th>{t('po.col_port_dest')}</th><th className="num">{t('po.col_booked_mt')}</th>
+                <th className="num">{t('po.col_dispatched_mt')}</th><th className="num">{t('po.col_pending_mt')}</th>
+                <th className="num">{t('po.col_price')}</th><th>{t('po.col_date')}</th>
               </tr>
             </thead>
             <tbody>
@@ -259,7 +261,7 @@ export function PurchaseOrders() {
                 </tr>
               ))}
               {list.length === 0 && (
-                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">No purchase orders yet — add the first one</td></tr>
+                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">{t('po.empty_orders')}</td></tr>
               )}
             </tbody>
           </table>
@@ -271,18 +273,18 @@ export function PurchaseOrders() {
       <div className="card p-6 mt-5">
         <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-base font-bold">Maintenance purchases</span>
-            <span className="badge" style={{ background: '#DCFCE7', color: '#15803D', fontWeight: 700, fontSize: 10 }}>⚙ from maintenance workflow</span>
+            <span className="text-base font-bold">{t('po.section_maint')}</span>
+            <span className="badge" style={{ background: '#DCFCE7', color: '#15803D', fontWeight: 700, fontSize: 10 }}>⚙ {t('po.badge_from_maint')}</span>
           </div>
-          <div className="text-xs num font-bold text-slate-700">Total ₹ {maintPOs.reduce((s, m) => s + (m.total || 0), 0).toLocaleString('en-IN')}</div>
+          <div className="text-xs num font-bold text-slate-700">{t('po.total')} ₹ {maintPOs.reduce((s, m) => s + (m.total || 0), 0).toLocaleString('en-IN')}</div>
         </div>
-        <div className="text-xs text-slate-500 mb-4">Spare parts not in store → bought externally · auto-pulled from the maintenance workflow (in sync, no manual entry)</div>
+        <div className="text-xs text-slate-500 mb-4">{t('po.section_maint_sub')}</div>
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
-            <thead><tr><th>Ticket</th><th>Part</th><th>Equipment</th><th>Store / unit</th><th>Supplier</th><th className="num">Qty</th><th className="num">Unit price</th><th className="num">Total</th><th>BUSY ref</th><th>Date</th></tr></thead>
+            <thead><tr><th>{t('po.col_ticket')}</th><th>{t('po.col_part')}</th><th>{t('po.col_equipment')}</th><th>{t('po.col_store_unit')}</th><th>{t('po.col_supplier')}</th><th className="num">{t('po.col_qty')}</th><th className="num">{t('po.col_unit_price')}</th><th className="num">{t('po.col_total')}</th><th>{t('po.col_busy_ref')}</th><th>{t('po.col_date')}</th></tr></thead>
             <tbody>
               {maintPOs.length === 0 && (
-                <tr><td colSpan={10} className="text-center text-slate-400 py-6 text-sm">No external maintenance buys yet — they appear here when the Purchase Manager bills a part that wasn’t in store.</td></tr>
+                <tr><td colSpan={10} className="text-center text-slate-400 py-6 text-sm">{t('po.empty_maint')}</td></tr>
               )}
               {maintPOs.map(m => (
                 <tr key={m.id}>
@@ -304,19 +306,19 @@ export function PurchaseOrders() {
       </div>
 
       {/* Modal */}
-      <SlidePanel open={open} onClose={handleClose} title="New purchase order" subtitle="Purchase Orders · Purchase">
-        <PanelSection title="Order details">
+      <SlidePanel open={open} onClose={handleClose} title={t('po.panel_title')} subtitle={t('po.panel_subtitle')}>
+        <PanelSection title={t('po.panel_section_order')}>
           <PanelRow>
-            <PanelField label="Material / oil type *">
-              <PanelInput placeholder="e.g. Paraffin (NP), C18 olefin" value={form.material} onChange={e => set('material', e.target.value)} />
+            <PanelField label={t('po.field_material')}>
+              <PanelInput placeholder={t('po.ph_material')} value={form.material} onChange={e => set('material', e.target.value)} />
             </PanelField>
-            <PanelField label="Supplier *">
-              <PanelInput placeholder="e.g. Reliance Industries Ltd" value={form.supplier} onChange={e => set('supplier', e.target.value)} />
+            <PanelField label={t('po.field_supplier')}>
+              <PanelInput placeholder={t('po.ph_supplier')} value={form.supplier} onChange={e => set('supplier', e.target.value)} />
             </PanelField>
           </PanelRow>
 
           <PanelRow cols={3}>
-            <PanelField label="Port / destination">
+            <PanelField label={t('po.field_destination')}>
               <PanelSelect value={form.destination} onChange={e => set('destination', e.target.value)}>
                 {PLANTS.map(p => <option key={p}>{p}</option>)}
                 <option>Kandla</option>
@@ -324,7 +326,7 @@ export function PurchaseOrders() {
                 <option>Port</option>
               </PanelSelect>
             </PanelField>
-            <PanelField label="Unit">
+            <PanelField label={t('po.field_unit')}>
               <PanelSelect value={form.unit} onChange={e => set('unit', e.target.value)}>
                 {UNITS.map(u => <option key={u}>{u}</option>)}
               </PanelSelect>
@@ -332,30 +334,30 @@ export function PurchaseOrders() {
           </PanelRow>
 
           <PanelRow>
-            <PanelField label="Quantity (MT)">
-              <PanelInput type="number" placeholder="e.g. 500" value={form.qty} onChange={e => set('qty', e.target.value)} />
+            <PanelField label={t('po.field_quantity')}>
+              <PanelInput type="number" placeholder={t('po.ph_quantity')} value={form.qty} onChange={e => set('qty', e.target.value)} />
             </PanelField>
-            <PanelField label="Price (₹)">
-              <PanelInput placeholder="e.g. ₹ 4,20,000" value={form.value} onChange={e => set('value', e.target.value)} />
+            <PanelField label={t('po.field_price')}>
+              <PanelInput placeholder={t('po.ph_price')} value={form.value} onChange={e => set('value', e.target.value)} />
             </PanelField>
           </PanelRow>
 
-          <PanelField label="Notes / special instructions">
-            <PanelTextarea placeholder="Brand specifications, delivery deadline, quality requirements…" value={form.notes} onChange={e => set('notes', e.target.value)} />
+          <PanelField label={t('po.field_notes')}>
+            <PanelTextarea placeholder={t('po.ph_notes')} value={form.notes} onChange={e => set('notes', e.target.value)} />
           </PanelField>
         </PanelSection>
 
         <PanelDivider />
 
         <OcrUpload
-          label="Quote / PO document"
-          hint="Upload supplier quote or draft PO — AI extracts items, rates, totals"
+          label={t('po.ocr_label')}
+          hint={t('po.ocr_hint')}
           fields={[
-            { key: 'supplier',  label: 'Supplier',        value: 'Indo Gulf Fertilisers Ltd' },
-            { key: 'material',  label: 'Material / Item',  value: 'PP Granules H110MA' },
-            { key: 'qty',       label: 'Quantity',         value: '500' },
-            { key: 'unit',      label: 'Unit',             value: 'MT' },
-            { key: 'value',     label: 'Est. Value (₹)',   value: '42,00,000' },
+            { key: 'supplier',  label: t('po.ocr_f_supplier'),  value: 'Indo Gulf Fertilisers Ltd' },
+            { key: 'material',  label: t('po.ocr_f_material'),   value: 'PP Granules H110MA' },
+            { key: 'qty',       label: t('po.ocr_f_quantity'),   value: '500' },
+            { key: 'unit',      label: t('po.ocr_f_unit'),       value: 'MT' },
+            { key: 'value',     label: t('po.ocr_f_value'),      value: '42,00,000' },
           ]}
           onExtracted={data => {
             if (data.supplier) set('supplier', data.supplier);
@@ -370,11 +372,11 @@ export function PurchaseOrders() {
           saved={saved}
           onCancel={handleClose}
           onSave={handleSave}
-          saveLabel="Create PO"
-          successLabel="PO created"
-          successSub="Sent to Vijay Ji for authorisation"
+          saveLabel={t('po.footer_save')}
+          successLabel={t('po.footer_success')}
+          successSub={t('po.footer_success_sub')}
           disabled={!form.material.trim() || !form.supplier.trim()}
-          requiredHint="Fill in Material and Supplier to create PO"
+          requiredHint={t('po.footer_required_hint')}
         />
       </SlidePanel>
     </>

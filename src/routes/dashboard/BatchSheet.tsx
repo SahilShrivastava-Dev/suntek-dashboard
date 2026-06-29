@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 const QC_BADGE: Record<string, { bg: string; color: string }> = {
   pending:  { bg: '#FEF3C7', color: '#D97706' },
@@ -42,6 +43,7 @@ function formatBatch(b: BatchSource) {
 type BatchDisplay = ReturnType<typeof formatBatch>;
 
 export function BatchSheet() {
+  const { t } = useTranslation();
   const [liveBatches, setLiveBatches] = useState<BatchDisplay[]>([]);
   const [updateFlash, setUpdateFlash] = useState<string | null>(null);
 
@@ -121,21 +123,21 @@ export function BatchSheet() {
       {/* KPIs */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Active batches</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('batch.activeBatches')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{liveBatches.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">across 4 factories</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('batch.acrossFactories')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Closed today</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('batch.closedToday')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">3</div>
-          <div className="text-[11px] text-slate-500 mt-1">96 drums total</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('batch.drumsTotal')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Avg yield vs ratio</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('batch.avgYield')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">+0.4%</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Variance flagged</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('batch.varianceFlagged')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-amber-600">1</div>
           <div className="text-[11px] text-amber-600 mt-1">Batch 1228 +2.4%</div>
         </div>
@@ -145,24 +147,24 @@ export function BatchSheet() {
       <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">Active batches</div>
-            <div className="text-xs text-slate-500">Live readings · oil-ratio variance computed on close</div>
+            <div className="text-base font-bold">{t('batch.activeBatches')}</div>
+            <div className="text-xs text-slate-500">{t('batch.liveReadingsSub')}</div>
           </div>
-          <Link 
-            to="/operator/batch-logger" 
+          <Link
+            to="/operator/batch-logger"
             className="btn-accent pill px-4 py-2 font-semibold text-sm no-underline inline-block text-center flex items-center justify-center"
           >
-            + Start batch
+            {t('batch.startBatch')}
           </Link>
         </div>
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
               <tr>
-                <th>Batch #</th><th>Plant</th><th>Recipe</th>
-                <th className="num">Target</th><th className="num">Current</th>
-                <th className="num">Drums</th><th className="num">Elapsed</th>
-                <th>Operator</th><th>QC</th>
+                <th>{t('batch.colBatchNo')}</th><th>{t('common.plant')}</th><th>{t('batch.colRecipe')}</th>
+                <th className="num">{t('batch.colTarget')}</th><th className="num">{t('batch.colCurrent')}</th>
+                <th className="num">{t('batch.colDrums')}</th><th className="num">{t('batch.colElapsed')}</th>
+                <th>{t('batch.colOperator')}</th><th>{t('batch.colQc')}</th>
               </tr>
             </thead>
             <tbody>
@@ -188,21 +190,21 @@ export function BatchSheet() {
                       </span>
                     </td>
                     <td className="num">{b.drums}</td>
-                    <td className="num text-slate-500">{b.elapsed}</td>
+                    <td className="num text-slate-500">{b.elapsed === 'Live' ? t('batch.live') : b.elapsed}</td>
                     <td className="text-slate-500">{b.op}</td>
                     <td>
                       <div className="flex items-center justify-between gap-3">
                         <span className="badge" style={{ background: qc.bg, color: qc.color }}>
-                          {b.qc.toUpperCase()}
+                          {t(`batch.qc.${b.qc}`, b.qc.toUpperCase())}
                         </span>
                         {b.editCount > 1 && (
                           <span
                             className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 cursor-help relative group font-bold tracking-wide select-none shrink-0"
-                            title={`This batch was updated ${b.editCount - 1} times`}
+                            title={t('batch.editedTimes', { times: b.editCount - 1 })}
                           >
-                            Edited
+                            {t('batch.edited')}
                             <span className="absolute bottom-full right-0 mb-1 hidden group-hover:block bg-slate-950 text-white text-[10px] px-2 py-1 rounded shadow-lg whitespace-nowrap z-50">
-                              Edited {b.editCount - 1} time{b.editCount - 1 !== 1 ? 's' : ''}
+                              {t('batch.editedCount', { times: b.editCount - 1 })}
                             </span>
                           </span>
                         )}

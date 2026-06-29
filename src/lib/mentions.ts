@@ -107,28 +107,35 @@ export function useDirectory(): TaggablePerson[] {
  */
 export function useMentionNotifier() {
   const people = useDirectory();
-  const { activeProfile } = useRoleContext();
+  const { activeProfile, activePersonId } = useRoleContext();
   return useCallback(
     async (
       text: string | null | undefined,
       ref: { entityType?: string; entityId?: string; entityLabel: string; route?: string | null },
     ) => {
-      const ids = extractMentionIds(text || '', people).filter((id) => id !== activeProfile.id);
+      // Exclude SELF by personal id — so a provisioned user tagging the mock
+      // archetype that shares their role isn't mistaken for self-tagging.
+      const ids = extractMentionIds(text || '', people).filter((id) => id !== activePersonId);
       if (!ids.length) return;
       // Direct insert (mirrors the app's other notify() helpers) so it works
       // regardless of NotificationsContext readiness. `delivered` drives the
       // receipt tick — false means the notification pipeline errored.
       let delivered = false;
-      await insertRows('notifications', {
+      const notif = {
         target_roles: ids,
         title: `${activeProfile.name} mentioned you`,
         body: `${ref.entityLabel}: “${truncate(text || '')}”`,
-        type: 'info',
+        type: 'info' as const,
         route: ref.route ?? null,
         actor_name: activeProfile.name,
         actor_role: activeProfile.roleLabel,
         read_by: [],
-      }).then(() => { delivered = true; }, () => {});
+      };
+      await insertRows('notifications', { ...notif, scope: 'personal' }).then(() => { delivered = true; }, () => {});
+      // Fallback for a DB without the scope column (pre-24 migration).
+      if (!delivered) {
+        await insertRows('notifications', notif).then(() => { delivered = true; }, () => {});
+      }
       // When the tag is attached to a record, leave a persistent trace in that
       // record's Notes thread (so the tagged person can see what was said) and
       // make the tagged people watchers for future changes.
@@ -138,7 +145,7 @@ export function useMentionNotifier() {
           const { data } = await insertRows('entity_notes', {
             entity_type: ref.entityType,
             entity_id: ref.entityId,
-            author_id: activeProfile.id,
+            author_id: activePersonId,
             author_name: activeProfile.name,
             author_role: activeProfile.roleLabel,
             body: text || '',
@@ -153,14 +160,14 @@ export function useMentionNotifier() {
           { entityType: ref.entityType, entityId: ref.entityId, entityLabel: ref.entityLabel, route: ref.route },
           tagged.map((p) => ({ id: p.id, name: p.name })),
           'mention',
-          activeProfile.id,
+          activePersonId,
         );
         if (noteId) {
           await createReceipts({ noteId, entityType: ref.entityType, entityId: ref.entityId, mentionIds: ids, delivered });
         }
       }
     },
-    [people, activeProfile],
+    [people, activeProfile, activePersonId],
   );
 }
 
@@ -309,6 +316,7 @@ export async function postNote(opts: {
       route: ref.route ?? null,
       actor_name: actor.name,
       actor_role: actor.role,
+      scope: 'personal', // an @-mention — match strictly by personal id
     });
     if (note?.id) {
       await createReceipts({ noteId: note.id, entityType: ref.entityType, entityId: ref.entityId, mentionIds: targets, delivered });
@@ -346,6 +354,7 @@ export async function notifyWatchers(opts: {
     route: opts.ref.route ?? null,
     actor_name: opts.actor.name,
     actor_role: opts.actor.role,
+    scope: 'personal', // specific watchers, not a role audience
   });
 }
 

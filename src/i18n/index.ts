@@ -30,12 +30,33 @@ export function storedLanguage(): string {
   }
 }
 
-/** Switch the UI language and remember it for the next boot (avoids a flash). */
-export function applyLanguage(code: string | null | undefined): void {
-  const lng = code || 'en';
-  if (i18n.language !== lng) i18n.changeLanguage(lng);
+/**
+ * Whether the user has an explicit language choice saved ON THIS DEVICE.
+ * When true, that choice is the source of truth and the DB preference must NOT
+ * override it (so a refresh always keeps the language you picked). The DB
+ * preference only SEEDS the language on a fresh device where this is false.
+ */
+export function hasStoredLanguage(): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, lng);
+    return !!localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Switch the UI language and remember it for the next boot (avoids a flash).
+ *
+ * A null/empty `code` means "no explicit preference" — in that case we KEEP the
+ * current language and do NOT fall back to English. (Falling back here caused
+ * the language to reset to English on every Supabase auth event — token
+ * refresh, tab focus — when the stored preference was empty.)
+ */
+export function applyLanguage(code: string | null | undefined): void {
+  if (!code) return;
+  if (i18n.language !== code) i18n.changeLanguage(code);
+  try {
+    localStorage.setItem(STORAGE_KEY, code);
   } catch {
     /* storage unavailable — language is session-only */
   }

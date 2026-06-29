@@ -1,9 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { MOCK_PROFILES, DEFAULT_PROFILE } from '../lib/profiles';
 import type { MockProfile } from '../lib/profiles';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
-import { applyLanguage } from '../i18n';
+import { applyLanguage, hasStoredLanguage } from '../i18n';
 
 type DbUser = Pick<
   Database['public']['Tables']['user_accounts']['Row'],
@@ -90,6 +90,11 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   // The logged-in Supabase auth user id — the exact link to this person's
   // directory (db) identity, used to bridge notification ids. null = no session.
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  // The auth user whose saved language we've already applied this session. Auth
+  // events (token refresh, tab focus) fire resolveFromSession repeatedly — we
+  // must apply the DB language only ONCE per login, never re-apply it, so it
+  // can't clobber a language the user switched to at runtime.
+  const langAppliedForRef = useRef<string | null>(null);
 
   // ── Resolve the logged-in user → locked MockProfile ────────────────────────
   useEffect(() => {
@@ -98,6 +103,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     async function resolveFromSession(userId: string | null) {
       if (!cancelled) setSessionUserId(userId);
       if (!userId) {
+        langAppliedForRef.current = null; // signed out → re-apply on next login
         if (!cancelled) setAuthProfile(null);
         return;
       }
@@ -109,8 +115,14 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         .returns<{ role: string | null; plant_id: string | null; name: string | null; preferred_language: string | null }>();
       if (cancelled) return;
 
-      // Boot the UI in the user's saved language (falls back to English).
-      applyLanguage(data?.preferred_language);
+      // Language source of truth = the user's local choice (localStorage). The
+      // DB preference only SEEDS the language on a fresh device that has no
+      // local choice yet — so a refresh/token-refresh/tab-focus can never
+      // override a language the user picked. Applied at most once per login.
+      if (langAppliedForRef.current !== userId) {
+        langAppliedForRef.current = userId;
+        if (!hasStoredLanguage()) applyLanguage(data?.preferred_language);
+      }
 
       const template = MOCK_PROFILES.find((p) => p.id === data?.role);
       if (!template) {

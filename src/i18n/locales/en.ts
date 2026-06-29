@@ -136,6 +136,10 @@ const en = {
     errCameraDenied: 'Camera permission denied. Please allow camera access and try again.',
     errCameraAccess: 'Could not access camera. Using file picker instead.',
     errGeoUnsupported: 'Geolocation not supported by this browser.',
+    outOfZoneTitle: '⚠️ Out of Zone',
+    outOfZoneBody: 'You are {{dist}} m away from {{plant}}.\n\nThis check-in will be flagged for review. Submit anyway?',
+    withinGeofence: 'Within factory geofence ({{dist}}m from centre)',
+    outsideZoneLabel: 'Outside zone — {{dist}}m from centre (limit: {{radius}}m)',
   },
   batch: {
     activeBatches: 'Active batches',

@@ -18,7 +18,8 @@ export function dropdownStyle(btn: HTMLElement | null, width: number, maxHeight:
       top: bottom + 8,
       right: 12,
       width: `min(${capped}px, calc(100vw - 48px))`,
-      maxHeight: `calc(100vh - ${bottom + 20}px)`,
+      // Compact card — capped so it never spans the whole screen height.
+      maxHeight: `min(440px, calc(100dvh - ${bottom + 28}px))`,
     };
   }
   return { position: 'absolute', top: 'calc(100% + 8px)', right: 0, width, maxHeight };

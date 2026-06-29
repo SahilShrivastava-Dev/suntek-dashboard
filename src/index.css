@@ -225,12 +225,16 @@
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     user-select: none;
+    white-space: nowrap;
   }
   table.dt tbody td {
     padding: 14px;
     font-size: 13px;
     border-bottom: 1px solid var(--border-2);
     color: var(--text-2);
+    /* Keep cells on one line so a narrow viewport scrolls the table
+       horizontally instead of crushing every cell into a tall stack. */
+    white-space: nowrap;
   }
   table.dt tbody tr { transition: background 120ms; }
   table.dt tbody tr:hover { background: #F8FAFC; }

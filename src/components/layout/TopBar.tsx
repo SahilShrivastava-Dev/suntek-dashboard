@@ -147,8 +147,8 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
           </svg>
           {unread > 0 && (
             <span style={{
-              position: 'absolute', top: 6, right: 6,
-              width: 16, height: 16, borderRadius: '50%',
+              position: 'absolute', top: -2, right: -2,
+              minWidth: 16, height: 16, padding: '0 3px', borderRadius: 999,
               background: '#F47651', border: '2px solid #fff',
               fontSize: 9, fontWeight: 700, color: '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -278,11 +278,13 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
           </div>
         )}
 
-        {/* Role preview switcher (admin only) — ⇅ icon, separate from the account menu */}
-        <RoleSwitchButton />
-
-        {/* Personal account menu (Settings · Sign out) */}
-        <ProfileSwitcher />
+        {/* Account controls — separated from the info icons */}
+        <div className="flex items-center gap-2 ml-1 pl-2 border-l border-slate-200">
+          {/* Role preview switcher (admin only) — ⇅ icon */}
+          <RoleSwitchButton />
+          {/* Personal account menu (Settings · Sign out) */}
+          <ProfileSwitcher />
+        </div>
       </div>
     </div>
   );

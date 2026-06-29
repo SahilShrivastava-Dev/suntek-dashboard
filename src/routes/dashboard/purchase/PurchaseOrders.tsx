@@ -9,7 +9,11 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRo
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { OcrUploadCard } from '../../../components/OcrUploadCard';
 import type { Database } from '../../../lib/database.types';
+
+// Purchase sheet OCR upload is available to management/finance roles only.
+const CAN_UPLOAD_SHEET = ['admin', 'unit_head', 'accountant_delhi', 'accountant_other'];
 
 type OrderRow = Database['public']['Tables']['oil_contracts']['Row'];
 type MaintStoreReq = Database['public']['Tables']['maintenance_store_requests']['Row'];
@@ -161,6 +165,9 @@ export function PurchaseOrders() {
 
   return (
     <>
+      {/* Purchase sheet OCR upload — management/finance only */}
+      {CAN_UPLOAD_SHEET.includes(activeProfile.id) && <OcrUploadCard kind="purchase" />}
+
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>

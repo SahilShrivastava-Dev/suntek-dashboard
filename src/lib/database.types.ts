@@ -32,10 +32,11 @@ export interface Database {
       profiles: {
         Row: {
           id: string; // uuid FK auth.users
-          role: UserRole;
+          role: string; // role_id — matches MockProfile.id ('admin', 'unit_head', …); drives RBAC
           plant_id: string | null;
           name: string;
           phone: string | null;
+          preferred_language: string | null;
           created_at: string;
         };
         Insert: Omit<Database['public']['Tables']['profiles']['Row'], 'created_at'>;
@@ -71,9 +72,29 @@ export interface Database {
           access_note: string | null;
           is_active: boolean;
           created_at: string;
+          auth_user_id: string | null;   // linked auth.users id once a login is provisioned
+          login_enabled: boolean | null; // true when this row has an active login
+          preferred_language: string | null;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['user_accounts']['Row'], 'id' | 'created_at'>>;
         Update: Partial<Database['public']['Tables']['user_accounts']['Insert']>;
+      };
+
+      // Audit history of profile changes (self-service + admin). See migration 21.
+      user_account_events: {
+        Row: {
+          id: string;
+          user_account_id: string | null;
+          target_name: string | null;
+          target_email: string | null;
+          action: string;
+          details: string | null;
+          actor_name: string | null;
+          actor_role: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['user_account_events']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['user_account_events']['Insert']>;
       };
 
       // Restricted persons/vehicles/vendors registry with resolve workflow. See migration 0006.
@@ -522,6 +543,15 @@ export interface Database {
           completion_photo_url: string | null;
           defective_part_photo_url: string | null;
           defective_part_decision: 'repair' | 'scrap' | null;
+          defective_raise_photo_url: string | null; // optional photo of the broken item at raise
+          pm_items_count: number | null;            // Purchase Manager: declared # items
+          pm_bill_total: number | null;             // Purchase Manager: declared bill total
+          pm_bill_url: string | null;               // supplier bill photo (aggregate)
+          pm_ocr_total: number | null;              // OCR-read total
+          pm_ocr_items: number | null;              // OCR-read line-item count
+          pm_ocr_status: string | null;             // 'match' | 'mismatch' | 'unread' | null
+          pm_ocr_raw: unknown | null;               // raw OCR payload
+          pm_mismatch: boolean | null;              // declared vs OCR disagree (advisory, never blocks)
           closed_at: string | null;
           created_at: string;
         };
@@ -722,6 +752,24 @@ export interface Database {
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['entity_watchers']['Row'], 'id' | 'created_at'>>;
         Update: Partial<Database['public']['Tables']['entity_watchers']['Insert']>;
+      };
+
+      // Read / delivery receipts on note mentions (one row per note × tagged
+      // person). delivered_at = notification created OK; seen_at = comment
+      // scrolled into view. See 23_note_receipts.sql.
+      entity_note_receipts: {
+        Row: {
+          id: string;
+          note_id: string;
+          entity_type: string;
+          entity_id: string;
+          profile_id: string;
+          delivered_at: string | null;
+          seen_at: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['entity_note_receipts']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['entity_note_receipts']['Insert']>;
       };
     };
   };

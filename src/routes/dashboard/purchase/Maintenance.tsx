@@ -3,15 +3,16 @@ import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { insertRows, updateRows } from '../../../lib/db';
+import { resizeImageToDataUrl, extractSupplierBill } from '../../../lib/nvidiaOcr';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { MOCK_PROFILES } from '../../../lib/profiles';
 import { useBlacklist } from '../../../contexts/BlacklistContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
-import { MentionText, NotesButton } from '../../../components/mentions';
+import { MentionText, NotesButton, ReadReceipt } from '../../../components/mentions';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
-import { useDirectory, useMentionNotifier, extractMentionIds, addWatchers, notifyWatchers, truncate } from '../../../lib/mentions';
+import { useDirectory, useMentionNotifier, notifyWatchers, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import type { AppNotification } from '../../../contexts/NotificationsContext';
@@ -85,6 +86,50 @@ type StoreReqRow = Tables['maintenance_store_requests']['Row'];
 type NotificationInsert = Tables['notifications']['Insert'];
 type TicketUpdate = Tables['maintenance_tickets']['Update'];
 type TicketStatus = Tables['maintenance_tickets']['Row']['status'];
+
+// ── Per-item workflow helpers ──────────────────────────────────────────────────
+// Each store-request row (item) moves through its own lifecycle. The ticket's
+// single status is a roll-up of the least-advanced open item, used only for the
+// timeline + table; the modal drives actions per item.
+
+type ItemStage = 'store' | 'unit_head' | 'purchase' | 'purchase_manager' | 'handover' | 'done' | 'rejected';
+
+/** Derive an item's current stage from its own fields. */
+function itemStage(r: StoreReqRow): ItemStage {
+  const decision = (r.store_decision as string | null) ?? 'pending';
+  if (r.unit_head_approval === 'rejected') return 'rejected';
+  if (!decision || decision === 'pending') return 'store';
+  if (r.unit_head_approval !== 'approved') return 'unit_head';
+  // approved:
+  if (decision === 'available') {
+    return r.handover_confirmed_at ? 'done' : 'handover';
+  }
+  // not in stock + approved → external procurement path
+  if (!r.busy_transaction_ref) return 'purchase';
+  if (!r.bill_verified) return 'purchase_manager'; // awaiting the aggregate PM bill
+  return r.handover_confirmed_at ? 'done' : 'handover';
+}
+
+const STAGE_RANK: Record<ItemStage, number> = {
+  store: 0, unit_head: 1, purchase: 2, purchase_manager: 3, handover: 4, done: 5, rejected: 5,
+};
+const STAGE_TO_TICKET: Record<string, TicketStatus> = {
+  store: 'pending_store', unit_head: 'pending_unit_head', purchase: 'pending_purchase',
+  purchase_manager: 'pending_purchase_manager', handover: 'pending_handover',
+};
+
+/** Roll the item stages up to a single ticket status (least-advanced open item). */
+function rollupStatus(reqs: StoreReqRow[], current: TicketStatus): TicketStatus {
+  if (!reqs.length) return current;
+  const open = reqs.filter(r => { const s = itemStage(r); return s !== 'done' && s !== 'rejected'; });
+  if (!open.length) {
+    // Everything resolved. If any item was actually delivered → defective return;
+    // if all were rejected → back to the technician to re-assess.
+    return reqs.some(r => itemStage(r) === 'done') ? 'pending_defective_return' : 'open';
+  }
+  const least = open.reduce((a, r) => STAGE_RANK[itemStage(r)] < STAGE_RANK[itemStage(a)] ? r : a, open[0]);
+  return STAGE_TO_TICKET[itemStage(least)] ?? current;
+}
 
 // ── Domain write helpers (use Supabase; kept local) ────────────────────────────
 
@@ -242,8 +287,11 @@ export function Maintenance() {
   });
   const actorObj = () => ({ id: activeProfile.id, name: activeProfile.name, role: activeProfile.roleLabel });
   // Insert directly (mirrors the module's role-based notify) so it doesn't depend on context tableReady.
-  const addNote = async (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => {
-    await insertRows('notifications', { ...n, read_by: [] }).then(() => {}, () => {});
+  // Returns whether the row was created (delivered) so receipts can be stamped.
+  const addNote = async (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>): Promise<boolean> => {
+    let ok = false;
+    await insertRows('notifications', { ...n, read_by: [] }).then(() => { ok = true; }, () => {});
+    return ok;
   };
   // Ping everyone tagged / CC'd on a ticket that its workflow moved.
   async function notifyTicketWatchers(t: TicketRow, title: string, body: string, type: AppNotification['type'] = 'info') {
@@ -268,7 +316,12 @@ export function Maintenance() {
   // Panel state
   const [completingSchedule, setCompletingSchedule] = useState<ScheduleRow | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<TicketRow | null>(null);
-  const [selectedStoreReq, setSelectedStoreReq] = useState<StoreReqRow | null>(null);
+  // All store-request rows (items) for the selected ticket. A ticket can need
+  // several parts at once; each row is one item with its own per-item lifecycle.
+  const [storeReqs, setStoreReqs] = useState<StoreReqRow[]>([]);
+  const selectedStoreReq = storeReqs[0] ?? null; // kept for the read-only timeline detail
+  // The item the user is currently acting on (store check / unit-head / purchase / handover).
+  const [actingReqId, setActingReqId] = useState<string | null>(null);
   const [showRaisePanel, setShowRaisePanel] = useState(false);
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   // When set, the schedule panel is in "revise" mode editing this row; null = creating new.
@@ -279,7 +332,10 @@ export function Maintenance() {
   const today = new Date().toISOString().split('T')[0];
   const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
   const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
-  const [storeForm, setStoreForm] = useState({ partName: '', quantity: '', specification: '' });
+  // Multi-item store request: a list of parts entered together (+ Add item).
+  type StoreItem = { partName: string; quantity: string; specification: string };
+  const BLANK_ITEM: StoreItem = { partName: '', quantity: '', specification: '' };
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([{ ...BLANK_ITEM }]);
   const [showStoreForm, setShowStoreForm] = useState(false);
 
   // Store manager availability form
@@ -296,6 +352,9 @@ export function Maintenance() {
   const [dispatchBlob, setDispatchBlob] = useState<Blob | null>(null); // purchase manager bill photo
   const [handoverNotes, setHandoverNotes] = useState('');
 
+  // Purchase Manager aggregate bill form (one bill for all procured items).
+  const [pmForm, setPmForm] = useState({ itemsCount: '', billTotal: '' });
+
   // Other action state
   const [busyRef, setBusyRef] = useState('');
   const [unitPrice, setUnitPrice] = useState(''); // procurement unit price (₹) → feeds FAR cost
@@ -305,6 +364,7 @@ export function Maintenance() {
   // Upload
   const [completionBlob, setCompletionBlob] = useState<Blob | null>(null);
   const [defectiveBlob, setDefectiveBlob] = useState<Blob | null>(null);
+  const [raisePhotoBlob, setRaisePhotoBlob] = useState<Blob | null>(null); // optional defective-item photo at raise
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
 
@@ -391,11 +451,17 @@ export function Maintenance() {
     setSearchParams(next, { replace: true });
   }, [searchParams, tickets, setSearchParams]);
 
+  const loadStoreReqs = useCallback(async (ticketId: string) => {
+    const { data } = await supabase.from('maintenance_store_requests')
+      .select('*').eq('ticket_id', ticketId).order('created_at', { ascending: true })
+      .returns<StoreReqRow[]>();
+    setStoreReqs(data || []);
+  }, []);
+
   useEffect(() => {
-    if (!selectedTicket) { setSelectedStoreReq(null); return; }
-    supabase.from('maintenance_store_requests').select('*').eq('ticket_id', selectedTicket.id).limit(1).returns<StoreReqRow[]>()
-      .then(({ data }) => setSelectedStoreReq(data?.[0] || null));
-  }, [selectedTicket?.id]);
+    if (!selectedTicket) { setStoreReqs([]); return; }
+    loadStoreReqs(selectedTicket.id);
+  }, [selectedTicket?.id, loadStoreReqs]);
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 
@@ -435,6 +501,21 @@ export function Maintenance() {
       assigned_to: isTechnician ? activeProfile.name : null,
     }).select('*, plants(name)').single();
     if (error) { toast.error(`Failed: ${error.message}`); return; }
+
+    // Optional: photo of the broken/defective item(s) attached at raise time.
+    if (newTicket && raisePhotoBlob) {
+      try {
+        setUploading(true);
+        const r = await uploadMaintenancePhoto(raisePhotoBlob, {
+          ticketId: newTicket.id, plantName: newTicket.plants?.name || 'Plant',
+          photoType: 'defective', creator: activeProfile.name, onProgress: setUploadPct,
+        });
+        await updateRows('maintenance_tickets', { defective_raise_photo_url: r.secure_url }).eq('id', newTicket.id);
+        newTicket.defective_raise_photo_url = r.secure_url;
+      } catch { /* non-blocking — the ticket is already raised */ }
+      finally { setUploading(false); setUploadPct(0); }
+    }
+
     notify({
       target_roles: ['admin', 'unit_head', 'store_manager_maint'],
       title: `Maintenance ticket raised: ${raiseForm.equipment}`,
@@ -443,21 +524,17 @@ export function Maintenance() {
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
 
-    // Notify anyone @-tagged in the description and make them watchers of this
-    // ticket, so they also get pinged as it moves through the workflow.
+    // Anyone @-tagged in the description becomes a watcher AND gets a realtime
+    // ping, and the description is persisted as the ticket's FIRST note so it
+    // shows in the Notes thread with delivery/read ticks. Same single path the
+    // edit / store-req / handover flows use (notifyMentions writes the
+    // entity_notes row + watchers + receipts + notification together).
     if (newTicket) {
-      const mentionIds = extractMentionIds(raiseForm.description || '', people).filter(id => id !== activeProfile.id);
-      if (mentionIds.length) {
-        const tagged = people.filter(p => mentionIds.includes(p.id));
-        await addWatchers(ticketRef(newTicket), tagged.map(p => ({ id: p.id, name: p.name })), 'mention', activeProfile.id);
-        notify({
-          target_roles: mentionIds,
-          title: `${activeProfile.name} tagged you in a maintenance ticket`,
-          body: `${raiseForm.equipment}: “${truncate(raiseForm.description || '')}”`,
-          type: 'urgent', route: `/dashboard/purchase/maint?ticket=${newTicket.id}`,
-          actor_name: activeProfile.name, actor_role: role, read_by: [],
-        });
-      }
+      await notifyMentions(raiseForm.description, {
+        entityType: 'maintenance_ticket', entityId: newTicket.id,
+        entityLabel: raiseForm.equipment,
+        route: `/dashboard/purchase/maint?ticket=${newTicket.id}`,
+      });
     }
 
     // Screen the equipment/description against the blacklist.
@@ -473,7 +550,7 @@ export function Maintenance() {
     setRaiseSaved(true);
     await loadData();
     setTimeout(() => {
-      setShowRaisePanel(false); setRaiseSaved(false);
+      setShowRaisePanel(false); setRaiseSaved(false); setRaisePhotoBlob(null);
       setRaiseForm({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
       if (newTicket && raiseForm.assessment === 'needs_part') {
         setSelectedTicket(newTicket); setShowStoreForm(true);
@@ -715,17 +792,21 @@ export function Maintenance() {
   }
 
   async function handleRaiseStoreReq() {
-    if (!storeForm.partName.trim() || !selectedTicket || actionBusyRef.current) return;
+    const items = storeItems
+      .map(it => ({ ...it, partName: it.partName.trim() }))
+      .filter(it => it.partName);
+    if (!items.length || !selectedTicket || actionBusyRef.current) return;
     actionBusyRef.current = true;
     try {
     const plant = dbPlants.find(p => p.name === selectedTicket.plants?.name);
-    const { data: sr } = await insertRows('maintenance_store_requests', {
-      ticket_id: selectedTicket.id, part_name: storeForm.partName,
-      quantity: parseFloat(storeForm.quantity) || null,
-      specification: storeForm.specification || null,
+    // One store-request row per item — a ticket can need several parts at once.
+    const rows = items.map(it => ({
+      ticket_id: selectedTicket.id, part_name: it.partName,
+      quantity: parseFloat(it.quantity) || null,
+      specification: it.specification || null,
       plant_id: plant?.id || selectedTicket.plant_id || null,
-    }).select('*').single();
-    setSelectedStoreReq(sr);
+    }));
+    await insertRows('maintenance_store_requests', rows);
     await updateTicketStatus(selectedTicket.id, 'pending_store');
     setSelectedTicket((t) => t ? { ...t, status: 'pending_store' } : t);
     // Route to the store manager of the ticket's Jharkhand unit (Chlorides /
@@ -734,19 +815,21 @@ export function Maintenance() {
     const storeTargets = unit
       ? [UNIT_STORE_MANAGER[unit], 'admin']
       : ['admin', 'store_manager_maint', 'warehouse_manager'];
+    const names = items.map(i => i.partName).join(', ');
     notify({
       target_roles: storeTargets,
-      title: `Store part needed${unit ? ` · ${UNIT_LABELS[unit]}` : ''}: ${storeForm.partName}`,
-      body: `${selectedTicket.equipment} · Qty: ${storeForm.quantity || '—'} · Check availability`,
+      title: `Store parts needed${unit ? ` · ${UNIT_LABELS[unit]}` : ''}: ${items.length} item${items.length > 1 ? 's' : ''}`,
+      body: `${selectedTicket.equipment} · ${names} · Check availability`,
       type: 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
-    await notifyMentions(storeForm.specification, {
+    await notifyMentions(items.map(i => i.specification).filter(Boolean).join(' '), {
       entityType: 'maintenance_ticket', entityId: selectedTicket.id,
       entityLabel: selectedTicket.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
     });
     setShowStoreForm(false);
-    setStoreForm({ partName: '', quantity: '', specification: '' });
+    setStoreItems([{ ...BLANK_ITEM }]);
+    await loadStoreReqs(selectedTicket.id);
     await loadData();
     } finally { actionBusyRef.current = false; }
   }
@@ -802,8 +885,24 @@ export function Maintenance() {
   }
 
   // Store manager submits availability decision with full part details
-  async function submitStoreDecision() {
-    if (!selectedTicket || !selectedStoreReq || storeDecisionForm.available === null) return;
+  // Reload all items + roll the ticket status up from their per-item stages.
+  async function refreshAfterItemChange() {
+    if (!selectedTicket) return;
+    const { data } = await supabase.from('maintenance_store_requests')
+      .select('*').eq('ticket_id', selectedTicket.id).order('created_at', { ascending: true })
+      .returns<StoreReqRow[]>();
+    const reqs = data || [];
+    setStoreReqs(reqs);
+    const next = rollupStatus(reqs, selectedTicket.status);
+    if (next !== selectedTicket.status) {
+      await updateTicketStatus(selectedTicket.id, next);
+      setSelectedTicket((t) => t ? { ...t, status: next } : t);
+    }
+    await loadData();
+  }
+
+  async function submitStoreDecision(req: StoreReqRow) {
+    if (!selectedTicket || storeDecisionForm.available === null) return;
     const available = storeDecisionForm.available;
     await updateRows('maintenance_store_requests', {
         store_decision: available ? 'available' : 'unavailable',
@@ -812,20 +911,10 @@ export function Maintenance() {
         shelf_location: available ? (storeDecisionForm.shelfLocation || null) : null,
         part_condition: available ? storeDecisionForm.partCondition : null,
       })
-      .eq('id', selectedStoreReq.id);
-    await updateTicketStatus(selectedTicket.id, 'pending_unit_head');
-    setSelectedTicket((t) => t ? { ...t, status: 'pending_unit_head' } : t);
-    setSelectedStoreReq((sr) => sr ? {
-      ...sr,
-      store_decision: available ? 'available' : 'unavailable',
-      purchase_required: !available,
-      qty_in_store: available ? parseFloat(storeDecisionForm.qtyInStore) : null,
-      shelf_location: available ? storeDecisionForm.shelfLocation : null,
-      part_condition: available ? storeDecisionForm.partCondition : null,
-    } : sr);
+      .eq('id', req.id);
     notify({
       target_roles: ['admin', 'unit_head'],
-      title: available ? `Part available: ${selectedStoreReq.part_name}` : `Part not in store: ${selectedStoreReq.part_name}`,
+      title: available ? `Part available: ${req.part_name}` : `Part not in store: ${req.part_name}`,
       body: available
         ? `Qty: ${storeDecisionForm.qtyInStore || '?'} · Shelf: ${storeDecisionForm.shelfLocation || '—'} · Condition: ${storeDecisionForm.partCondition} · Awaiting unit head approval`
         : `${selectedTicket.equipment} — external procurement needed. Awaiting unit head approval.`,
@@ -833,121 +922,99 @@ export function Maintenance() {
       actor_name: activeProfile.name, actor_role: role, read_by: [],
     });
     setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' });
-    await loadData();
+    setActingReqId(null);
+    await refreshAfterItemChange();
   }
 
-  async function unitHeadApprove(approved: boolean) {
-    if (!selectedTicket || !selectedStoreReq) return;
-    const partAvailable = selectedStoreReq.store_decision === 'available';
-    // If part available + approved → pending_handover (store hands part to tech)
-    // If part unavailable + approved → pending_purchase (Vijay procures)
-    // If rejected → open (tech re-assesses)
-    const nextStatus = !approved ? 'open' : partAvailable ? 'pending_handover' : 'pending_purchase';
+  async function unitHeadApprove(req: StoreReqRow, approved: boolean) {
+    if (!selectedTicket) return;
+    const partAvailable = req.store_decision === 'available';
     await updateRows('maintenance_store_requests', { unit_head_approval: approved ? 'approved' : 'rejected' })
-      .eq('id', selectedStoreReq.id);
-    await updateTicketStatus(selectedTicket.id, nextStatus);
-    setSelectedTicket((t) => t ? { ...t, status: nextStatus } : t);
+      .eq('id', req.id);
     if (approved && partAvailable) {
-      notify({
-        target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'],
-        title: `Approved: hand over ${selectedStoreReq.part_name}`,
-        body: `Unit head approved. Store manager to hand part to technician and upload invoice + photo.`,
-        type: 'info', route: '/dashboard/purchase/maint',
-        actor_name: activeProfile.name, actor_role: role, read_by: [],
-      });
+      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
     } else if (approved && !partAvailable) {
-      notify({
-        target_roles: ['admin', 'unit_head'],
-        title: `Procurement approved: ${selectedStoreReq.part_name}`,
-        body: `${selectedTicket.equipment} — procure from market. Enter BUSY ref when done.`,
-        type: 'warning', route: '/dashboard/purchase/maint',
-        actor_name: activeProfile.name, actor_role: role, read_by: [],
-      });
+      notify({ target_roles: ['admin', 'unit_head'], title: `Procurement approved: ${req.part_name}`, body: `${selectedTicket.equipment} — procure from market. Enter BUSY ref when done.`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
     } else {
-      notify({
-        target_roles: ['technician_shd', 'admin'],
-        title: `Request rejected: ${selectedStoreReq.part_name}`,
-        body: `Unit head rejected — ticket sent back to technician`,
-        type: 'warning', route: '/dashboard/purchase/maint',
-        actor_name: activeProfile.name, actor_role: role, read_by: [],
-      });
+      notify({ target_roles: ['technician_shd', 'admin'], title: `Item rejected: ${req.part_name}`, body: `Unit head rejected this item.`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
     }
-    await notifyTicketWatchers(
-      selectedTicket,
-      approved ? `Approved: ${selectedTicket.equipment}` : `Sent back: ${selectedTicket.equipment}`,
-      approved ? `${activeProfile.name} approved the store request.` : `${activeProfile.name} sent the ticket back to the technician.`,
-    );
-    await loadData();
+    await notifyTicketWatchers(selectedTicket, approved ? `Approved: ${selectedTicket.equipment}` : `Item rejected: ${selectedTicket.equipment}`, `${activeProfile.name} ${approved ? 'approved' : 'rejected'} "${req.part_name}".`);
+    setActingReqId(null);
+    await refreshAfterItemChange();
   }
 
-  async function markPurchased() {
-    if (!selectedTicket || !selectedStoreReq || !busyRef.trim()) return;
-    // Unit head procures: records the BUSY ref + supplier. Price is entered by
-    // the Purchase Manager (from the actual bill) at the next stage.
+  async function markPurchased(req: StoreReqRow) {
+    if (!selectedTicket || !busyRef.trim()) return;
     const supplier = supplierName.trim();
     await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null })
-      .eq('id', selectedStoreReq.id);
-    setSelectedStoreReq((sr) => sr ? { ...sr, busy_transaction_ref: busyRef, supplier_name: supplier || null } : sr);
-    await updateTicketStatus(selectedTicket.id, 'pending_purchase_manager');
-    setSelectedTicket((t) => t ? { ...t, status: 'pending_purchase_manager' } : t);
-    notify({
-      target_roles: ['purchase_manager', 'admin'],
-      title: `Procured — Purchase Manager to bill: ${selectedStoreReq.part_name}`,
-      body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to enter the price, upload the bill, and mark en route.`,
-      type: 'info', route: '/dashboard/purchase/maint',
-      actor_name: activeProfile.name, actor_role: role, read_by: [],
-    });
-    // Screen the chosen supplier against the blacklist (vendor risk).
+      .eq('id', req.id);
+    notify({ target_roles: ['purchase_manager', 'admin'], title: `Procured — Purchase Manager to bill: ${req.part_name}`, body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to upload the bill.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
     if (supplier) {
-      const hits = await screenBlacklist(
-        [{ value: supplier, label: 'Supplier' }],
-        { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment },
-      );
-      if (hits.length) {
-        const h = hits[0];
-        toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
-      }
+      const hits = await screenBlacklist([{ value: supplier, label: 'Supplier' }], { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment });
+      if (hits.length) { const h = hits[0]; toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`); }
     }
-    setBusyRef(''); setSupplierName(''); await loadData();
+    setBusyRef(''); setSupplierName(''); setActingReqId(null);
+    await refreshAfterItemChange();
   }
 
-  // Purchase Manager: upload the supplier bill photo + mark the part en route.
-  async function confirmDispatch() {
-    if (!selectedTicket || !selectedStoreReq || !dispatchBlob) return;
+  // Purchase Manager: ONE aggregate bill for all externally-procured items on this
+  // ticket. PM declares # items + total; we OCR the bill and FLAG (never block) a
+  // mismatch. Procured items are marked billed → they move to handover.
+  async function submitPurchaseManagerBill() {
+    if (!selectedTicket || !dispatchBlob) return;
+    const declaredItems = parseInt(pmForm.itemsCount, 10);
+    const declaredTotal = parseFloat(pmForm.billTotal.replace(/[^0-9.]/g, ''));
+    if (!declaredItems || !declaredTotal) { toast.error('Enter the number of items and the total bill amount.'); return; }
     setUploading(true);
     try {
+      // OCR the bill (best-effort) — this never blocks submission.
+      let ocrTotal: number | null = null, ocrItems: number | null = null, ocrStatus = 'unread';
+      let ocrRaw: unknown = null, mismatch = false;
+      try {
+        const file = new File([dispatchBlob], 'bill.jpg', { type: dispatchBlob.type || 'image/jpeg' });
+        const dataUrl = await resizeImageToDataUrl(file, 1600);
+        const ocr = await extractSupplierBill(dataUrl);
+        ocrTotal = ocr.totalAmount; ocrItems = ocr.lineItemCount; ocrRaw = ocr;
+        const totalOff = ocrTotal != null && Math.abs(ocrTotal - declaredTotal) > Math.max(1, declaredTotal * 0.02);
+        const itemsOff = ocrItems != null && ocrItems !== declaredItems;
+        mismatch = !!(totalOff || itemsOff);
+        ocrStatus = (ocrTotal == null && ocrItems == null) ? 'unread' : (mismatch ? 'mismatch' : 'match');
+      } catch { ocrStatus = 'unread'; }
+
       const r = await uploadMaintenancePhoto(dispatchBlob, {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
         photoType: 'bill', creator: activeProfile.name, onProgress: setUploadPct,
       });
-      // Purchase manager can confirm/correct the price from the actual bill.
-      const qty = selectedStoreReq.quantity || 1;
-      const up = unitPrice.trim() ? parseFloat(unitPrice.replace(/[^0-9.]/g, '')) : selectedStoreReq.unit_price ?? null;
-      const total = up != null ? up * qty : selectedStoreReq.total_price ?? null;
-      await updateRows('maintenance_store_requests', { handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total })
-        .eq('id', selectedStoreReq.id);
-      setSelectedStoreReq((sr) => sr ? { ...sr, handover_invoice_url: r.secure_url, bill_verified: true, unit_price: up, total_price: total } : sr);
-      // The Purchase Orders page derives this external buy directly from the
-      // store request (single source of truth) — no separate PO row to insert.
-      await updateTicketStatus(selectedTicket.id, 'pending_handover');
-      setSelectedTicket((t) => t ? { ...t, status: 'pending_handover' } : t);
-      notify({
-        target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'],
-        title: `Part en route: ${selectedStoreReq.part_name}`,
-        body: `${activeProfile.name} uploaded the supplier bill — part dispatched to store. Confirm receipt on arrival.`,
-        type: 'info', route: '/dashboard/purchase/maint',
-        actor_name: activeProfile.name, actor_role: role, read_by: [],
-      });
-      await notifyTicketWatchers(selectedTicket, `Part dispatched: ${selectedTicket.equipment}`, `${activeProfile.name} uploaded the bill — en route to store.`);
-      setDispatchBlob(null); setUploadPct(0);
-      await loadData();
+
+      await updateRows('maintenance_tickets', {
+        pm_items_count: declaredItems, pm_bill_total: declaredTotal, pm_bill_url: r.secure_url,
+        pm_ocr_total: ocrTotal, pm_ocr_items: ocrItems, pm_ocr_status: ocrStatus, pm_ocr_raw: ocrRaw, pm_mismatch: mismatch,
+      }).eq('id', selectedTicket.id);
+      setSelectedTicket((t) => t ? { ...t, pm_items_count: declaredItems, pm_bill_total: declaredTotal, pm_bill_url: r.secure_url, pm_ocr_total: ocrTotal, pm_ocr_items: ocrItems, pm_ocr_status: ocrStatus, pm_mismatch: mismatch } : t);
+
+      // Mark all procured-but-unbilled items as billed → they move to handover.
+      const procured = storeReqs.filter(sr => itemStage(sr) === 'purchase_manager');
+      for (const sr of procured) {
+        await updateRows('maintenance_store_requests', { bill_verified: true, handover_invoice_url: r.secure_url }).eq('id', sr.id);
+      }
+      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'], title: `Bill uploaded — ${procured.length} item(s) en route`, body: `${activeProfile.name} billed ₹${declaredTotal.toLocaleString('en-IN')} for ${declaredItems} item(s).`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
+
+      if (mismatch) {
+        const ocrItemsTxt = ocrItems ?? '?';
+        const ocrTotalTxt = ocrTotal != null ? `₹${ocrTotal.toLocaleString('en-IN')}` : '₹?';
+        toast.error(`⚠ Bill mismatch — you entered ${declaredItems} items / ₹${declaredTotal.toLocaleString('en-IN')}, OCR read ${ocrItemsTxt} items / ${ocrTotalTxt}. Submitted, but admin has been notified to verify.`);
+        notify({ target_roles: ['admin', 'unit_head'], title: `⚠ Bill mismatch flagged: ${selectedTicket.equipment}`, body: `${activeProfile.name} declared ${declaredItems} items / ₹${declaredTotal.toLocaleString('en-IN')}; OCR read ${ocrItemsTxt} items / ${ocrTotalTxt}. Please verify the bill.`, type: 'urgent', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
+      }
+      await notifyTicketWatchers(selectedTicket, `Bill uploaded: ${selectedTicket.equipment}`, `${activeProfile.name} uploaded the supplier bill — items en route to store.`);
+      setDispatchBlob(null); setUploadPct(0); setPmForm({ itemsCount: '', billTotal: '' });
+      await refreshAfterItemChange();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
 
   // Store manager: upload invoice + product photo, confirm physical handover to technician
-  async function confirmHandover() {
-    if (!selectedTicket || !selectedStoreReq) return;
+  async function confirmHandover(req: StoreReqRow) {
+    if (!selectedTicket) return;
     if (!handoverInvoiceBlob && !handoverPhotoBlob) { toast.error('Please upload at least the invoice or product photo before confirming handover.'); return; }
     setUploading(true);
     try {
@@ -974,23 +1041,20 @@ export function Maintenance() {
           handover_confirmed_at: new Date().toISOString(),
           bill_verified: true,
         })
-        .eq('id', selectedStoreReq.id);
-      await updateTicketStatus(selectedTicket.id, 'pending_defective_return');
-      setSelectedTicket((t) => t ? { ...t, status: 'pending_defective_return' } : t);
+        .eq('id', req.id);
       notify({
         target_roles: ['technician_shd', 'admin', 'unit_head'],
-        title: `Part handed over: ${selectedStoreReq.part_name}`,
-        body: `${activeProfile.name} confirmed handover. Technician to decide repair or scrap on old part.`,
+        title: `Part handed over: ${req.part_name}`,
+        body: `${activeProfile.name} confirmed handover of "${req.part_name}".`,
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
       });
-      await notifyTicketWatchers(selectedTicket, `Part handed over: ${selectedTicket.equipment}`, `${activeProfile.name} confirmed handover — repair can proceed.`);
       await notifyMentions(handoverNotes, {
         entityType: 'maintenance_ticket', entityId: selectedTicket.id,
         entityLabel: selectedTicket.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
       });
-      setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); setUploadPct(0);
-      await loadData();
+      setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); setUploadPct(0); setActingReqId(null);
+      await refreshAfterItemChange();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
   }
@@ -1221,8 +1285,8 @@ export function Maintenance() {
 
   function renderTicketActions() {
     if (!selectedTicket) return null;
+    const t = selectedTicket;
     const status = selectedTicket.status;
-    const partAvailable = selectedStoreReq?.store_decision === 'available';
 
     if (status === 'closed') {
       return (
@@ -1247,23 +1311,36 @@ export function Maintenance() {
     // ── open: technician decides in-house vs store ──
     if (status === 'open' && (isTechnician || isAdmin || isUnitHead)) {
       if (showStoreForm) {
+        const validItems = storeItems.filter(it => it.partName.trim()).length;
         return (
           <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
-            <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>Store request — part details</div>
-            <PanelField label="Part name *">
-              <PanelInput value={storeForm.partName} onChange={e => setStoreForm(f => ({ ...f, partName: e.target.value }))} placeholder="e.g. Mechanical seal, O-ring kit" />
-            </PanelField>
-            <PanelRow>
-              <PanelField label="Quantity needed">
-                <PanelInput type="number" value={storeForm.quantity} onChange={e => setStoreForm(f => ({ ...f, quantity: e.target.value }))} placeholder="e.g. 2" />
-              </PanelField>
-            </PanelRow>
-            <PanelField label="Specification / quality">
-              <PanelTextarea value={storeForm.specification} onChange={e => setStoreForm(f => ({ ...f, specification: e.target.value }))} placeholder="Brand, size, grade, tolerance…" />
-            </PanelField>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button onClick={() => setShowStoreForm(false)} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
-              <button onClick={handleRaiseStoreReq} disabled={!storeForm.partName.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !storeForm.partName.trim() ? 0.5 : 1 }}>Send to Store Manager</button>
+            <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 13 }}>Store request — parts needed</div>
+            <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 12 }}>Add every part this breakdown needs. Each is tracked and approved individually.</div>
+            {storeItems.map((it, idx) => (
+              <div key={idx} style={{ border: '1px solid #F1F5F9', borderRadius: 12, padding: 12, marginBottom: 10, background: '#FCFCFD' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#64748B' }}>Item {idx + 1}</span>
+                  {storeItems.length > 1 && (
+                    <button onClick={() => setStoreItems(items => items.filter((_, i) => i !== idx))} style={{ border: 'none', background: 'transparent', color: '#DC2626', cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'inherit' }}>✕ Remove</button>
+                  )}
+                </div>
+                <PanelField label="Part name *">
+                  <PanelInput value={it.partName} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, partName: e.target.value } : x))} placeholder="e.g. Mechanical seal, O-ring kit" />
+                </PanelField>
+                <PanelRow>
+                  <PanelField label="Quantity">
+                    <PanelInput type="number" value={it.quantity} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} placeholder="e.g. 2" />
+                  </PanelField>
+                </PanelRow>
+                <PanelField label="Specification / quality">
+                  <PanelTextarea value={it.specification} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, specification: e.target.value } : x))} placeholder="Brand, size, grade, tolerance…" />
+                </PanelField>
+              </div>
+            ))}
+            <button onClick={() => setStoreItems(items => [...items, { ...BLANK_ITEM }])} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1.5px dashed #CBD5E1', background: '#fff', color: '#475569', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit', marginBottom: 12 }}>+ Add another item</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
+              <button onClick={handleRaiseStoreReq} disabled={!validItems} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !validItems ? 0.5 : 1 }}>Send {validItems > 1 ? `${validItems} items` : 'to Store Manager'}</button>
             </div>
           </div>
         );
@@ -1295,263 +1372,168 @@ export function Maintenance() {
       );
     }
 
-    // ── pending_store: store manager checks availability ──
-    if (status === 'pending_store') {
-      if (!selectedStoreReq) return <div style={{ fontSize: 12, color: '#94A3B8' }}>Loading store request…</div>;
-      const ticketUnit = (selectedTicket.unit as Unit | null) || null;
-      // The matching unit's store manager (or generic/warehouse, or admin) can act.
-      const storeManagerCanAct = isAdmin || (isStoreManager && (
-        role === 'store_manager_maint' || role === 'warehouse_manager' || !ticketUnit || myStoreUnit === ticketUnit
-      ));
-      // Unit head can override the routing to the other unit's store.
-      const overrideBtn = (isUnitHead || isAdmin) ? (
-        <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', marginTop: 10 }}>
-          ⇄ Override · reroute to {UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser']} store
-        </button>
-      ) : null;
-      if (storeManagerCanAct) {
-        return (
-          <div>
-            {ticketUnit && <div style={{ fontSize: 11, color: '#A21CAF', fontWeight: 700, marginBottom: 8 }}>Routed to {UNIT_LABELS[ticketUnit]} store</div>}
-            {/* Part request info */}
-            <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 12, padding: 14, marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#EA580C', textTransform: 'uppercase', marginBottom: 6 }}>Store request — check availability</div>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>{selectedStoreReq.part_name}</div>
-              {selectedStoreReq.quantity && <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>Qty requested: {selectedStoreReq.quantity}</div>}
-              {selectedStoreReq.specification && <div style={{ fontSize: 12, color: '#475569', marginTop: 4, fontStyle: 'italic' }}>{selectedStoreReq.specification}</div>}
-            </div>
+    // ── Per-item workflow (multi-item) ──────────────────────────────────────
+    // Each item card shows its own stage + the action for the current role.
+    // Items flow independently; the Purchase Manager bills the procured ones
+    // together below. The ticket status is a roll-up of the least-advanced item.
+    const ticketUnit = (t.unit as Unit | null) || null;
+    const storeManagerCanAct = isAdmin || (isStoreManager && (
+      role === 'store_manager_maint' || role === 'warehouse_manager' || !ticketUnit || myStoreUnit === ticketUnit
+    ));
+    const cancelBtn: React.CSSProperties = { flex: 1, padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 12.5, fontFamily: 'inherit' };
+    const primaryBtn = (bg: string): React.CSSProperties => ({ padding: '9px 12px', borderRadius: 10, border: 'none', background: bg, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit' });
+    const awaitTxt: React.CSSProperties = { fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '10px 0', marginTop: 6 };
 
-            {/* Availability toggle */}
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 8 }}>Is this part available in store?</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {([true, false] as const).map(v => (
-                  <button key={String(v)} onClick={() => setStoreDecisionForm(f => ({ ...f, available: v }))}
-                    style={{ flex: 1, padding: '12px', borderRadius: 12, border: `2px solid ${storeDecisionForm.available === v ? (v ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: storeDecisionForm.available === v ? (v ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 13, cursor: 'pointer', color: storeDecisionForm.available === v ? (v ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>
-                    {v ? '✓ Yes, in stock' : '✗ Not in stock'}
-                  </button>
-                ))}
-              </div>
-            </div>
+    const STAGE_BADGE: Record<ItemStage, { label: string; bg: string; color: string }> = {
+      store: { label: 'Store check', bg: '#FFF7ED', color: '#EA580C' },
+      unit_head: { label: 'Unit head', bg: '#F5F3FF', color: '#7C3AED' },
+      purchase: { label: 'Procure', bg: '#EFF6FF', color: '#2563EB' },
+      purchase_manager: { label: 'Awaiting bill', bg: '#FDF4FF', color: '#A21CAF' },
+      handover: { label: 'Handover', bg: '#FAF5FF', color: '#9333EA' },
+      done: { label: 'Done', bg: '#F0FDF4', color: '#16A34A' },
+      rejected: { label: 'Rejected', bg: '#FEF2F2', color: '#DC2626' },
+    };
 
-            {/* If available: fill in stock details */}
-            {storeDecisionForm.available === true && (
-              <div style={{ border: '1px solid #BBF7D0', borderRadius: 12, padding: 14, marginBottom: 14, background: '#F0FDF4' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#16A34A', textTransform: 'uppercase', marginBottom: 10 }}>Stock details</div>
-                <PanelRow>
-                  <PanelField label="Qty available in store">
-                    <PanelInput type="number" value={storeDecisionForm.qtyInStore} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyInStore: e.target.value }))} placeholder="e.g. 3" />
-                  </PanelField>
-                  <PanelField label="Shelf / bin location">
-                    <PanelInput value={storeDecisionForm.shelfLocation} onChange={e => setStoreDecisionForm(f => ({ ...f, shelfLocation: e.target.value }))} placeholder="e.g. Rack B-12, Shelf 3" />
-                  </PanelField>
-                </PanelRow>
-                <PanelField label="Part condition">
-                  <PanelSelect value={storeDecisionForm.partCondition} onChange={e => setStoreDecisionForm(f => ({ ...f, partCondition: e.target.value }))}>
-                    <option value="new">New</option>
-                    <option value="used_good">Used — good condition</option>
-                    <option value="refurbished">Refurbished</option>
-                  </PanelSelect>
-                </PanelField>
-              </div>
-            )}
+    const procuredAwaitingBill = storeReqs.filter(r => itemStage(r) === 'purchase_manager');
 
-            {storeDecisionForm.available === false && (
-              <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 12, padding: 12, marginBottom: 14 }}>
-                <div style={{ fontSize: 12, color: '#DC2626' }}>Part not in store — will go to unit head for external procurement approval.</div>
-              </div>
-            )}
-
-            <button onClick={submitStoreDecision} disabled={storeDecisionForm.available === null}
-              style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: storeDecisionForm.available === null ? 0.4 : 1 }}>
-              Submit to unit head for approval
-            </button>
-            {overrideBtn}
-          </div>
-        );
-      }
-      return (
-        <div style={{ textAlign: 'center', padding: '12px 0' }}>
-          <div style={{ fontSize: 12, color: '#94A3B8' }}>Awaiting {ticketUnit ? `${UNIT_LABELS[ticketUnit]} ` : ''}store manager decision…</div>
-          {overrideBtn}
-        </div>
-      );
-    }
-
-    // ── pending_unit_head: unit head approves based on store decision ──
-    if (status === 'pending_unit_head') {
-      return (
-        <div>
-          <div style={{ background: '#F5F3FF', border: '1px solid #DDD6FE', borderRadius: 12, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#7C3AED', textTransform: 'uppercase', marginBottom: 6 }}>
-              {partAvailable ? 'Approve part handover' : 'Approve external procurement'}
-            </div>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>{selectedStoreReq?.part_name}</div>
-            {partAvailable ? (
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 6 }}>
-                Store says: <strong>In stock</strong>
-                {selectedStoreReq?.qty_in_store ? ` · Qty: ${selectedStoreReq.qty_in_store}` : ''}
-                {selectedStoreReq?.shelf_location ? ` · ${selectedStoreReq.shelf_location}` : ''}
-                {selectedStoreReq?.part_condition ? ` · ${selectedStoreReq.part_condition}` : ''}
-              </div>
-            ) : (
-              <div style={{ fontSize: 12, color: '#DC2626', marginTop: 6 }}>
-                Store says: <strong>Not in stock</strong> — needs external procurement from market
-              </div>
-            )}
-          </div>
-          {isUnitHead || isAdmin ? (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => unitHeadApprove(true)} style={{ flex: 2, padding: '12px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
-                {partAvailable ? 'Approve handover' : 'Approve procurement'}
-              </button>
-              <button onClick={() => unitHeadApprove(false)} style={{ flex: 1, padding: '12px', borderRadius: 12, border: 'none', background: '#DC2626', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Reject</button>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Awaiting Vijay Ji approval…</div>
-          )}
-        </div>
-      );
-    }
-
-    // ── pending_purchase: unit head / Vijay enters BUSY ref ──
-    if (status === 'pending_purchase') {
-      return (
-        <div>
-          <div style={{ background: '#F5F3FF', border: '1px solid #DDD6FE', borderRadius: 12, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#7C3AED', textTransform: 'uppercase', marginBottom: 4 }}>External purchase required</div>
-            <div style={{ fontSize: 13, color: '#475569' }}>
-              Part not in store. Vijay Ji to procure from market.<br />
-              Enter the BUSY transaction reference once purchase is done.
-            </div>
-          </div>
-          {isUnitHead || isAdmin ? (
-            <div>
-              <PanelField label="BUSY transaction reference *">
-                <PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" />
-              </PanelField>
-              <PanelField label="Supplier / vendor (bought from)">
-                <PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals · recorded as a PO" />
-              </PanelField>
-              <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>The Purchase Manager enters the price from the supplier bill at the next step.</div>
-              <button onClick={markPurchased} disabled={!busyRef.trim()} style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#7C3AED', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: !busyRef.trim() ? 0.5 : 1 }}>
-                Mark as purchased — send to Purchase Manager
-              </button>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Vijay Ji is procuring the part…</div>
-          )}
-        </div>
-      );
-    }
-
-    // ── pending_purchase_manager: purchase manager uploads supplier bill, marks en route ──
-    if (status === 'pending_purchase_manager') {
-      return (
-        <div>
-          <div style={{ background: '#FDF4FF', border: '1px solid #F5D0FE', borderRadius: 12, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#A21CAF', textTransform: 'uppercase', marginBottom: 4 }}>Upload supplier bill &amp; dispatch</div>
-            <div style={{ fontSize: 13, color: '#475569' }}>
-              Procured via BUSY ({selectedStoreReq?.busy_transaction_ref || 'ref pending'}). Upload the supplier bill photo and confirm the part is en route to the store.
-            </div>
-          </div>
-          {isPurchaseManager || isAdmin ? (
-            <div>
-              <PanelRow>
-                <PanelField label="Unit price (₹)">
-                  <PanelInput type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder={selectedStoreReq?.unit_price != null ? String(selectedStoreReq.unit_price) : 'e.g. 4500'} />
-                </PanelField>
-                <PanelField label={`Total (× ${selectedStoreReq?.quantity || 1})`}>
-                  <PanelInput disabled value={(() => { const up = unitPrice.trim() ? (parseFloat(unitPrice.replace(/[^0-9.]/g, '')) || 0) : (selectedStoreReq?.unit_price || 0); return up ? `₹ ${(up * (selectedStoreReq?.quantity || 1)).toLocaleString('en-IN')}` : '—'; })()} />
-                </PanelField>
-              </PanelRow>
-              <PhotoUploader onBlobReady={setDispatchBlob} label="Supplier bill / invoice photo" hint="Clear photo of the supplier bill for this part" />
-              {uploading && <UploadBar pct={uploadPct} color="#A21CAF" />}
-              <button onClick={confirmDispatch} disabled={!dispatchBlob || uploading}
-                style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#A21CAF', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>
-                {uploading ? `Uploading… ${uploadPct}%` : 'Upload bill — mark en route to store'}
-              </button>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Purchase Manager (Anshul) uploading the bill…</div>
-          )}
-        </div>
-      );
-    }
-
-    // ── pending_handover: store manager uploads invoice + product photo, confirms handover ──
-    if (status === 'pending_handover') {
-      return (
-        <div>
-          <div style={{ background: '#FDF4FF', border: '1px solid #E9D5FF', borderRadius: 12, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#9333EA', textTransform: 'uppercase', marginBottom: 4 }}>
-              {partAvailable ? 'Hand over part to technician' : 'Receive part & hand over to technician'}
-            </div>
-            <div style={{ fontSize: 13, color: '#475569' }}>
-              {partAvailable
-                ? `Issue ${selectedStoreReq?.part_name} from store to technician. Upload invoice and part photo, then confirm handover.`
-                : `Part procured via BUSY (${selectedStoreReq?.busy_transaction_ref || 'ref pending'}). Receive from Vijay Ji, upload invoice + product photo, then hand over to technician.`}
-            </div>
-          </div>
-          {isStoreManager || isAdmin ? (
-            <div>
-              <PhotoUploader onBlobReady={setHandoverInvoiceBlob} label="Invoice / purchase bill" hint="Photo of the invoice or purchase bill for this part" />
-              <PhotoUploader onBlobReady={setHandoverPhotoBlob} label="Part photo" hint="Clear photo of the part being handed over" />
-              <PanelField label="Handover notes (optional)">
-                <PanelTextarea value={handoverNotes} onChange={e => setHandoverNotes(e.target.value)} placeholder="e.g. New seal from supplier X, batch no…" />
-              </PanelField>
-              {uploading && <UploadBar pct={uploadPct} color="#9333EA" />}
-              <button onClick={confirmHandover} disabled={(!handoverInvoiceBlob && !handoverPhotoBlob) || uploading}
-                style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#9333EA', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', marginTop: 8, opacity: ((!handoverInvoiceBlob && !handoverPhotoBlob) || uploading) ? 0.5 : 1 }}>
-                {uploading ? `Uploading… ${uploadPct}%` : 'Confirm handover to technician'}
-              </button>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Store manager confirming handover…</div>
-          )}
-        </div>
-      );
-    }
-
-    // ── pending_defective_return: technician uploads old part photo + decides repair/scrap ──
-    if (status === 'pending_defective_return') {
-      return (
-        <div>
-          <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 12, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#EA580C', textTransform: 'uppercase', marginBottom: 4 }}>Return defective part</div>
-            <div style={{ fontSize: 12, color: '#475569' }}>Return the old/defective part to store. Upload a clear photo and decide: repair or scrap?</div>
-            {selectedStoreReq?.handover_invoice_url && (
-              <a href={selectedStoreReq.handover_invoice_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 6 }}>View handover invoice ↗</a>
-            )}
-          </div>
-          {isTechnician || isAdmin ? (
-            <div>
-              <PhotoUploader onBlobReady={setDefectiveBlob} label="Photo of defective part" hint="Clear photo of the old/broken part being returned" />
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 8 }}>What should be done with this part?</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {(['repair', 'scrap'] as const).map(d => (
-                    <button key={d} onClick={() => setDefectiveDecision(d)}
-                      style={{ flex: 1, padding: '10px', borderRadius: 12, border: `2px solid ${defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: defectiveDecision === d ? (d === 'repair' ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 13, cursor: 'pointer', color: defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>
-                      {d === 'repair' ? '🔧 Send for repair' : '🗑 Scrap it'}
-                    </button>
-                  ))}
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {storeReqs.map((req) => {
+          const s = itemStage(req);
+          const acting = actingReqId === req.id;
+          const badge = STAGE_BADGE[s];
+          return (
+            <div key={req.id} style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{req.part_name}</div>
+                  <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
+                    {req.quantity ? `Qty ${req.quantity}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
+                  </div>
                 </div>
+                <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color, whiteSpace: 'nowrap' }}>{badge.label}</span>
               </div>
-              {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
-              <button onClick={submitDefectiveReturn} disabled={!defectiveBlob || !defectiveDecision || uploading}
-                style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: (!defectiveBlob || !defectiveDecision || uploading) ? 0.5 : 1 }}>
-                {uploading ? 'Uploading…' : 'Submit return & close ticket'}
-              </button>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '12px 0' }}>Awaiting technician defective part return…</div>
-          )}
-        </div>
-      );
-    }
 
-    return null;
+              {/* STORE CHECK */}
+              {s === 'store' && (storeManagerCanAct ? (acting ? (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 8 }}>Is this part in store?</div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                    {([true, false] as const).map(v => (
+                      <button key={String(v)} onClick={() => setStoreDecisionForm(f => ({ ...f, available: v }))} style={{ flex: 1, padding: '10px', borderRadius: 10, border: `2px solid ${storeDecisionForm.available === v ? (v ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: storeDecisionForm.available === v ? (v ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', color: storeDecisionForm.available === v ? (v ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>{v ? '✓ In stock' : '✗ Not in stock'}</button>
+                    ))}
+                  </div>
+                  {storeDecisionForm.available === true && (
+                    <PanelRow>
+                      <PanelField label="Qty available"><PanelInput type="number" value={storeDecisionForm.qtyInStore} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyInStore: e.target.value }))} placeholder="e.g. 3" /></PanelField>
+                      <PanelField label="Shelf / bin"><PanelInput value={storeDecisionForm.shelfLocation} onChange={e => setStoreDecisionForm(f => ({ ...f, shelfLocation: e.target.value }))} placeholder="Rack B-12" /></PanelField>
+                    </PanelRow>
+                  )}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => { setActingReqId(null); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }} style={cancelBtn}>Cancel</button>
+                    <button onClick={() => submitStoreDecision(req)} disabled={storeDecisionForm.available === null} style={{ ...primaryBtn('#F47651'), flex: 2, opacity: storeDecisionForm.available === null ? 0.4 : 1 }}>Submit to unit head</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => { setActingReqId(req.id); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }} style={{ ...primaryBtn('#F47651'), width: '100%', marginTop: 10 }}>Check availability</button>
+              )) : <div style={awaitTxt}>Awaiting store manager…</div>)}
+
+              {/* UNIT HEAD */}
+              {s === 'unit_head' && ((isUnitHead || isAdmin) ? (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 12, color: req.store_decision === 'available' ? '#16A34A' : '#DC2626', marginBottom: 8 }}>
+                    Store says: <strong>{req.store_decision === 'available' ? 'In stock' : 'Not in stock'}</strong>{req.store_decision === 'available' && req.qty_in_store ? ` · Qty ${req.qty_in_store}` : ''}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => unitHeadApprove(req, true)} style={{ ...primaryBtn('#16A34A'), flex: 2 }}>{req.store_decision === 'available' ? 'Approve handover' : 'Approve procurement'}</button>
+                    <button onClick={() => unitHeadApprove(req, false)} style={{ ...primaryBtn('#DC2626'), flex: 1 }}>Reject</button>
+                  </div>
+                </div>
+              ) : <div style={awaitTxt}>Awaiting unit head approval…</div>)}
+
+              {/* PURCHASE (procurement) */}
+              {s === 'purchase' && ((isUnitHead || isAdmin) ? (acting ? (
+                <div style={{ marginTop: 10 }}>
+                  <PanelField label="BUSY transaction reference *"><PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" /></PanelField>
+                  <PanelField label="Supplier / vendor"><PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals" /></PanelField>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => { setActingReqId(null); setBusyRef(''); setSupplierName(''); }} style={cancelBtn}>Cancel</button>
+                    <button onClick={() => markPurchased(req)} disabled={!busyRef.trim()} style={{ ...primaryBtn('#7C3AED'), flex: 2, opacity: !busyRef.trim() ? 0.5 : 1 }}>Mark purchased</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => { setActingReqId(req.id); setBusyRef(''); setSupplierName(''); }} style={{ ...primaryBtn('#7C3AED'), width: '100%', marginTop: 10 }}>Procure — enter BUSY ref</button>
+              )) : <div style={awaitTxt}>Unit head procuring…</div>)}
+
+              {s === 'purchase_manager' && <div style={awaitTxt}>Procured ({req.busy_transaction_ref || 'ref pending'}) · awaiting purchase bill below…</div>}
+
+              {/* HANDOVER */}
+              {s === 'handover' && (storeManagerCanAct ? (acting ? (
+                <div style={{ marginTop: 10 }}>
+                  <PhotoUploader onBlobReady={setHandoverInvoiceBlob} label="Invoice / bill" hint="Photo of the invoice or purchase bill" />
+                  <PhotoUploader onBlobReady={setHandoverPhotoBlob} label="Part photo" hint="Photo of the part being handed over" />
+                  {uploading && <UploadBar pct={uploadPct} color="#9333EA" />}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button onClick={() => { setActingReqId(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); }} style={cancelBtn}>Cancel</button>
+                    <button onClick={() => confirmHandover(req)} disabled={(!handoverInvoiceBlob && !handoverPhotoBlob) || uploading} style={{ ...primaryBtn('#9333EA'), flex: 2, opacity: ((!handoverInvoiceBlob && !handoverPhotoBlob) || uploading) ? 0.5 : 1 }}>{uploading ? `Uploading… ${uploadPct}%` : 'Confirm handover'}</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => { setActingReqId(req.id); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); }} style={{ ...primaryBtn('#9333EA'), width: '100%', marginTop: 10 }}>Hand over to technician</button>
+              )) : <div style={awaitTxt}>Store manager to hand over…</div>)}
+
+              {s === 'done' && <div style={{ fontSize: 12, color: '#16A34A', marginTop: 8, fontWeight: 600 }}>✓ Handed over{req.handover_confirmed_at ? ` · ${formatDate(req.handover_confirmed_at)}` : ''}</div>}
+              {s === 'rejected' && <div style={{ fontSize: 12, color: '#DC2626', marginTop: 8 }}>Rejected by unit head.</div>}
+            </div>
+          );
+        })}
+
+        {(isUnitHead || isAdmin) && storeReqs.some(r => itemStage(r) === 'store') && ticketUnit && (
+          <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>⇄ Reroute to {UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser']} store</button>
+        )}
+
+        {/* PURCHASE MANAGER — aggregate bill for all procured items */}
+        {procuredAwaitingBill.length > 0 && (isPurchaseManager || isAdmin) && (
+          <div style={{ border: '1px solid #F5D0FE', borderRadius: 14, padding: 14, background: '#FDF4FF' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#A21CAF', textTransform: 'uppercase', marginBottom: 4 }}>Purchase Manager — bill {procuredAwaitingBill.length} procured item(s)</div>
+            <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>One supplier bill covers all procured items (incl. GST). Enter the count + total; OCR will cross-check the photo.</div>
+            <PanelRow>
+              <PanelField label="Number of items *"><PanelInput type="number" value={pmForm.itemsCount} onChange={e => setPmForm(f => ({ ...f, itemsCount: e.target.value }))} placeholder={String(procuredAwaitingBill.length)} /></PanelField>
+              <PanelField label="Total bill amount (₹) *"><PanelInput value={pmForm.billTotal} onChange={e => setPmForm(f => ({ ...f, billTotal: e.target.value }))} placeholder="e.g. 32800000" /></PanelField>
+            </PanelRow>
+            <PhotoUploader onBlobReady={setDispatchBlob} label="Supplier bill photo *" hint="Clear photo of the full supplier bill" />
+            {uploading && <UploadBar pct={uploadPct} color="#A21CAF" />}
+            <button onClick={submitPurchaseManagerBill} disabled={!dispatchBlob || uploading} style={{ ...primaryBtn('#A21CAF'), width: '100%', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>{uploading ? `Uploading… ${uploadPct}%` : 'Upload bill — verify & mark en route'}</button>
+          </div>
+        )}
+        {procuredAwaitingBill.length > 0 && !(isPurchaseManager || isAdmin) && <div style={awaitTxt}>Purchase Manager (Anshul) to upload the bill…</div>}
+
+        {/* PM mismatch banner */}
+        {t.pm_mismatch && (
+          <div style={{ border: '1px solid #FECACA', background: '#FEF2F2', borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>⚠ Bill verification mismatch</div>
+            <div style={{ fontSize: 11.5, color: '#7F1D1D', marginTop: 3 }}>
+              Declared {t.pm_items_count} items / ₹{Number(t.pm_bill_total || 0).toLocaleString('en-IN')} · OCR read {t.pm_ocr_items ?? '?'} items / ₹{t.pm_ocr_total != null ? Number(t.pm_ocr_total).toLocaleString('en-IN') : '?'}. Please verify the bill.
+            </div>
+          </div>
+        )}
+
+        {/* DEFECTIVE RETURN + close (technician) */}
+        {status === 'pending_defective_return' && ((isTechnician || isAdmin) ? (
+          <div style={{ border: '1px solid #FED7AA', borderRadius: 14, padding: 14, background: '#FFF7ED' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#EA580C', textTransform: 'uppercase', marginBottom: 8 }}>Return defective part & close</div>
+            <PhotoUploader onBlobReady={setDefectiveBlob} label="Photo of defective part" hint="Clear photo of the old/broken part" />
+            <div style={{ display: 'flex', gap: 8, margin: '10px 0' }}>
+              {(['repair', 'scrap'] as const).map(d => (
+                <button key={d} onClick={() => setDefectiveDecision(d)} style={{ flex: 1, padding: '10px', borderRadius: 10, border: `2px solid ${defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: defectiveDecision === d ? (d === 'repair' ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', color: defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>{d === 'repair' ? '🔧 Repair' : '🗑 Scrap'}</button>
+              ))}
+            </div>
+            {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
+            <button onClick={submitDefectiveReturn} disabled={!defectiveBlob || !defectiveDecision || uploading} style={{ ...primaryBtn('#F47651'), width: '100%', opacity: (!defectiveBlob || !defectiveDecision || uploading) ? 0.5 : 1 }}>{uploading ? 'Uploading…' : 'Submit & close ticket'}</button>
+          </div>
+        ) : <div style={awaitTxt}>Awaiting technician defective-part return…</div>)}
+      </div>
+    );
   }
 
   // skipped stages for stage strip (pending_purchase skipped if part was in store)
@@ -1880,6 +1862,8 @@ export function Maintenance() {
             <option value="needs_part">Need a part from store</option>
           </PanelSelect>
         </PanelField>
+        <PhotoUploader onBlobReady={setRaisePhotoBlob} label="Defective item photo (optional)" hint="Photo of the broken / defective item(s) — helps the team assess" />
+        {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
         <PanelDivider />
         <PanelFooter saved={raiseSaved} onCancel={() => setShowRaisePanel(false)} onSave={handleRaiseTicket} saveLabel={raising ? 'Raising…' : 'Raise ticket'} successLabel="Ticket raised" successSub="Store manager, admin and unit head notified" disabled={!raiseForm.equipment.trim() || raising} requiredHint="Fill in equipment name to raise ticket" />
       </SlidePanel>
@@ -1904,7 +1888,7 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
       >
@@ -1930,7 +1914,7 @@ export function Maintenance() {
                 {selectedTicket.assigned_to && <> · Assigned to {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
                 {selectedTicket.unit && <> · <span style={{ color: '#A21CAF', fontWeight: 700 }}>{UNIT_LABELS[selectedTicket.unit as Unit] || selectedTicket.unit}</span></>}
               </div>
-              {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><MentionText text={selectedTicket.description} /></div>}
+              {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><TicketDescription entityId={selectedTicket.id} text={selectedTicket.description} /></div>}
             </div>
 
             {/* Notes are visible to everyone on the ticket; edit/delete are admin-only. */}
@@ -2092,6 +2076,42 @@ export function Maintenance() {
         </div>
       </SlidePanel>
     </>
+  );
+}
+
+/**
+ * The ticket description shown in the detail panel. The raise description is
+ * persisted as the ticket's first note, so we mirror that note's read-receipt
+ * here: @names go green per-person as they're seen, and a WhatsApp-style tick
+ * (sent / delivered / seen) sits beside the line. Degrades to plain highlighted
+ * text when no matching note/receipt exists (e.g. tickets raised before this).
+ */
+function TicketDescription({ entityId, text }: { entityId: string; text: string }) {
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
+  const [tick, setTick] = useState<ReturnType<typeof tickState>>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const notes = await getNotes('maintenance_ticket', entityId);
+      const target = (text || '').trim();
+      // The raise note: earliest note whose body matches the description and
+      // that actually tagged someone (so there's a receipt to show).
+      const note = notes.find((n) => (n.body || '').trim() === target && (n.mentions?.length ?? 0) > 0);
+      if (!note) { if (!cancelled) { setSeenIds(new Set()); setTick(null); } return; }
+      const recs = await getReceipts([note.id]);
+      if (cancelled) return;
+      setSeenIds(seenProfileIds(recs));
+      setTick(tickState(note.mentions || [], recs));
+    })();
+    return () => { cancelled = true; };
+  }, [entityId, text]);
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <MentionText text={text} seenIds={seenIds} />
+      {tick && <ReadReceipt state={tick} />}
+    </span>
   );
 }
 

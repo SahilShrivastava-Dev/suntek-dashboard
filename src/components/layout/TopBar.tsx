@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ProfileSwitcher } from './ProfileSwitcher';
+import { RoleSwitchButton } from './RoleSwitchButton';
 import { CautionButton } from '../anomaly/CautionButton';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
@@ -246,7 +247,10 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
           </div>
         )}
 
-        {/* Profile switcher */}
+        {/* Role preview switcher (admin only) — ⇅ icon, separate from the account menu */}
+        <RoleSwitchButton />
+
+        {/* Personal account menu (Settings · Sign out) */}
         <ProfileSwitcher />
       </div>
     </div>

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { AuthUser } from '../../hooks/useAuth';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useAnomalies } from '../../contexts/AnomalyContext';
+import { useSearchPalette } from '../../contexts/SearchPaletteContext';
 import { profileCanAccess } from '../../lib/profiles';
 
 interface SidebarProps {
@@ -181,6 +182,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
   const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
   const { criticalCount } = useAnomalies();
+  const { openPalette } = useSearchPalette();
 
   const [purchaseOpen, setPurchaseOpen] = useState(
     location.pathname.startsWith('/dashboard/purchase')
@@ -316,7 +318,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       {/* Quick Search */}
       <button
         className="btn-accent pill px-4 py-2.5 font-semibold text-[13px] flex items-center gap-2 mb-2 w-full justify-center"
-        onClick={() => {}}
+        onClick={openPalette}
       >
         <IconSearch />
         <span>{t('nav.quickSearch')}</span>

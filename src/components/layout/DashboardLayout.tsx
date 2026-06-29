@@ -9,6 +9,7 @@ import { profileCanAccess } from '../../lib/profiles';
 import { useBlacklist } from '../../contexts/BlacklistContext';
 import type { BlacklistEntry } from '../../contexts/BlacklistContext';
 import { ErrorBoundary } from '../ErrorBoundary';
+import { SearchPaletteProvider } from '../../contexts/SearchPaletteContext';
 
 // ── Blacklisted overlay ───────────────────────────────────────────────────────
 
@@ -185,6 +186,7 @@ export function DashboardLayout() {
   }
 
   return (
+    <SearchPaletteProvider>
     <div style={{ minHeight: '100vh' }}>
       <Sidebar user={user} onSignOut={signOut} />
 
@@ -250,5 +252,6 @@ export function DashboardLayout() {
         </div>
       </main>
     </div>
+    </SearchPaletteProvider>
   );
 }

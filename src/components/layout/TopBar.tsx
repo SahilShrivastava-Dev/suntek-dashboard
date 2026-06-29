@@ -5,8 +5,10 @@ import { ProfileSwitcher } from './ProfileSwitcher';
 import { RoleSwitchButton } from './RoleSwitchButton';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { CautionButton } from '../anomaly/CautionButton';
+import { Search } from 'lucide-react';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
+import { useSearchPalette } from '../../contexts/SearchPaletteContext';
 import type { AppNotification } from '../../contexts/NotificationsContext';
 
 type NType = 'critical' | 'urgent' | 'warning' | 'info';
@@ -46,6 +48,7 @@ interface TopBarProps {
 export function TopBar({ title, breadcrumb }: TopBarProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { openPalette } = useSearchPalette();
   const { activeProfile } = useRoleContext();
   const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady } = useNotifications();
   const [open, setOpen] = useState(false);
@@ -103,6 +106,16 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
           <span className="font-medium">{t('topbar.live')}</span>
           <span className="text-slate-400">· {t('topbar.lastSync')}</span>
         </div>
+
+        {/* Global quick-search (Cmd/Ctrl+K) */}
+        <button
+          onClick={openPalette}
+          title={`${t('nav.quickSearch')} (⌘K)`}
+          aria-label={t('nav.quickSearch')}
+          className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
+        >
+          <Search size={16} />
+        </button>
 
         {/* Language switcher */}
         <LanguageSwitcher />

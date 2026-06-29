@@ -1611,66 +1611,66 @@ export function Maintenance() {
         <>
           <div className="grid grid-cols-12 gap-5 mb-5">
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Due today</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.dueToday')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{dueToday}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Due this week</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.dueThisWeek')}</div>
               <div className="text-[28px] font-extrabold mt-1 num">{dueWeek}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Overdue</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.overdue')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-red-600">{overdue}</div>
-              <div className="text-[11px] text-red-600 mt-1">needs immediate attention</div>
+              <div className="text-[11px] text-red-600 mt-1">{t('maint.needsAttention')}</div>
             </div>
             <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">Completed MTD</div>
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.completedMtd')}</div>
               <div className="text-[28px] font-extrabold mt-1 num text-green-600">{closedPeriodicMTD}</div>
             </div>
           </div>
           <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
-            <div className="text-base font-bold mb-1">Periodic maintenance schedule</div>
-            <div className="text-xs text-slate-500 mb-4">Recurring tasks — auto-ticket generated when due</div>
+            <div className="text-base font-bold mb-1">{t('maint.periodicScheduleTitle')}</div>
+            <div className="text-xs text-slate-500 mb-4">{t('maint.periodicScheduleSub')}</div>
             <div className="overflow-x-auto scroll-x">
               <table className="dt">
                 <thead>
                   <tr>
-                    <th>Task</th><th>Equipment</th><th>Plant</th><th>Frequency</th>
-                    <th>Last done</th><th>Next due</th><th>Status</th>
-                    {(isTechnician || isAdmin || isUnitHead) && <th>Action</th>}
+                    <th>{t('maint.colTask')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
+                    <th>{t('maint.colLastDone')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
+                    {(isTechnician || isAdmin || isUnitHead) && <th>{t('maint.colAction')}</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {schedules.length === 0 && (
                     <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">
-                      No schedules yet — {!isTechnician ? 'add one in Schedule Setup tab' : 'admin will set up the schedule'}
+                      {!isTechnician ? t('maint.noSchedulesAddSelf') : t('maint.noSchedulesAdmin')}
                     </td></tr>
                   )}
                   {schedules.map(s => {
                     const linkedTicket = tickets.find(t => t.schedule_id === s.id && t.status !== 'closed');
                     const days = daysFromNow(s.next_due_at);
                     const due = dueDateLabel(days);
-                    let statusLabel = 'On track'; let statusBg = '#DCFCE7'; let statusColor = '#16A34A';
-                    if (linkedTicket) { statusLabel = 'Ticket open'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
-                    else if (days !== null && days < 0) { statusLabel = 'Overdue'; statusBg = '#FEE2E2'; statusColor = '#DC2626'; }
-                    else if (days !== null && days <= 3) { statusLabel = 'Due soon'; statusBg = '#FEF3C7'; statusColor = '#D97706'; }
+                    let statusKey = 'maint.schedStatusOnTrack'; let statusBg = '#DCFCE7'; let statusColor = '#16A34A';
+                    if (linkedTicket) { statusKey = 'maint.schedStatusTicketOpen'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
+                    else if (days !== null && days < 0) { statusKey = 'maint.schedStatusOverdue'; statusBg = '#FEE2E2'; statusColor = '#DC2626'; }
+                    else if (days !== null && days <= 3) { statusKey = 'maint.schedStatusDueSoon'; statusBg = '#FEF3C7'; statusColor = '#D97706'; }
                     return (
                       <tr key={s.id}>
                         <td className="font-semibold">{s.title}</td>
                         <td>{s.equipment}</td>
                         <td>{s.plants?.name || '—'}</td>
-                        <td className="text-slate-500">{FREQ_LABEL[s.frequency] || s.frequency}</td>
+                        <td className="text-slate-500">{t('maint.freq_' + s.frequency, FREQ_LABEL[s.frequency] || s.frequency)}</td>
                         <td className="text-slate-500 text-xs">{s.last_completed_at ? formatDate(s.last_completed_at) : '—'}</td>
                         <td style={{ color: due.color, fontWeight: 600, fontSize: 12 }}>{due.text}</td>
-                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{statusLabel}</span></td>
+                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{t(statusKey)}</span></td>
                         {(isTechnician || isAdmin || isUnitHead) && (
                           <td>
                             {(linkedTicket || (days !== null && days <= 0)) ? (
                               <button onClick={() => setCompletingSchedule(s)} className="btn-accent pill px-3 py-1.5 font-semibold text-xs">
-                                Mark complete
+                                {t('maint.markComplete')}
                               </button>
                             ) : (
-                              <span className="text-xs text-slate-400">Not due</span>
+                              <span className="text-xs text-slate-400">{t('maint.notDue')}</span>
                             )}
                           </td>
                         )}
@@ -1777,12 +1777,12 @@ export function Maintenance() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <div>
-              <div className="text-base font-bold">Maintenance schedules</div>
-              <div className="text-xs text-slate-500">Define recurring tasks — auto-tickets fire when due</div>
+              <div className="text-base font-bold">{t('maint.schedulesTitle')}</div>
+              <div className="text-xs text-slate-500">{t('maint.schedulesSub')}</div>
             </div>
             {isAdmin && (
               <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAddSchedule}>
-                + Add schedule
+                {t('maint.addSchedule')}
               </button>
             )}
           </div>
@@ -1790,14 +1790,14 @@ export function Maintenance() {
             <table className="dt">
               <thead>
                 <tr>
-                  <th>Task title</th><th>Equipment</th><th>Plant</th><th>Frequency</th>
-                  <th>Assigned to</th><th>Next due</th><th>Status</th>
-                  {isAdmin && <th>Actions</th>}
+                  <th>{t('maint.colTaskTitle')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
+                  <th>{t('maint.colAssignedTo')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
+                  {isAdmin && <th>{t('maint.colActions')}</th>}
                 </tr>
               </thead>
               <tbody>
                 {schedules.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">No schedules defined yet</td></tr>
+                  <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noSchedulesDefined')}</td></tr>
                 )}
                 {schedules.map(s => {
                   const due = dueDateLabel(daysFromNow(s.next_due_at));
@@ -1807,10 +1807,10 @@ export function Maintenance() {
                       <td className="font-semibold">{s.title}</td>
                       <td>{s.equipment}</td>
                       <td>{s.plants?.name || '—'}</td>
-                      <td>{FREQ_LABEL[s.frequency] || s.frequency}</td>
-                      <td>{s.assigned_to || <span className="text-slate-400">Unassigned</span>}</td>
-                      <td style={{ color: paused ? '#94A3B8' : due.color, fontWeight: 600 }}>{paused ? 'Paused' : due.text}</td>
-                      <td><span className="badge" style={{ background: s.is_active ? '#DCFCE7' : '#F1F5F9', color: s.is_active ? '#16A34A' : '#94A3B8' }}>{s.is_active ? 'Active' : 'Paused'}</span></td>
+                      <td>{t('maint.freq_' + s.frequency, FREQ_LABEL[s.frequency] || s.frequency)}</td>
+                      <td>{s.assigned_to || <span className="text-slate-400">{t('maint.unassigned')}</span>}</td>
+                      <td style={{ color: paused ? '#94A3B8' : due.color, fontWeight: 600 }}>{paused ? t('maint.paused') : due.text}</td>
+                      <td><span className="badge" style={{ background: s.is_active ? '#DCFCE7' : '#F1F5F9', color: s.is_active ? '#16A34A' : '#94A3B8' }}>{s.is_active ? t('maint.active') : t('maint.paused')}</span></td>
                       {isAdmin && (
                         <td>
                           <ScheduleRowMenu

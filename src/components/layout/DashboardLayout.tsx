@@ -111,7 +111,7 @@ const PURCHASE_TAB_PATHS = [
 
 export function DashboardLayout() {
   const { user, signOut, session, loading: authLoading } = useAuth();
-  const { isViewingAs, activeProfile, switchProfile } = useRoleContext();
+  const { isViewingAs, activeProfile, switchProfile, authResolved } = useRoleContext();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const location = useLocation();
   const navigate = useNavigate();
@@ -145,6 +145,19 @@ export function DashboardLayout() {
   // output below is gated.
   if (import.meta.env.PROD && !authLoading && !session) {
     return <Navigate to="/login" replace />;
+  }
+
+  // While the session / profile is still resolving, show a loader instead of the
+  // locked "Access Restricted" fallback (which flashes — or sticks — otherwise).
+  if (!authResolved || authLoading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+          <div className="w-11 h-11 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-extrabold text-lg shadow-sm">S°</div>
+          <div className="animate-spin" style={{ width: 22, height: 22, border: '2.5px solid #E2E8F0', borderTopColor: '#F47651', borderRadius: '50%' }} />
+        </div>
+      </div>
+    );
   }
 
   const path = location.pathname;

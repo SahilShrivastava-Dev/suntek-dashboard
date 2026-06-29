@@ -73,7 +73,7 @@ export function CautionButton() {
           ref={panelRef}
           style={{
             position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-            width: 380, maxHeight: 540,
+            width: 'min(380px, calc(100vw - 24px))', maxHeight: 'min(540px, 70vh)',
             background: '#fff', border: '1px solid #E2E8F0',
             borderRadius: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
             zIndex: 200, display: 'flex', flexDirection: 'column', overflow: 'hidden',

@@ -121,17 +121,21 @@ export function useMentionNotifier() {
       // regardless of NotificationsContext readiness. `delivered` drives the
       // receipt tick — false means the notification pipeline errored.
       let delivered = false;
-      await insertRows('notifications', {
+      const notif = {
         target_roles: ids,
         title: `${activeProfile.name} mentioned you`,
         body: `${ref.entityLabel}: “${truncate(text || '')}”`,
-        type: 'info',
+        type: 'info' as const,
         route: ref.route ?? null,
         actor_name: activeProfile.name,
         actor_role: activeProfile.roleLabel,
         read_by: [],
-        scope: 'personal', // an @-mention — match strictly by personal id
-      }).then(() => { delivered = true; }, () => {});
+      };
+      await insertRows('notifications', { ...notif, scope: 'personal' }).then(() => { delivered = true; }, () => {});
+      // Fallback for a DB without the scope column (pre-24 migration).
+      if (!delivered) {
+        await insertRows('notifications', notif).then(() => { delivered = true; }, () => {});
+      }
       // When the tag is attached to a record, leave a persistent trace in that
       // record's Notes thread (so the tagged person can see what was said) and
       // make the tagged people watchers for future changes.

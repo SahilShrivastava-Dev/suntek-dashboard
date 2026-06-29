@@ -123,7 +123,9 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     } catch {
       setTableReady(false);
     }
-    // identityKey/personId/floor define the query+filter; selfKey the cleared set.
+    // identityKey is the stable string form of identityIds (the query input);
+    // personId/floor define the filter, selfKey the cleared set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identityKey, personId, selfKey, floor, isForMe]);
 
   useEffect(() => {
@@ -196,10 +198,14 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   async function addNotification(n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>): Promise<boolean> {
     if (!tableReady) return false;
     let ok = false;
-    await insertRows('notifications', {
-      ...n,
-      read_by: [],
-    }).then(() => { ok = true; }, () => { ok = false; });
+    await insertRows('notifications', { ...n, read_by: [] }).then(() => { ok = true; }, () => { ok = false; });
+    // Fallback for a DB that hasn't run 24_notification_scope.sql yet: retry
+    // without `scope` so the notification still sends (degrades to broadcast).
+    if (!ok && n.scope) {
+      const { scope, ...rest } = n;
+      void scope;
+      await insertRows('notifications', { ...rest, read_by: [] }).then(() => { ok = true; }, () => {});
+    }
     return ok;
   }
 

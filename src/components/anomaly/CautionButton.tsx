@@ -4,6 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useAnomalies } from '../../contexts/AnomalyContext';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { profileCanAccess } from '../../lib/profiles';
+import { dropdownStyle } from '../../lib/uiPosition';
 import type { Severity } from '../../lib/anomaly/types';
 
 const ICON_BG: Record<Severity, string> = { urgent: '#FEE2E2', warning: '#FEF3C7', info: '#DBEAFE' };
@@ -51,10 +52,10 @@ export function CautionButton() {
       <button
         ref={btnRef}
         title="Anomaly detection"
-        className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
+        className={`w-10 h-10 rounded-full border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
         onClick={() => setOpen(v => !v)}
       >
-        <AlertTriangle size={16} color={criticalCount > 0 ? badgeColor : '#64748B'} strokeWidth={2} />
+        <AlertTriangle size={16} color={open ? '#fff' : (criticalCount > 0 ? badgeColor : '#64748B')} strokeWidth={2} />
         {criticalCount > 0 && (
           <span style={{
             position: 'absolute', top: -2, right: -2,
@@ -72,8 +73,7 @@ export function CautionButton() {
         <div
           ref={panelRef}
           style={{
-            position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-            width: 'min(380px, calc(100vw - 24px))', maxHeight: 'min(540px, 70vh)',
+            ...dropdownStyle(btnRef.current, 380, 540),
             background: '#fff', border: '1px solid #E2E8F0',
             borderRadius: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
             zIndex: 200, display: 'flex', flexDirection: 'column', overflow: 'hidden',

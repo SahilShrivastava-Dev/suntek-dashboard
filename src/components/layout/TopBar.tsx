@@ -9,6 +9,7 @@ import { Search } from 'lucide-react';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { useSearchPalette } from '../../contexts/SearchPaletteContext';
+import { dropdownStyle } from '../../lib/uiPosition';
 import type { AppNotification } from '../../contexts/NotificationsContext';
 
 type NType = 'critical' | 'urgent' | 'warning' | 'info';
@@ -111,7 +112,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
       </div>
 
       {/* Right: live indicator + notifications + profile switcher */}
-      <div className="flex items-center gap-2 flex-wrap justify-end" style={{ position: 'relative' }}>
+      <div className="flex items-center gap-2 flex-wrap justify-end w-full md:w-auto" style={{ position: 'relative' }}>
         {/* Live sync pill */}
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-full text-[12px]">
           <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
@@ -138,7 +139,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
         {/* Bell button */}
         <button
           ref={btnRef}
-          className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
+          className={`w-10 h-10 rounded-full border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
           onClick={() => setOpen(v => !v)}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -163,8 +164,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
           <div
             ref={panelRef}
             style={{
-              position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-              width: 'min(360px, calc(100vw - 24px))', maxHeight: 'min(520px, 70vh)',
+              ...dropdownStyle(btnRef.current, 360, 520),
               background: '#fff', border: '1px solid #E2E8F0',
               borderRadius: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
               zIndex: 200, display: 'flex', flexDirection: 'column',

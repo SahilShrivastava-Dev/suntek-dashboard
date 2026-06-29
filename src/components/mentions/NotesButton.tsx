@@ -64,13 +64,15 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
   const [posting, setPosting] = useState(false);
   const [count, setCount] = useState(0);
 
-  const { activeProfile } = useRoleContext();
+  const { activeProfile, activePersonId } = useRoleContext();
   const { addNotification } = useNotifications();
   const people = useDirectory();
   const toast = useToast();
 
   const ref = { entityType, entityId, entityLabel, route };
-  const actor = { id: activeProfile.id, name: activeProfile.name, role: activeProfile.roleLabel };
+  // Author/self keys on the PERSONAL id (not the shared role id) so two
+  // same-role people stay distinct for receipts, seen-state and self-exclusion.
+  const actor = { id: activePersonId, name: activeProfile.name, role: activeProfile.roleLabel };
 
   async function load() {
     setLoading(true);
@@ -142,13 +144,15 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
   }, [open, entityType, entityId]);
 
   // A tagged note scrolled into the viewer's view → mark it seen (once).
+  // Keyed on the PERSONAL id so only this person's @chip greens — not everyone
+  // who shares their role.
   function handleSeen(noteId: string) {
-    markNoteSeen(noteId, activeProfile.id);
+    markNoteSeen(noteId, activePersonId);
     setReceipts((prev) => {
-      const row = (prev[noteId] ?? []).find((r) => r.profile_id === activeProfile.id);
+      const row = (prev[noteId] ?? []).find((r) => r.profile_id === activePersonId);
       return mergeReceipt(prev, {
         note_id: noteId,
-        profile_id: activeProfile.id,
+        profile_id: activePersonId,
         delivered_at: row?.delivered_at ?? new Date().toISOString(),
         seen_at: new Date().toISOString(),
       });
@@ -212,7 +216,7 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
             {notes.map((n) => (
-              <NoteRow key={n.id} note={n} receipts={receipts[n.id] ?? []} viewerId={activeProfile.id} onSeen={handleSeen} />
+              <NoteRow key={n.id} note={n} receipts={receipts[n.id] ?? []} viewerId={activePersonId} onSeen={handleSeen} />
             ))}
           </div>
         )}

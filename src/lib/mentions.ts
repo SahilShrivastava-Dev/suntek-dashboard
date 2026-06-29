@@ -107,13 +107,15 @@ export function useDirectory(): TaggablePerson[] {
  */
 export function useMentionNotifier() {
   const people = useDirectory();
-  const { activeProfile } = useRoleContext();
+  const { activeProfile, activePersonId } = useRoleContext();
   return useCallback(
     async (
       text: string | null | undefined,
       ref: { entityType?: string; entityId?: string; entityLabel: string; route?: string | null },
     ) => {
-      const ids = extractMentionIds(text || '', people).filter((id) => id !== activeProfile.id);
+      // Exclude SELF by personal id — so a provisioned user tagging the mock
+      // archetype that shares their role isn't mistaken for self-tagging.
+      const ids = extractMentionIds(text || '', people).filter((id) => id !== activePersonId);
       if (!ids.length) return;
       // Direct insert (mirrors the app's other notify() helpers) so it works
       // regardless of NotificationsContext readiness. `delivered` drives the
@@ -138,7 +140,7 @@ export function useMentionNotifier() {
           const { data } = await insertRows('entity_notes', {
             entity_type: ref.entityType,
             entity_id: ref.entityId,
-            author_id: activeProfile.id,
+            author_id: activePersonId,
             author_name: activeProfile.name,
             author_role: activeProfile.roleLabel,
             body: text || '',
@@ -153,14 +155,14 @@ export function useMentionNotifier() {
           { entityType: ref.entityType, entityId: ref.entityId, entityLabel: ref.entityLabel, route: ref.route },
           tagged.map((p) => ({ id: p.id, name: p.name })),
           'mention',
-          activeProfile.id,
+          activePersonId,
         );
         if (noteId) {
           await createReceipts({ noteId, entityType: ref.entityType, entityId: ref.entityId, mentionIds: ids, delivered });
         }
       }
     },
-    [people, activeProfile],
+    [people, activeProfile, activePersonId],
   );
 }
 

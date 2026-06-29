@@ -34,6 +34,14 @@ interface RoleContextValue {
    * belongs to this person. Always non-empty (at least `[activeProfile.id]`).
    */
   activeIdentityIds: string[];
+  /**
+   * The active person's SINGLE personal identity — their `db_<uuid>` when they
+   * are a provisioned user, otherwise their profile id. Unlike `activeProfile.id`
+   * (which is the shared role-template id for provisioned users), this is unique
+   * per person, so it's what "is this note mine / mark it seen / don't tag
+   * myself" must key on. Two different technicians get two different personIds.
+   */
+  activePersonId: string;
   /** The logged-in user's own profile (who they actually are). */
   authProfile: MockProfile | null;
   allProfiles: MockProfile[];
@@ -185,6 +193,20 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     return [...ids];
   }, [activeProfile, extraProfiles, sessionUserId, selfProfile]);
 
+  // The active person's unique personal id (their db twin if provisioned, else
+  // their profile id). NEVER the shared role id — used for "is this mine /
+  // mark seen / exclude self" so two same-role people stay distinct.
+  const activePersonId = useMemo(() => {
+    if (activeProfile.id.startsWith('db_')) return activeProfile.id; // already personal
+    if (sessionUserId && activeProfile.id === selfProfile.id) {
+      const mine = extraProfiles.find((p) => p.authUserId === sessionUserId);
+      if (mine) return mine.id; // exact auth link
+    }
+    const key = activeProfile.name.trim().toLowerCase();
+    const twin = extraProfiles.find((p) => p.name.trim().toLowerCase() === key);
+    return twin?.id ?? activeProfile.id; // name twin, else the (mock) profile id
+  }, [activeProfile, extraProfiles, sessionUserId, selfProfile]);
+
   function switchProfile(profileId: string) {
     if (!canSwitch) return; // locked users cannot change their role
     // Switching back to self clears the preview.
@@ -196,6 +218,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       value={{
         activeProfile,
         activeIdentityIds,
+        activePersonId,
         authProfile,
         allProfiles,
         switchProfile,

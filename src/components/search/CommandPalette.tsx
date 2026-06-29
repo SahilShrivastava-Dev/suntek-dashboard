@@ -21,7 +21,7 @@ const TYPE_ICON: Record<SearchType, string> = {
  * see matching tickets, people, customers, etc. across the app; ↑/↓ to move,
  * ↵ to open, esc to close. Access-aware — only shows records the role can reach.
  */
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({ open, onClose, initialQuery = '' }: { open: boolean; onClose: () => void; initialQuery?: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { activeProfile } = useRoleContext();
@@ -37,15 +37,15 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   const canAccess = useMemo(() => (route: string) => profileCanAccess(activeProfile, route), [activeProfile]);
 
-  // Reset + focus whenever the palette opens.
+  // Reset + focus whenever the palette opens (seed from initialQuery, e.g. voice).
   useEffect(() => {
     if (!open) return;
-    setQuery('');
+    setQuery(initialQuery);
     setResults([]);
     setActive(0);
     const id = setTimeout(() => inputRef.current?.focus(), 30);
     return () => clearTimeout(id);
-  }, [open]);
+  }, [open, initialQuery]);
 
   // Debounced search. A request id guards against out-of-order responses.
   useEffect(() => {

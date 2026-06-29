@@ -131,7 +131,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
 
         {/* Global quick-search (Cmd/Ctrl+K) */}
         <button
-          onClick={openPalette}
+          onClick={() => openPalette()}
           title={`${t('nav.quickSearch')} (⌘K)`}
           aria-label={t('nav.quickSearch')}
           className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"

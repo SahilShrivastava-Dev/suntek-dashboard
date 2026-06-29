@@ -12,7 +12,7 @@
 import { supabase } from './supabase';
 
 export type SearchType =
-  | 'ticket' | 'user' | 'customer' | 'storereq' | 'asset' | 'blacklist' | 'batch' | 'po';
+  | 'ticket' | 'note' | 'user' | 'customer' | 'storereq' | 'asset' | 'blacklist' | 'batch' | 'po';
 
 export interface SearchResult {
   id: string;
@@ -130,9 +130,54 @@ const ENTITIES: EntityConfig[] = [
 ];
 
 /** i18n group key per result type (for headings in the palette). */
-export const GROUP_KEY: Record<SearchType, string> = Object.fromEntries(
-  ENTITIES.map((e) => [e.type, e.groupKey]),
-) as Record<SearchType, string>;
+export const GROUP_KEY: Record<SearchType, string> = {
+  ...Object.fromEntries(ENTITIES.map((e) => [e.type, e.groupKey])),
+  note: 'palette.groupNotes',
+} as Record<SearchType, string>;
+
+/**
+ * Maps an entity_notes row's entity_type to the page that owns it. The note
+ * deep-links to that record (so searching a comment opens the workflow it's on)
+ * and is access-gated by that route. Unknown entity types are skipped.
+ */
+const NOTE_ENTITY: Record<string, { route: string; link: (id: string) => string }> = {
+  maintenance_ticket: { route: '/dashboard/purchase/maint', link: (id) => `/dashboard/purchase/maint?ticket=${id}` },
+  anomaly: { route: '/dashboard/anomaly-center', link: () => '/dashboard/anomaly-center' },
+  active_batch: { route: '/dashboard/predictive-qc', link: () => '/dashboard/predictive-qc' },
+};
+
+/**
+ * Search the free-text comments/notes people leave on records (entity_notes).
+ * Lets someone find a workflow by a fragment of a comment they remember
+ * ("Sahil will need to look…") and jump straight to its ticket.
+ */
+async function searchNotes(q: string, canAccess: (route: string) => boolean): Promise<SearchResult[]> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const qb: any = (supabase as any).from('entity_notes');
+    const { data, error } = await qb
+      .select('id, body, author_name, entity_type, entity_id, created_at')
+      .or(`body.ilike.%${q}%,author_name.ilike.%${q}%`)
+      .order('created_at', { ascending: false })
+      .limit(8);
+    if (error || !Array.isArray(data)) return [];
+    const out: SearchResult[] = [];
+    for (const row of data as Record<string, unknown>[]) {
+      const cfg = NOTE_ENTITY[str(row.entity_type)];
+      if (!cfg || !canAccess(cfg.route)) continue;
+      out.push({
+        id: str(row.id),
+        type: 'note',
+        title: clip(str(row.body)),
+        subtitle: join([row.author_name ? `— ${str(row.author_name)}` : '']),
+        route: cfg.link(str(row.entity_id)),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
 
 /** Strip characters that would break the PostgREST `or(...)` filter syntax. */
 function sanitize(q: string): string {
@@ -153,19 +198,22 @@ export async function searchEntities(
   const targets = ENTITIES.filter((e) => canAccess(e.route));
   const orFilter = (cols: string[]) => cols.map((c) => `${c}.ilike.%${q}%`).join(',');
 
-  const settled = await Promise.all(
-    targets.map(async (e) => {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const qb: any = (supabase as any).from(e.table);
-        const { data, error } = await qb.select(e.select).or(orFilter(e.columns)).limit(6);
-        if (error || !Array.isArray(data)) return [] as SearchResult[];
-        return (data as Record<string, unknown>[]).map((row) => ({ type: e.type, ...e.map(row) }) as SearchResult);
-      } catch {
-        return [] as SearchResult[];
-      }
-    }),
-  );
+  const [settled, notes] = await Promise.all([
+    Promise.all(
+      targets.map(async (e) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const qb: any = (supabase as any).from(e.table);
+          const { data, error } = await qb.select(e.select).or(orFilter(e.columns)).limit(6);
+          if (error || !Array.isArray(data)) return [] as SearchResult[];
+          return (data as Record<string, unknown>[]).map((row) => ({ type: e.type, ...e.map(row) }) as SearchResult);
+        } catch {
+          return [] as SearchResult[];
+        }
+      }),
+    ),
+    searchNotes(q, canAccess),
+  ]);
 
-  return settled.flat();
+  return [...settled.flat(), ...notes];
 }

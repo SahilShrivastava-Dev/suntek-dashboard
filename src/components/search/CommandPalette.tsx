@@ -9,10 +9,10 @@ import { useDirectory } from '../../lib/mentions';
 import { searchEntities, GROUP_KEY, type SearchResult, type SearchType } from '../../lib/globalSearch';
 
 /** Stable display order for the result groups. */
-const TYPE_ORDER: SearchType[] = ['ticket', 'user', 'customer', 'storereq', 'asset', 'blacklist', 'batch', 'po'];
+const TYPE_ORDER: SearchType[] = ['ticket', 'note', 'user', 'customer', 'storereq', 'asset', 'blacklist', 'batch', 'po'];
 
 const TYPE_ICON: Record<SearchType, string> = {
-  ticket: '🔧', user: '👤', customer: '🤝', storereq: '📦',
+  ticket: '🔧', note: '💬', user: '👤', customer: '🤝', storereq: '📦',
   asset: '🏷️', blacklist: '🚫', batch: '⚗️', po: '🛒',
 };
 

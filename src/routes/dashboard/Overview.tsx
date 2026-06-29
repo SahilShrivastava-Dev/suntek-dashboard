@@ -331,8 +331,8 @@ export function Overview() {
           </div>
         </div>
 
-        {/* Lock + Progress stacked */}
-        <div className="col-span-6 lg:col-span-2 grid gap-5">
+        {/* Lock + Progress stacked — mock widgets, omitted on phones for breathing space */}
+        <div className="hidden md:grid col-span-6 lg:col-span-2 gap-5">
           <div className="card p-5 flex flex-col items-center justify-center text-center" style={{ position: 'relative' }}>
             <KpiInfoButton info={{ title: 'System Lock Status', what: 'Indicates whether 2-step verification is active for the Admin role. When locked, sensitive actions require a second authentication step. This is a UI status indicator only.', source: 'Mock data', note: 'Dummy — not connected to any auth system. Future: read from Supabase auth or role config.' }} />
             <div className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center mb-2">
@@ -430,7 +430,7 @@ export function Overview() {
         <div className="grid grid-cols-12 gap-5 mb-5">
 
           {/* DSO Gauge */}
-          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+          <div className="col-span-12 sm:col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
             <KpiInfoButton info={{ title: 'Days Sales Outstanding (DSO)', what: 'How many days on average it takes to collect payment after a sale is made. Lower is better — below 30d is best-in-class.', source: 'Derived', formula: 'DSO = (Debtors Outstanding / FY Revenue) × 365', tables: ['DailySum', 'Master1', 'Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > DailySum\nBusyFY2026 > dbo > Tables > Master1', note: 'Debtors = Master1 WHERE ParentGrp=116. Target < 30 days.' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">{t('overview.daysSalesOutstanding')}</div>
             <div className="flex items-center gap-3">
@@ -445,7 +445,7 @@ export function Overview() {
           </div>
 
           {/* Gross Margin Ring */}
-          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+          <div className="col-span-12 sm:col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
             <KpiInfoButton info={{ title: 'Gross Margin %', what: 'Percentage of FY revenue remaining after subtracting total purchases. Measures operational profitability before overheads.', source: 'Derived', formula: 'Gross Margin = (FY Revenue − FY Purchase) / FY Revenue × 100', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9 (Sales), VchType=14 (Purchase)', note: 'Industry benchmark for chemical mfg is ~28%.' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">{t('overview.grossMarginFy')}</div>
             <div className="flex items-center gap-3">
@@ -500,7 +500,7 @@ export function Overview() {
         <div className="grid grid-cols-12 gap-5 mb-5">
 
           {/* DPO + Cash Conversion Cycle */}
-          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+          <div className="col-span-12 sm:col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
             <KpiInfoButton info={{ title: 'DPO & Cash Conversion Cycle', what: 'DPO = how many days before the company pays its suppliers. CCC = DSO minus DPO — negative means cash-positive (collect before you pay). Very favourable for working capital.', source: 'Derived', formula: 'DPO = (Creditors Outstanding / FY Purchase) × 365\nCCC = DSO − DPO', tables: ['DailySum', 'Master1', 'Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > DailySum\nBusyFY2026 > dbo > Tables > Master1', note: 'Creditors: Master1 WHERE ParentGrp=117' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">{t('overview.payablesCycleDpo')}</div>
             <div className="text-[28px] font-extrabold num text-blue-700">{analytics.dpo} d</div>
@@ -517,7 +517,7 @@ export function Overview() {
           </div>
 
           {/* Collection Ratio */}
-          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+          <div className="col-span-12 sm:col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
             <KpiInfoButton info={{ title: 'Collection Ratio MTD', what: 'Percentage of this month\'s sales revenue that has already been received as cash. 100% = all invoices collected. Lower % = paper revenue not yet turned into cash.', source: 'Derived', formula: 'Collection Ratio = MTD Receipts / MTD Sales × 100', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'Receipts: VchType=16 · Sales: VchType=9, current month' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">{t('overview.collectionRatioMtd')}</div>
             <div className="flex items-center gap-3">

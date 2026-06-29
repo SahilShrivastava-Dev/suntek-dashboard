@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -115,6 +115,10 @@ export function DashboardLayout() {
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const location = useLocation();
   const navigate = useNavigate();
+  // Mobile sidebar drawer (md+ shows the sidebar permanently).
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Close the drawer whenever the route changes.
+  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
   // Detect if the currently previewed profile is blacklisted
   const blacklistEntry = blacklistReady ? isPersonBlacklisted(activeProfile.name) : null;
@@ -188,14 +192,20 @@ export function DashboardLayout() {
   return (
     <SearchPaletteProvider>
     <div style={{ minHeight: '100vh' }}>
-      <Sidebar user={user} onSignOut={signOut} />
+      <Sidebar user={user} onSignOut={signOut} mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <main
-        className="min-h-screen p-5 md:p-7"
-        style={{ marginLeft: '260px' }}
-      >
+      {/* Mobile drawer backdrop */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-slate-900/40 z-40"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      <main className="min-h-screen p-4 md:p-7 ml-0 md:ml-[260px]">
         <div className="max-w-[1500px] mx-auto">
-          <TopBar title={title} breadcrumb={breadcrumb} />
+          <TopBar title={title} breadcrumb={breadcrumb} onMenu={() => setSidebarOpen(true)} />
 
           {/* "Viewing as" banner — appears when not in Admin mode */}
           {isViewingAs && (

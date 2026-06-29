@@ -27,6 +27,10 @@ export interface MockProfile {
    * its `db_<uuid>` directory identity without relying on name matching.
    */
   authUserId?: string;
+  /** When this person's account was provisioned (user_accounts.created_at). Used
+   * as a notification floor so a new user doesn't inherit pre-account history.
+   * Unset on the static archetypes (they see everything). */
+  accountCreatedAt?: string;
   role: string;
   roleLabel: string;
   roleDescription: string;

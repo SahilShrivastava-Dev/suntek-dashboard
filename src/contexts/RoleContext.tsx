@@ -6,7 +6,7 @@ import type { Database } from '../lib/database.types';
 
 type DbUser = Pick<
   Database['public']['Tables']['user_accounts']['Row'],
-  'id' | 'name' | 'role_id' | 'role_label' | 'plant_name' | 'access_note' | 'auth_user_id'
+  'id' | 'name' | 'role_id' | 'role_label' | 'plant_name' | 'access_note' | 'auth_user_id' | 'created_at'
 >;
 
 /**
@@ -42,6 +42,12 @@ interface RoleContextValue {
    * myself" must key on. Two different technicians get two different personIds.
    */
   activePersonId: string;
+  /**
+   * When the active person's account was created — notifications older than this
+   * are hidden so a freshly-provisioned user doesn't inherit the whole backlog.
+   * null for the static archetypes / dev (they see everything).
+   */
+  activeAccountFloor: string | null;
   /** The logged-in user's own profile (who they actually are). */
   authProfile: MockProfile | null;
   allProfiles: MockProfile[];
@@ -126,7 +132,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     async function loadDbUsers() {
       const { data } = await supabase
         .from('user_accounts')
-        .select('id, name, role_id, role_label, plant_name, access_note, auth_user_id')
+        .select('id, name, role_id, role_label, plant_name, access_note, auth_user_id, created_at')
         .eq('is_active', true)
         .returns<DbUser[]>();
       if (!data?.length) return;
@@ -145,6 +151,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
           id: `db_${u.id}`,
           baseRoleId: template.id, // keep the role link so role-targeted notifications still reach this person
           authUserId: u.auth_user_id ?? undefined, // exact session ↔ directory link
+          accountCreatedAt: u.created_at ?? undefined, // notification floor
           name: u.name,
           initials,
           roleLabel: u.role_label || template.roleLabel,
@@ -207,6 +214,14 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     return twin?.id ?? activeProfile.id; // name twin, else the (mock) profile id
   }, [activeProfile, extraProfiles, sessionUserId, selfProfile]);
 
+  // The active person's provisioning date (notification floor). Resolved from
+  // whichever directory entry matches their personal id; null for archetypes.
+  const activeAccountFloor = useMemo(() => {
+    if (activeProfile.accountCreatedAt) return activeProfile.accountCreatedAt;
+    const mine = extraProfiles.find((p) => p.id === activePersonId);
+    return mine?.accountCreatedAt ?? null;
+  }, [activeProfile, extraProfiles, activePersonId]);
+
   function switchProfile(profileId: string) {
     if (!canSwitch) return; // locked users cannot change their role
     // Switching back to self clears the preview.
@@ -219,6 +234,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         activeProfile,
         activeIdentityIds,
         activePersonId,
+        activeAccountFloor,
         authProfile,
         allProfiles,
         switchProfile,

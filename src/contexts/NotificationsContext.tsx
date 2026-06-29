@@ -15,6 +15,14 @@ export interface AppNotification {
   created_at: string;
   read_by: string[];
   cleared_by?: string[];
+  /**
+   * 'personal' = an @-mention / CC to specific people (matched ONLY by personal
+   * id, so it never leaks to others who share a role). 'broadcast' (default) =
+   * a role/audience announcement (matched by role id). Omit on personal
+   * producers? No — personal producers MUST set 'personal'; everything else
+   * defaults to 'broadcast' at the DB.
+   */
+  scope?: 'personal' | 'broadcast';
 }
 
 interface NotificationsContextValue {
@@ -61,25 +69,43 @@ function addCleared(roleId: string, ids: string[]) {
 }
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
-  const { activeProfile, activeIdentityIds } = useRoleContext();
-  // The id used for per-person bookkeeping (read/cleared pointers).
-  const roleId = activeProfile?.id ?? 'admin';
-  // Every id this person answers to — they own a notification addressed to ANY
-  // of these (their role id, their personal db id, etc.). Stable string key for
-  // effect deps. Falls back to the primary id if the set hasn't resolved yet.
-  const identityIds = activeIdentityIds?.length ? activeIdentityIds : [roleId];
+  const { activeProfile, activeIdentityIds, activePersonId, activeAccountFloor } = useRoleContext();
+  // Per-person bookkeeping key (read / cleared / unread). The PERSONAL id, so
+  // two people who share a role keep independent read & cleared state.
+  const selfKey = activePersonId || activeProfile?.id || 'admin';
+  const personId = activePersonId || selfKey;
+  // Every id this person answers to (personal id + role id) — used to match
+  // role BROADCASTS. Stable string key for effect deps.
+  const identityIds = activeIdentityIds?.length ? activeIdentityIds : [selfKey];
   const identityKey = identityIds.join(',');
+  // Hide notifications created before this person's account existed.
+  const floor = activeAccountFloor;
 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [tableReady, setTableReady] = useState(false);
 
-  // Load notifications addressed to any of this person's identities.
+  // Does this notification belong to the active person?
+  //  • 'personal' (an @-mention / CC) → matched STRICTLY by personal id, so it
+  //    never leaks to others who merely share a role.
+  //  • 'broadcast' / legacy → matched by any role/identity id.
+  const isForMe = useCallback((n: AppNotification): boolean => {
+    if (!n.target_roles) return false;
+    if (n.scope === 'personal') return n.target_roles.includes(personId);
+    const idSet = new Set(identityIds);
+    return n.target_roles.some((id) => idSet.has(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identityKey, personId]);
+
+  // Load notifications addressed to this person (personal tags + role broadcasts),
+  // newer than their account floor.
   const loadNotifications = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('notifications')
         .select('*')
-        .overlaps('target_roles', identityIds)
+        .overlaps('target_roles', identityIds);
+      if (floor) query = query.gte('created_at', floor);
+      const { data, error } = await query
         .order('created_at', { ascending: false })
         .limit(50)
         .returns<AppNotification[]>();
@@ -91,49 +117,45 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         }
       }
       setTableReady(true);
-      // Hide notifications this profile has cleared (local pointer + DB marker).
-      const cleared = getClearedSet(roleId);
-      setNotifications((data || []).filter((n) => !cleared.has(n.id) && !n.cleared_by?.includes(roleId)));
+      // Apply the personal/broadcast scope filter + hide cleared.
+      const cleared = getClearedSet(selfKey);
+      setNotifications((data || []).filter((n) => isForMe(n) && !cleared.has(n.id) && !n.cleared_by?.includes(selfKey)));
     } catch {
       setTableReady(false);
     }
-    // identityKey is the stable string form of identityIds (every id we query
-    // for); roleId drives the cleared filter.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identityKey, roleId]);
+    // identityKey/personId/floor define the query+filter; selfKey the cleared set.
+  }, [identityKey, personId, selfKey, floor, isForMe]);
 
   useEffect(() => {
     loadNotifications();
   }, [loadNotifications]);
 
   // Supabase real-time subscription for new notifications. A tag fires here the
-  // moment it's inserted — match on ANY of this person's identities.
+  // moment it's inserted — same scope-aware match as the load.
   useEffect(() => {
     if (!tableReady) return;
-    const idSet = new Set(identityIds);
     const channel = supabase
-      .channel(`notifications:${roleId}`)
+      .channel(`notifications:${selfKey}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'notifications',
       }, (payload) => {
         const n = payload.new as AppNotification;
-        if (n.target_roles?.some((id) => idSet.has(id)) && !getClearedSet(roleId).has(n.id)) {
+        if (isForMe(n) && (!floor || n.created_at >= floor) && !getClearedSet(selfKey).has(n.id)) {
           setNotifications(prev => (prev.some((x) => x.id === n.id) ? prev : [n, ...prev]));
         }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identityKey, roleId, tableReady]);
+  }, [identityKey, personId, selfKey, floor, tableReady, isForMe]);
 
-  const unreadCount = notifications.filter(n => !n.read_by?.includes(roleId)).length;
+  const unreadCount = notifications.filter(n => !n.read_by?.includes(selfKey)).length;
 
   function markRead(id: string) {
     setNotifications(prev =>
-      prev.map(n => n.id === id && !n.read_by.includes(roleId)
-        ? { ...n, read_by: [...n.read_by, roleId] }
+      prev.map(n => n.id === id && !n.read_by.includes(selfKey)
+        ? { ...n, read_by: [...n.read_by, selfKey] }
         : n
       )
     );
@@ -142,8 +164,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       .select('read_by').eq('id', id).limit(1).returns<{ read_by: string[] | null }[]>()
       .then(({ data }) => {
         const row = data?.[0];
-        if (row && !row.read_by?.includes(roleId)) {
-          updateRows('notifications', { read_by: [...(row.read_by || []), roleId] })
+        if (row && !row.read_by?.includes(selfKey)) {
+          updateRows('notifications', { read_by: [...(row.read_by || []), selfKey] })
             .eq('id', id)
             .then(() => {}, () => {});
         }
@@ -152,7 +174,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   function markAllRead() {
     setNotifications(prev =>
-      prev.map(n => n.read_by.includes(roleId) ? n : { ...n, read_by: [...n.read_by, roleId] })
+      prev.map(n => n.read_by.includes(selfKey) ? n : { ...n, read_by: [...n.read_by, selfKey] })
     );
     // Optimistic — don't wait for DB
   }
@@ -160,12 +182,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   function clearAll() {
     const current = notifications;
     // Persistent per-profile pointer (survives reload, no DB delete needed).
-    addCleared(roleId, current.map((n) => n.id));
+    addCleared(selfKey, current.map((n) => n.id));
     setNotifications([]); // optimistic — instant for this profile
     // Also write the DB marker when the column exists (best-effort, cross-device).
     current.forEach((n) => {
-      if (n.cleared_by?.includes(roleId)) return;
-      updateRows('notifications', { cleared_by: [...(n.cleared_by || []), roleId] })
+      if (n.cleared_by?.includes(selfKey)) return;
+      updateRows('notifications', { cleared_by: [...(n.cleared_by || []), selfKey] })
         .eq('id', n.id)
         .then(() => {}, () => {});
     });

@@ -130,6 +130,7 @@ export function useMentionNotifier() {
         actor_name: activeProfile.name,
         actor_role: activeProfile.roleLabel,
         read_by: [],
+        scope: 'personal', // an @-mention — match strictly by personal id
       }).then(() => { delivered = true; }, () => {});
       // When the tag is attached to a record, leave a persistent trace in that
       // record's Notes thread (so the tagged person can see what was said) and
@@ -311,6 +312,7 @@ export async function postNote(opts: {
       route: ref.route ?? null,
       actor_name: actor.name,
       actor_role: actor.role,
+      scope: 'personal', // an @-mention — match strictly by personal id
     });
     if (note?.id) {
       await createReceipts({ noteId: note.id, entityType: ref.entityType, entityId: ref.entityId, mentionIds: targets, delivered });
@@ -348,6 +350,7 @@ export async function notifyWatchers(opts: {
     route: opts.ref.route ?? null,
     actor_name: opts.actor.name,
     actor_role: opts.actor.role,
+    scope: 'personal', // specific watchers, not a role audience
   });
 }
 

@@ -180,6 +180,7 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
             route: route ?? null,
             actor_name: actor.name,
             actor_role: actor.role,
+            scope: 'personal', // a CC to specific people
           });
         }
       }

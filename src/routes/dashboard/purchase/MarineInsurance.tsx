@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
@@ -13,6 +14,7 @@ type Panel = 'topup' | 'ledger' | null;
 type LedgerRow = Database['public']['Tables']['marine_insurance']['Row'];
 
 export function MarineInsurance() {
+  const { t } = useTranslation();
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
@@ -62,7 +64,7 @@ export function MarineInsurance() {
     }).select('*').single();
 
     if (error) {
-      toast.error(`Save failed: ${error.message}`);
+      toast.error(t('marine.saveFailed', { message: error.message }));
       return;
     }
     if (data) setLedger(prev => [data as LedgerRow, ...prev]);
@@ -76,7 +78,7 @@ export function MarineInsurance() {
     );
     if (hits.length) {
       const h = hits[0];
-      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      toast.error(t('marine.blacklistHit', { value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
     }
     setSaved(true);
     setTimeout(() => { setPanel(null); setSaved(false); setForm({ amount: '', reference: '', date: today, mode: 'NEFT', notes: '' }); }, 1600);
@@ -98,7 +100,7 @@ export function MarineInsurance() {
           <KpiInfoButton info={{ title: 'Marine Insurance Balance', what: 'Running prepaid balance on the open marine insurance policy. Every supplier dispatch auto-deducts the insured value. Balance drops below ₹1 Cr triggers a top-up alert.', source: 'Form entry', formLabel: 'Top-up form', formPath: '/dashboard/purchase/marine', note: 'Top-ups logged manually via the "Top up" slide panel. Auto-deduction is applied per dispatch entry.' }} />
           <div className="flex items-start justify-between">
             <div>
-              <div className="text-xs text-slate-500 mb-1">Marine insurance balance</div>
+              <div className="text-xs text-slate-500 mb-1">{t('marine.balanceLabel')}</div>
               <div className="text-3xl font-extrabold num">
                 ₹ {currentBalance.toFixed(2)} Cr{' '}
                 <span className="text-base font-medium text-slate-400">/ ₹10 Cr</span>
@@ -112,42 +114,42 @@ export function MarineInsurance() {
           </div>
           <div className="progress mt-3 mb-1"><div style={{ width: '95%' }}></div></div>
           <div className="flex items-center justify-between text-xs text-slate-500 mb-3">
-            <span>Threshold ₹1 Cr</span>
-            <span className="font-semibold text-slate-700">95% remaining</span>
+            <span>{t('marine.threshold')} ₹1 Cr</span>
+            <span className="font-semibold text-slate-700">95% {t('marine.remaining')}</span>
           </div>
-          <div className="font-semibold text-sm">Auto-deduct: live</div>
+          <div className="font-semibold text-sm">{t('marine.autoDeductLive')}</div>
           <div className="text-xs text-slate-500 mb-3">
-            Every supplier dispatch deducts. Top-up alert fires on threshold breach.
+            {t('marine.autoDeductHint')}
           </div>
           <div className="flex gap-2">
             <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setPanel('topup')}>
-              Top up
+              {t('marine.topUp')}
             </button>
             <button className="btn-outline pill px-4 py-2 font-semibold text-sm" onClick={() => setPanel('ledger')}>
-              View ledger
+              {t('marine.viewLedger')}
             </button>
           </div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Marine Insurance Top-ups FY', what: 'Number of times the marine insurance prepaid balance has been topped up during the current financial year. Frequent top-ups may indicate high dispatch volume or underestimated policy size.', source: 'Form entry', formLabel: 'Top-up form', formPath: '/dashboard/purchase/marine' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Top-ups this FY</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('marine.topUpsThisFy')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">2</div>
-          <div className="text-[11px] text-slate-500 mt-1">last on 18 Mar</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('marine.lastOn')} 18 Mar</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Avg Deduction per Dispatch', what: 'Average marine insurance amount deducted for each supplier dispatch this month. Calculated from total MTD deductions divided by dispatch count. Reflects average shipment insured value.', source: 'Form entry', formLabel: 'Dispatch log (auto-deduct)', formPath: '/dashboard/purchase/marine', note: 'Deductions come from MARINE_LEDGER entries with type "deduct".' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Avg deduction / dispatch</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('marine.avgDeductionDispatch')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">₹ 16 L</div>
-          <div className="text-[11px] text-slate-500 mt-1">31 dispatches MTD</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('marine.dispatchesMtd', { count: 31 })}</div>
         </div>
       </div>
 
       {/* Ledger table */}
       <div className="card p-6" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Marine Insurance Ledger', what: 'Transaction history of the marine insurance prepaid balance — all top-ups (credits) and dispatch deductions (debits). Running balance is shown per row. New top-ups entered via the "Top up" slide panel; deductions are auto-logged per supplier dispatch.', source: 'Form entry', formLabel: 'Top-up / View ledger panel', formPath: '/dashboard/purchase/marine', note: 'Data from MARINE_LEDGER mock (mockData.ts). Future: Supabase marine_ledger table.' }} />
-        <div className="text-base font-bold mb-3">Recent ledger</div>
+        <div className="text-base font-bold mb-3">{t('marine.recentLedger')}</div>
         {loadError ? (
-          <ErrorState title="Couldn't load the ledger" message="The marine insurance ledger failed to load."
+          <ErrorState title={t('marine.loadErrorTitle')} message={t('marine.loadErrorMessage')}
             onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
         ) : loading ? (
           <SkeletonRows rows={6} />
@@ -156,8 +158,8 @@ export function MarineInsurance() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Date</th><th>Type</th><th>Reference</th>
-                <th className="num">Amount</th><th className="num">Balance</th>
+                <th>{t('marine.colDate')}</th><th>{t('marine.colType')}</th><th>{t('marine.colReference')}</th>
+                <th className="num">{t('marine.colAmount')}</th><th className="num">{t('marine.colBalance')}</th>
               </tr>
             </thead>
             <tbody>
@@ -166,8 +168,8 @@ export function MarineInsurance() {
                   <td className="text-slate-500">{l.date}</td>
                   <td>
                     {l.type === 'top_up'
-                      ? <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A' }}>TOP-UP</span>
-                      : <span className="badge" style={{ background: '#FEE2E2', color: '#DC2626' }}>DEDUCT</span>
+                      ? <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A' }}>{t('marine.badgeTopUp')}</span>
+                      : <span className="badge" style={{ background: '#FEE2E2', color: '#DC2626' }}>{t('marine.badgeDeduct')}</span>
                     }
                   </td>
                   <td>{l.reference || '—'}</td>
@@ -178,7 +180,7 @@ export function MarineInsurance() {
                 </tr>
               ))}
               {ledger.length === 0 && (
-                <tr><td colSpan={5} className="text-center text-slate-400 py-6 text-sm">No ledger entries yet</td></tr>
+                <tr><td colSpan={5} className="text-center text-slate-400 py-6 text-sm">{t('marine.noLedgerEntries')}</td></tr>
               )}
             </tbody>
           </table>
@@ -187,22 +189,22 @@ export function MarineInsurance() {
       </div>
 
       {/* Top-up panel */}
-      <SlidePanel open={panel === 'topup'} onClose={handleClose} title="Top up marine insurance" subtitle="Marine Insurance · Purchase">
-        <PanelField label="Top-up amount (₹ Cr) *">
+      <SlidePanel open={panel === 'topup'} onClose={handleClose} title={t('marine.topUpPanelTitle')} subtitle={t('marine.topUpPanelSubtitle')}>
+        <PanelField label={t('marine.topUpAmountLabel')}>
           <PanelInput type="number" step="0.01" placeholder="e.g. 0.50" value={form.amount} onChange={e => set('amount', e.target.value)} />
         </PanelField>
 
         {newBalance && (
           <div style={{ margin: '-8px 0 16px', padding: '10px 14px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 12, fontSize: 13 }}>
-            New balance after top-up: <strong>₹ {newBalance} Cr</strong>
+            {t('marine.newBalanceAfter')} <strong>₹ {newBalance} Cr</strong>
           </div>
         )}
 
         <PanelRow>
-          <PanelField label="Reference / policy no">
+          <PanelField label={t('marine.referenceLabel')}>
             <PanelInput placeholder="e.g. POL-2026-4421" value={form.reference} onChange={e => set('reference', e.target.value)} />
           </PanelField>
-          <PanelField label="Payment mode">
+          <PanelField label={t('marine.paymentModeLabel')}>
             <PanelSelect value={form.mode} onChange={e => set('mode', e.target.value)}>
               <option>NEFT</option>
               <option>RTGS</option>
@@ -212,23 +214,23 @@ export function MarineInsurance() {
           </PanelField>
         </PanelRow>
 
-        <PanelField label="Date">
+        <PanelField label={t('marine.dateLabel')}>
           <PanelInput type="date" value={form.date} onChange={e => set('date', e.target.value)} />
         </PanelField>
 
-        <PanelField label="Notes">
-          <PanelTextarea placeholder="Any remarks about this top-up…" value={form.notes} onChange={e => set('notes', e.target.value)} />
+        <PanelField label={t('marine.notesLabel')}>
+          <PanelTextarea placeholder={t('marine.notesPlaceholder')} value={form.notes} onChange={e => set('notes', e.target.value)} />
         </PanelField>
 
         <PanelDivider />
 
         <OcrUpload
-          label="Payment receipt / policy document"
-          hint="Upload bank receipt — AI reads amount, reference and date"
+          label={t('marine.ocrLabel')}
+          hint={t('marine.ocrHint')}
           fields={[
-            { key: 'amount',    label: 'Amount (₹)',   value: '1,50,000' },
-            { key: 'reference', label: 'UTR / Ref No', value: 'NEFT2026060900123' },
-            { key: 'mode',      label: 'Mode',         value: 'NEFT' },
+            { key: 'amount',    label: t('marine.ocrFieldAmount'),    value: '1,50,000' },
+            { key: 'reference', label: t('marine.ocrFieldRef'),       value: 'NEFT2026060900123' },
+            { key: 'mode',      label: t('marine.ocrFieldMode'),      value: 'NEFT' },
           ]}
           onExtracted={data => {
             if (data.amount)    set('amount',    data.amount);
@@ -241,16 +243,16 @@ export function MarineInsurance() {
           saved={saved}
           onCancel={handleClose}
           onSave={handleSave}
-          saveLabel="Record top-up"
-          successLabel="Top-up recorded"
-          successSub="Balance updated · ledger entry created"
+          saveLabel={t('marine.recordTopUp')}
+          successLabel={t('marine.topUpRecorded')}
+          successSub={t('marine.topUpRecordedSub')}
           disabled={!form.amount.trim()}
-          requiredHint="Enter the top-up amount to continue"
+          requiredHint={t('marine.requiredHint')}
         />
       </SlidePanel>
 
       {/* Ledger view panel */}
-      <SlidePanel open={panel === 'ledger'} onClose={handleClose} title="Full ledger" subtitle="Marine Insurance · All entries">
+      <SlidePanel open={panel === 'ledger'} onClose={handleClose} title={t('marine.fullLedgerTitle')} subtitle={t('marine.fullLedgerSubtitle')}>
         {/* Filter tabs */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
           {(['all', 'top-up', 'deduct'] as const).map(f => (
@@ -266,11 +268,11 @@ export function MarineInsurance() {
                 cursor: 'pointer', fontFamily: 'inherit',
               }}
             >
-              {f === 'all' ? 'All' : f === 'top-up' ? 'Top-ups' : 'Deductions'}
+              {f === 'all' ? t('marine.filterAll') : f === 'top-up' ? t('marine.filterTopUps') : t('marine.filterDeductions')}
             </button>
           ))}
           <span style={{ marginLeft: 'auto', fontSize: 12, color: '#94A3B8', alignSelf: 'center' }}>
-            {ledgerList.length} entries
+            {t('marine.entriesCount', { count: ledgerList.length })}
           </span>
         </div>
 
@@ -289,12 +291,12 @@ export function MarineInsurance() {
                 <div style={{ fontSize: 13, fontWeight: 700, color: l.amount > 0 ? '#16A34A' : '#DC2626' }}>
                   {l.amount > 0 ? '+' : ''}₹ {Math.abs(l.amount)} Cr
                 </div>
-                <div style={{ fontSize: 11, color: '#94A3B8' }}>Bal ₹ {l.balance} Cr</div>
+                <div style={{ fontSize: 11, color: '#94A3B8' }}>{t('marine.balShort')} ₹ {l.balance} Cr</div>
               </div>
             </div>
           ))}
           {ledgerList.length === 0 && (
-            <div style={{ textAlign: 'center', color: '#94A3B8', padding: '24px 0', fontSize: 13 }}>No entries</div>
+            <div style={{ textAlign: 'center', color: '#94A3B8', padding: '24px 0', fontSize: 13 }}>{t('marine.noEntries')}</div>
           )}
         </div>
       </SlidePanel>

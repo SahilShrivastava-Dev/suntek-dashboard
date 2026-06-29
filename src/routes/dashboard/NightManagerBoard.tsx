@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { upsertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
@@ -123,6 +124,7 @@ const createCustomIcon = (initials: string, status: string) => {
 };
 
 export function NightManagerBoard() {
+  const { t } = useTranslation();
   const toast = useToast();
   const [liveDuty, setLiveDuty] = useState<CheckInLog[]>([]);
   const [deviceMappings, setDeviceMappings] = useState<DeviceMappingRow[]>([]);
@@ -164,26 +166,26 @@ export function NightManagerBoard() {
         const isGuest = !row.employee_id;
         const ip = row.ip_address;
         
-        let name = row.profiles?.name || 'Live Check-In';
+        let name = row.profiles?.name || t('nightBoard.liveCheckIn');
         let role = row.profiles?.role || 'L1';
         let phone = row.profiles?.phone || null;
         let isMapped = false;
-        
+
         if (isGuest && ip) {
           const mapping = activeMappings.find((m) => m.ip_address === ip);
           if (mapping) {
             name = mapping.name;
-            role = mapping.department ? `${mapping.department} (Guest)` : 'Guest';
+            role = mapping.department ? t('nightBoard.deptGuest', { dept: mapping.department }) : t('nightBoard.guest');
             phone = mapping.phone;
             isMapped = true;
           } else {
-            name = `Guest (${ip})`;
-            role = 'Unknown Department';
+            name = t('nightBoard.guestWithIp', { ip });
+            role = t('nightBoard.unknownDepartment');
             isMapped = false;
           }
         }
-        
-        const plant = row.plants?.name || 'Unknown Plant';
+
+        const plant = row.plants?.name || t('nightBoard.unknownPlant');
         const coords = getCoords(plant, row.lat, row.lng, index);
         
         return {
@@ -193,7 +195,7 @@ export function NightManagerBoard() {
           plant,
           coords,
           status: row.is_on_site ? 'green' : 'red',
-          shift: 'Live Check-in',
+          shift: t('nightBoard.liveCheckinShift'),
           last: formatRelativeTime(row.submitted_at),
           submitted_at: row.submitted_at,
           initial: name.substring(0, 2).toUpperCase(),
@@ -265,7 +267,7 @@ export function NightManagerBoard() {
       });
 
       if (error) {
-        toast.error(`Error saving mapping: ${error.message}`);
+        toast.error(t('nightBoard.errorSavingMapping', { message: error.message }));
       } else {
         setIsModalOpen(false);
         setModalData(null);
@@ -283,22 +285,22 @@ export function NightManagerBoard() {
       {/* KPIs */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">On duty now</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.onDutyNow')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.filter(d => d.status === 'green').length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">across {new Set(liveDuty.map(d => d.plant)).size || 0} factories</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('nightBoard.acrossFactories', { count: new Set(liveDuty.map(d => d.plant)).size || 0 })}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Geo-tagged check-ins</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.geoTaggedCheckins')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">today</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('nightBoard.today')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Out-of-zone</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.outOfZone')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{liveDuty.filter(d => d.status === 'red').length}</div>
-          <div className="text-[11px] text-amber-600 mt-1">flagged</div>
+          <div className="text-[11px] text-amber-600 mt-1">{t('nightBoard.flagged')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Photo proof %</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.photoProofPct')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-slate-900">
             {liveDuty.length > 0 ? Math.round((liveDuty.filter(d => d.photo_url).length / liveDuty.length) * 100) : 0}%
           </div>
@@ -311,8 +313,8 @@ export function NightManagerBoard() {
         <div className="col-span-12 lg:col-span-7 card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
           <div className="flex items-center justify-between mb-2">
             <div>
-              <div className="text-base font-bold text-slate-900">Live check-in map</div>
-              <div className="text-xs text-slate-500">GPS coordinates tagged · click pins to see role details & photo</div>
+              <div className="text-base font-bold text-slate-900">{t('nightBoard.liveCheckinMap')}</div>
+              <div className="text-xs text-slate-500">{t('nightBoard.mapSubtitle')}</div>
             </div>
             {selectedCheckIn && (
               <button 
@@ -323,7 +325,7 @@ export function NightManagerBoard() {
                 }}
                 className="text-xs px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-600 border border-amber-200 rounded-lg shadow-sm font-semibold transition-colors"
               >
-                Reset Map
+                {t('nightBoard.resetMap')}
               </button>
             )}
           </div>
@@ -365,27 +367,27 @@ export function NightManagerBoard() {
                       </div>
 
                       <div className="space-y-1 text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-100 mb-2">
-                        <div><strong className="text-slate-500">Plant:</strong> <span className="font-semibold">{d.plant}</span></div>
-                        <div><strong className="text-slate-500">Seen:</strong> <span className="font-semibold">{d.last}</span></div>
+                        <div><strong className="text-slate-500">{t('nightBoard.plantLabel')}</strong> <span className="font-semibold">{d.plant}</span></div>
+                        <div><strong className="text-slate-500">{t('nightBoard.seenLabel')}</strong> <span className="font-semibold">{d.last}</span></div>
                         {d.ip_address && (
                           <div>
-                            <strong className="text-slate-500">Device IP:</strong> <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[10px]">{d.ip_address}</code>
+                            <strong className="text-slate-500">{t('nightBoard.deviceIpLabel')}</strong> <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[10px]">{d.ip_address}</code>
                           </div>
                         )}
                         {d.phone && (
-                          <div><strong className="text-slate-500">Phone:</strong> <span className="font-semibold">{d.phone}</span></div>
+                          <div><strong className="text-slate-500">{t('nightBoard.phoneLabel')}</strong> <span className="font-semibold">{d.phone}</span></div>
                         )}
                         <div>
-                          <strong className="text-slate-500">Status:</strong>{' '}
+                          <strong className="text-slate-500">{t('nightBoard.statusLabel')}</strong>{' '}
                           <span className={`font-bold ${d.status === 'green' ? 'text-emerald-600' : d.status === 'amber' ? 'text-amber-600' : 'text-rose-600'}`}>
-                            {d.status === 'green' ? 'On Site · In Zone' : d.status === 'amber' ? 'On Site · Zone Edge' : 'Out of Zone'}
+                            {d.status === 'green' ? t('nightBoard.statusInZone') : d.status === 'amber' ? t('nightBoard.statusZoneEdge') : t('nightBoard.statusOutOfZone')}
                           </span>
                         </div>
                       </div>
 
                       {d.photo_url && (
                         <div className="mb-2 rounded-lg overflow-hidden border border-slate-100 max-h-[120px] flex items-center justify-center bg-slate-50">
-                          <img src={d.photo_url} alt="Compliance Proof" className="w-full h-full object-cover" />
+                          <img src={d.photo_url} alt={t('nightBoard.complianceProof')} className="w-full h-full object-cover" />
                         </div>
                       )}
 
@@ -394,7 +396,7 @@ export function NightManagerBoard() {
                           onClick={() => openMappingModal(d)}
                           className="w-full text-center py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm shadow-blue-500/10"
                         >
-                          {d.isMapped ? 'Edit IP Details' : 'Register IP Details'}
+                          {d.isMapped ? t('nightBoard.editIpDetails') : t('nightBoard.registerIpDetails')}
                         </button>
                       )}
                     </div>
@@ -407,23 +409,23 @@ export function NightManagerBoard() {
           <div className="flex items-center gap-3 mt-3 text-[11px] text-slate-600 font-semibold">
             <span className="flex items-center gap-1.5">
               <span className="status-dot sd-green animate-pulse" style={{ width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block' }}></span>
-              On site · in zone
+              {t('nightBoard.legendInZone')}
             </span>
             <span className="flex items-center gap-1.5">
               <span className="status-dot sd-amber" style={{ width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block' }}></span>
-              On site · zone edge
+              {t('nightBoard.legendZoneEdge')}
             </span>
             <span className="flex items-center gap-1.5">
               <span className="status-dot sd-red" style={{ width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block' }}></span>
-              Out of zone
+              {t('nightBoard.legendOutOfZone')}
             </span>
           </div>
         </div>
 
         {/* Duty list */}
         <div className="col-span-12 lg:col-span-5 card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
-          <div className="text-base font-bold mb-1 text-slate-900 font-serif serif text-lg">On duty · current shift</div>
-          <div className="text-[11px] text-slate-500 mb-4">Latest check-ins automatically appear at the top. Click any to locate them.</div>
+          <div className="text-base font-bold mb-1 text-slate-900 font-serif serif text-lg">{t('nightBoard.onDutyCurrentShift')}</div>
+          <div className="text-[11px] text-slate-500 mb-4">{t('nightBoard.dutyListSubtitle')}</div>
           
           <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
             {sortedDuty.map((d, i) => {
@@ -459,9 +461,9 @@ export function NightManagerBoard() {
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                               : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 animate-pulse'
                           }`}
-                          title={`IP: ${d.ip_address}. Click to manage assignment.`}
+                          title={t('nightBoard.ipTooltip', { ip: d.ip_address })}
                         >
-                          {d.isMapped ? 'Mapped' : 'Unmapped IP'}
+                          {d.isMapped ? t('nightBoard.mapped') : t('nightBoard.unmappedIp')}
                         </button>
                       )}
                     </div>
@@ -472,7 +474,7 @@ export function NightManagerBoard() {
                       <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: dotColor, display: 'inline-block', flexShrink: 0 }}></span>
                       {d.last}
                     </div>
-                    <div className="text-[10px] text-slate-400 font-semibold mt-1">GPS · pic</div>
+                    <div className="text-[10px] text-slate-400 font-semibold mt-1">{t('nightBoard.gpsPic')}</div>
                   </div>
                 </div>
               );
@@ -486,7 +488,7 @@ export function NightManagerBoard() {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadein" style={{ animation: 'fadein 200ms ease' }}>
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 border border-slate-100 overflow-hidden relative">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-extrabold text-slate-950">Assign Device IP Details</h3>
+              <h3 className="text-lg font-extrabold text-slate-950">{t('nightBoard.assignDeviceIp')}</h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
                 className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors font-bold"
@@ -500,7 +502,7 @@ export function NightManagerBoard() {
                 IP
               </div>
               <div>
-                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Device IP Address</div>
+                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t('nightBoard.deviceIpAddress')}</div>
                 <div className="font-mono text-sm font-semibold text-slate-700">{modalData.ip_address}</div>
               </div>
             </div>
@@ -508,41 +510,41 @@ export function NightManagerBoard() {
             <form onSubmit={handleSaveMapping} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                  Full Name *
+                  {t('nightBoard.fullName')}
                 </label>
                 <input
                   type="text"
                   required
                   value={modalData.name}
                   onChange={e => setModalData({ ...modalData, name: e.target.value })}
-                  placeholder="e.g. Anooj Kumar"
+                  placeholder={t('nightBoard.fullNamePlaceholder')}
                   className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm font-medium"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                  Department / Role *
+                  {t('nightBoard.departmentRole')}
                 </label>
                 <input
                   type="text"
                   required
                   value={modalData.department}
                   onChange={e => setModalData({ ...modalData, department: e.target.value })}
-                  placeholder="e.g. Operator, Helper, Security"
+                  placeholder={t('nightBoard.departmentPlaceholder')}
                   className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm font-medium"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                  Phone Number
+                  {t('nightBoard.phoneNumber')}
                 </label>
                 <input
                   type="tel"
                   value={modalData.phone}
                   onChange={e => setModalData({ ...modalData, phone: e.target.value })}
-                  placeholder="e.g. +91 98765 43210"
+                  placeholder={t('nightBoard.phonePlaceholder')}
                   className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm font-medium"
                 />
               </div>
@@ -553,14 +555,14 @@ export function NightManagerBoard() {
                   onClick={() => setIsModalOpen(false)}
                   className="flex-1 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 text-sm bg-slate-50 hover:bg-slate-100 transition-colors"
                 >
-                  Cancel
+                  {t('nightBoard.cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingMapping}
                   className="flex-1 py-3 rounded-xl font-bold text-white text-sm bg-blue-600 hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/20 disabled:bg-slate-400"
                 >
-                  {isSubmittingMapping ? 'Saving...' : 'Register Device'}
+                  {isSubmittingMapping ? t('nightBoard.saving') : t('nightBoard.registerDevice')}
                 </button>
               </div>
             </form>

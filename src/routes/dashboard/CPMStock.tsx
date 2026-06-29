@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { insertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
@@ -17,6 +18,7 @@ interface BulkRow {
 }
 
 export function CPMStock() {
+  const { t } = useTranslation();
   const toast = useToast();
   const [storeSearch, setStoreSearch] = useState('');
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -73,7 +75,7 @@ export function CPMStock() {
 
   // Average tank fill — replaces the hardcoded 68% KPI.
   const avgTankLevel = tanks.length
-    ? Math.round(tanks.reduce((s, t) => s + t.level_pct, 0) / tanks.length)
+    ? Math.round(tanks.reduce((s, tk) => s + tk.level_pct, 0) / tanks.length)
     : 0;
 
   function addBulkRow() {
@@ -93,7 +95,7 @@ export function CPMStock() {
     if (filled.length === 0) return;
     const today = new Date().toISOString().split('T')[0];
     const plantId = bulkPlant || dbPlants[0]?.id;
-    if (!plantId) { toast.error('No plant selected. Please select a plant.'); return; }
+    if (!plantId) { toast.error(t('cpmStock.noPlantSelected')); return; }
     const inserts = filled.map(r => ({
       product: r.item,
       quantity: parseFloat(r.adjustment) * (r.direction === 'out' ? -1 : 1),
@@ -102,7 +104,7 @@ export function CPMStock() {
       date: today,
     }));
     const { error } = await insertRows('stock_levels', inserts);
-    if (error) { toast.error(`Save failed: ${error.message}`); return; }
+    if (error) { toast.error(t('cpmStock.saveFailed', { message: error.message })); return; }
     const { data } = await supabase.from('stock_levels').select('*, plants(name)')
       .order('updated_at', { ascending: false }).returns<StockRow[]>();
     setStockItems(data || []);
@@ -125,26 +127,26 @@ export function CPMStock() {
       {/* KPIs */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total stock records</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('cpmStock.totalStockRecords')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{stockItems.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">across all plants</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('cpmStock.acrossAllPlants')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total quantity</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('cpmStock.totalQuantity')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">
             {stockItems.reduce((s, i) => s + (i.quantity || 0), 0).toFixed(0)}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">units on record</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('cpmStock.unitsOnRecord')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Products tracked</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('cpmStock.productsTracked')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">
             {new Set(stockItems.map(i => i.product)).size}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">unique products</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('cpmStock.uniqueProducts')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Tank capacity</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('cpmStock.tankCapacity')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{avgTankLevel}%</div>
           <div className="progress mt-2"><div style={{ width: `${avgTankLevel}%` }}></div></div>
         </div>
@@ -153,8 +155,8 @@ export function CPMStock() {
       {loadError && (
         <div className="card p-4 mb-5">
           <ErrorState
-            title="Couldn't load stock data"
-            message="Tanks, the CP matrix, and store items failed to load."
+            title={t('cpmStock.loadErrorTitle')}
+            message={t('cpmStock.loadErrorMessage')}
             onRetry={() => { setLoading(true); setLoadError(false); load(); }}
           />
         </div>
@@ -165,17 +167,17 @@ export function CPMStock() {
         <div className="col-span-12 lg:col-span-7 card p-6">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className="text-base font-bold">CP density × location</div>
-              <div className="text-xs text-slate-500">Drums on hand · cell shading shows volume</div>
+              <div className="text-base font-bold">{t('cpmStock.cpDensityLocation')}</div>
+              <div className="text-xs text-slate-500">{t('cpmStock.drumsOnHandHint')}</div>
             </div>
           </div>
           <div className="overflow-x-auto scroll-x">
             <table className="dt">
               <thead>
                 <tr>
-                  <th>Location</th>
-                  {densities.map(d => <th key={d} className="num">d {d}</th>)}
-                  <th className="num">Total</th>
+                  <th>{t('cpmStock.location')}</th>
+                  {densities.map(d => <th key={d} className="num">{t('cpmStock.densityCol', { d })}</th>)}
+                  <th className="num">{t('cpmStock.total')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -205,8 +207,8 @@ export function CPMStock() {
         </div>
 
         <div className="col-span-12 lg:col-span-5 card p-6">
-          <div className="text-base font-bold">Tank levels · port + factory</div>
-          <div className="text-xs text-slate-500 mb-4">Pictorial only — capacity bars per tank</div>
+          <div className="text-base font-bold">{t('cpmStock.tankLevels')}</div>
+          <div className="text-xs text-slate-500 mb-4">{t('cpmStock.tankLevelsHint')}</div>
           <div className="space-y-3">
             {tanks.map(tk => {
               const color = tk.alert ? '#DC2626' : tk.level_pct > 70 ? '#16A34A' : tk.level_pct > 30 ? '#F47651' : '#D97706';
@@ -215,12 +217,12 @@ export function CPMStock() {
                   <div className="flex items-center justify-between mb-1.5">
                     <div>
                       <div className="font-semibold text-sm">{tk.name}</div>
-                      <div className="text-[11px] text-slate-500">{tk.location} · cap {tk.capacity} {tk.unit}</div>
+                      <div className="text-[11px] text-slate-500">{tk.location} · {t('cpmStock.cap')} {tk.capacity} {tk.unit}</div>
                     </div>
                     <div className="text-right">
                       <div className="font-bold num text-sm">{Math.round((tk.capacity ?? 0) * tk.level_pct / 100)} {tk.unit}</div>
                       <div className="text-[11px] font-semibold" style={{ color }}>
-                        {tk.level_pct}%{tk.alert ? ' · low' : ''}
+                        {tk.level_pct}%{tk.alert ? ' · ' + t('cpmStock.low') : ''}
                       </div>
                     </div>
                   </div>
@@ -231,7 +233,7 @@ export function CPMStock() {
               );
             })}
             {!loading && tanks.length === 0 && (
-              <div className="text-center text-slate-400 py-6 text-sm">No tanks configured</div>
+              <div className="text-center text-slate-400 py-6 text-sm">{t('cpmStock.noTanksConfigured')}</div>
             )}
           </div>
         </div>
@@ -241,14 +243,14 @@ export function CPMStock() {
       <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">Store items · 400+ SKUs</div>
-            <div className="text-xs text-slate-500">Per-item thresholds · alerts auto-fire on breach</div>
+            <div className="text-base font-bold">{t('cpmStock.storeItems')}</div>
+            <div className="text-xs text-slate-500">{t('cpmStock.storeItemsHint')}</div>
           </div>
           <div className="flex items-center gap-2">
             <input
               value={storeSearch}
               onChange={e => setStoreSearch(e.target.value)}
-              placeholder="Search item …"
+              placeholder={t('cpmStock.searchItemPlaceholder')}
               className="px-4 py-2 bg-slate-50 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
             />
             <button
@@ -258,7 +260,7 @@ export function CPMStock() {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M12 5v14M5 12h14"/>
               </svg>
-              Bulk update
+              {t('cpmStock.bulkUpdate')}
             </button>
           </div>
         </div>
@@ -269,8 +271,8 @@ export function CPMStock() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Product</th><th>Plant</th><th className="num">Density</th>
-                <th className="num">Qty</th><th>Date</th>
+                <th>{t('cpmStock.product')}</th><th>{t('cpmStock.plant')}</th><th className="num">{t('cpmStock.density')}</th>
+                <th className="num">{t('cpmStock.qty')}</th><th>{t('cpmStock.date')}</th>
               </tr>
             </thead>
             <tbody>
@@ -284,7 +286,7 @@ export function CPMStock() {
                 </tr>
               ))}
               {filteredItems.length === 0 && (
-                <tr><td colSpan={5} className="text-center text-slate-400 py-6 text-sm">No stock records yet — add via bulk update</td></tr>
+                <tr><td colSpan={5} className="text-center text-slate-400 py-6 text-sm">{t('cpmStock.noStockRecords')}</td></tr>
               )}
             </tbody>
           </table>
@@ -303,9 +305,9 @@ export function CPMStock() {
             {/* Header */}
             <div className="flex items-start justify-between mb-5">
               <div>
-                <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">CPM Stock · Store Items</div>
-                <div className="text-xl font-bold">Bulk stock update</div>
-                <div className="text-xs text-slate-500 mt-1">Add multiple stock movements at once · each row is one item</div>
+                <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">{t('cpmStock.modalEyebrow')}</div>
+                <div className="text-xl font-bold">{t('cpmStock.bulkStockUpdate')}</div>
+                <div className="text-xs text-slate-500 mt-1">{t('cpmStock.bulkStockUpdateHint')}</div>
               </div>
               <button
                 className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center shrink-0 ml-4 transition-colors"
@@ -319,7 +321,7 @@ export function CPMStock() {
 
             {dbPlants.length > 0 && (
               <div className="mb-4">
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Plant</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('cpmStock.plant')}</label>
                 <select
                   value={bulkPlant}
                   onChange={e => setBulkPlant(e.target.value)}
@@ -337,17 +339,17 @@ export function CPMStock() {
                     <path d="M20 6 9 17l-5-5"/>
                   </svg>
                 </div>
-                <div className="font-semibold text-green-700">Stock updated</div>
-                <div className="text-xs text-slate-500 mt-1">Ledger entries created · alerts re-evaluated…</div>
+                <div className="font-semibold text-green-700">{t('cpmStock.stockUpdated')}</div>
+                <div className="text-xs text-slate-500 mt-1">{t('cpmStock.stockUpdatedHint')}</div>
               </div>
             ) : (
               <>
                 {/* Column headers */}
                 <div className="grid grid-cols-[2fr_1fr_80px_2fr_24px] gap-2 mb-2 px-1">
-                  <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Item name</div>
-                  <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Qty</div>
-                  <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">In / Out</div>
-                  <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Note</div>
+                  <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{t('cpmStock.itemName')}</div>
+                  <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{t('cpmStock.qty')}</div>
+                  <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{t('cpmStock.inOut')}</div>
+                  <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{t('cpmStock.note')}</div>
                   <div />
                 </div>
 
@@ -373,19 +375,19 @@ export function CPMStock() {
                           onClick={() => updateBulkRow(idx, 'direction', 'in')}
                           className={`flex-1 py-2 transition-colors ${row.direction === 'in' ? 'bg-green-500 text-white' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
                         >
-                          IN
+                          {t('cpmStock.in')}
                         </button>
                         <button
                           onClick={() => updateBulkRow(idx, 'direction', 'out')}
                           className={`flex-1 py-2 transition-colors ${row.direction === 'out' ? 'bg-red-500 text-white' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
                         >
-                          OUT
+                          {t('cpmStock.out')}
                         </button>
                       </div>
                       <input
                         value={row.note}
                         onChange={e => updateBulkRow(idx, 'note', e.target.value)}
-                        placeholder="reason…"
+                        placeholder={t('cpmStock.reasonPlaceholder')}
                         className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 transition"
                       />
                       <button
@@ -409,13 +411,13 @@ export function CPMStock() {
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M12 5v14M5 12h14"/>
                   </svg>
-                  Add another item
+                  {t('cpmStock.addAnotherItem')}
                 </button>
 
                 {/* Actions */}
                 <div className="flex gap-3">
                   <button className="btn-ghost pill flex-1 py-3 font-semibold text-sm" onClick={handleCloseBulkModal}>
-                    Cancel
+                    {t('cpmStock.cancel')}
                   </button>
                   <button
                     className="btn-accent pill flex-1 py-3 font-semibold text-sm"
@@ -423,7 +425,7 @@ export function CPMStock() {
                     onClick={handleBulkSave}
                     style={{ opacity: !bulkRows.some(r => r.item.trim() && r.adjustment) ? 0.5 : 1 }}
                   >
-                    Save {bulkRows.filter(r => r.item.trim() && r.adjustment).length || ''} update{bulkRows.filter(r => r.item.trim() && r.adjustment).length !== 1 ? 's' : ''}
+                    {t('cpmStock.saveUpdates', { count: bulkRows.filter(r => r.item.trim() && r.adjustment).length })}
                   </button>
                 </div>
               </>

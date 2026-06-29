@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { SkeletonRows, ErrorState, EmptyState } from '../../components/ui/states';
@@ -26,6 +27,7 @@ function fmtINR(v: number): string {
 
 export function Benchmarking() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const { data, isLoading, isError, refetch } = useQuery<BatchRow[]>({
     queryKey: ['benchmark-batches'],
@@ -89,16 +91,16 @@ export function Benchmarking() {
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-4 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Plant league table', what: 'Ranks the plants against each other on the metrics that drive cost and reliability, so best practice at one plant becomes visible at the others.', source: 'Derived', note: 'Grouped from closed/flagged active_batches; cost/MT from computeBatchCost().' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Plants compared</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('benchmarking.plantsCompared')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{stats.length}</div>
         </div>
         <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Lowest cost / MT</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('benchmarking.lowestCostPerMT')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-green-600">{best ? fmtINR(best.avgCostPerMT) : '—'}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{best ? best.plant : 'no data yet'}</div>
+          <div className="text-[11px] text-slate-500 mt-1">{best ? best.plant : t('benchmarking.noDataYet')}</div>
         </div>
         <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total output</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('benchmarking.totalOutput')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{stats.reduce((s, p) => s + p.totalOutputMT, 0).toFixed(0)} MT</div>
         </div>
       </div>
@@ -106,24 +108,24 @@ export function Benchmarking() {
       <div className="card p-6">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">Multi-plant benchmarking</div>
-            <div className="text-xs text-slate-500">Ranked by cost / MT · lower is better</div>
+            <div className="text-base font-bold">{t('benchmarking.title')}</div>
+            <div className="text-xs text-slate-500">{t('benchmarking.subtitle')}</div>
           </div>
         </div>
         {isLoading ? (
           <SkeletonRows rows={5} />
         ) : isError ? (
-          <ErrorState title="Couldn't load batches" onRetry={() => refetch()} />
+          <ErrorState title={t('benchmarking.loadError')} onRetry={() => refetch()} />
         ) : stats.length === 0 ? (
-          <EmptyState title="No batch data yet" message="Plant comparisons appear once batches close with plant, output and weight recorded." />
+          <EmptyState title={t('benchmarking.emptyTitle')} message={t('benchmarking.emptyMessage')} />
         ) : (
           <div className="overflow-x-auto scroll-x">
             <table className="dt">
               <thead>
                 <tr>
-                  <th className="num">#</th><th>Plant</th><th className="num">Batches</th>
-                  <th className="num">Output (MT)</th><th className="num">Avg cycle (hrs)</th>
-                  <th className="num">Off-spec rate</th><th className="num">Cost / MT</th><th></th>
+                  <th className="num">#</th><th>{t('benchmarking.colPlant')}</th><th className="num">{t('benchmarking.colBatches')}</th>
+                  <th className="num">{t('benchmarking.colOutput')}</th><th className="num">{t('benchmarking.colAvgCycle')}</th>
+                  <th className="num">{t('benchmarking.colOffSpec')}</th><th className="num">{t('benchmarking.colCostPerMT')}</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -140,7 +142,7 @@ export function Benchmarking() {
                       </span>
                     </td>
                     <td className="num font-bold">{s.avgCostPerMT > 0 ? fmtINR(s.avgCostPerMT) : '—'}</td>
-                    <td><button className="chip hover:bg-slate-200" onClick={() => navigate('/dashboard/batches')}>Batches →</button></td>
+                    <td><button className="chip hover:bg-slate-200" onClick={() => navigate('/dashboard/batches')}>{t('benchmarking.batchesLink')}</button></td>
                   </tr>
                 ))}
               </tbody>

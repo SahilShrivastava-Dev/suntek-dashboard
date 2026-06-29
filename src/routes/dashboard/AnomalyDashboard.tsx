@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { ShieldCheck, RefreshCw, Activity, Download, Cpu, Sparkles, Database, Check } from 'lucide-react';
 import { SlidePanel } from '../../components/SlidePanel';
@@ -31,6 +32,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 export function AnomalyDashboard() {
+  const { t } = useTranslation();
   const { scan, findings, loading, error, refetch } = useAnomalies();
   const exporter = useExportFeatures();
   const [selected, setSelected] = useState<AnomalyFinding | null>(null);
@@ -57,19 +59,19 @@ export function AnomalyDashboard() {
             <Activity size={20} color="#D97706" />
           </div>
           <div style={{ fontSize: 13, color: '#64748B' }}>
-            Statistical scan over BUSY financials · {scan?.anchor_date ? `data through ${new Date(scan.anchor_date).toLocaleDateString('en-IN')}` : '—'}
-            {scan?._fallback && <span style={{ color: '#D97706' }}> · cached</span>}
+            {t('anomaly.scanSubtitle')} · {scan?.anchor_date ? t('anomaly.dataThrough', { date: new Date(scan.anchor_date).toLocaleDateString('en-IN') }) : '—'}
+            {scan?._fallback && <span style={{ color: '#D97706' }}> · {t('anomaly.cached')}</span>}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => exporter.mutate()}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 14px', borderRadius: 20, border: '1px solid #E2E8F0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#475569', cursor: 'pointer', fontFamily: 'inherit' }}>
             {exporter.isSuccess ? <Check size={13} color="#16A34A" /> : <Download size={13} />}
-            {exporter.isPending ? 'Exporting…' : exporter.isSuccess ? `Saved ${exporter.data?.count} CSVs` : 'Export features (CSV)'}
+            {exporter.isPending ? t('anomaly.exporting') : exporter.isSuccess ? t('anomaly.savedCsvs', { count: exporter.data?.count }) : t('anomaly.exportFeatures')}
           </button>
           <button onClick={refetch}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 14px', borderRadius: 20, border: '1px solid #E2E8F0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#475569', cursor: 'pointer', fontFamily: 'inherit' }}>
-            <RefreshCw size={13} /> Re-scan
+            <RefreshCw size={13} /> {t('anomaly.rescan')}
           </button>
         </div>
       </div>
@@ -81,25 +83,25 @@ export function AnomalyDashboard() {
             onClick={() => setTierModal(l)} />
         ))}
       </div>
-      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 22 }}>Click a tier to view its anomalies</div>
+      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 22 }}>{t('anomaly.clickTierHint')}</div>
 
       {/* Problem-KPI grid */}
       {scan?.kpis && scan.kpis.length > 0 && (
         <div style={{ marginBottom: 26 }}>
-          <SectionTitle>Key metrics · flagged where anomalous</SectionTitle>
+          <SectionTitle>{t('anomaly.keyMetricsTitle')}</SectionTitle>
           <ProblemKpiGrid kpis={scan.kpis} />
         </div>
       )}
 
       {/* Risk analytics — multi-plot grid */}
       <div style={{ marginBottom: 26 }}>
-        <SectionTitle>Risk analytics</SectionTitle>
+        <SectionTitle>{t('anomaly.riskAnalytics')}</SectionTitle>
         <AnomalyAnalyticsGrid />
       </div>
 
       {/* Metric Explorer — interactive charts with granularity */}
       <div style={{ marginBottom: 26 }}>
-        <SectionTitle>Metric explorer · drill by granularity</SectionTitle>
+        <SectionTitle>{t('anomaly.metricExplorerTitle')}</SectionTitle>
         <MetricExplorer />
       </div>
 
@@ -108,17 +110,17 @@ export function AnomalyDashboard() {
 
       {/* Tier popup — opened from a severity pill */}
       {tierModal && (
-        <SlidePanel open onClose={() => setTierModal(null)} subtitle="Detected anomalies"
+        <SlidePanel open onClose={() => setTierModal(null)} subtitle={t('anomaly.detectedAnomalies')}
           title={`${LEVEL_LABEL[tierModal]} · ${tierFindings.length}`}>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#94A3B8', fontSize: 13 }}>Scanning live data…</div>
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#94A3B8', fontSize: 13 }}>{t('anomaly.scanningLiveData')}</div>
           ) : error ? (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#94A3B8', fontSize: 13 }}>Could not reach the detection engine.</div>
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#94A3B8', fontSize: 13 }}>{t('anomaly.engineUnreachable')}</div>
           ) : tierFindings.length === 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '36px 0', color: '#16A34A' }}>
               <ShieldCheck size={34} />
-              <div style={{ fontSize: 14, fontWeight: 700, marginTop: 10, color: '#15803D' }}>No {LEVEL_LABEL[tierModal].toLowerCase()} anomalies</div>
-              <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 4 }}>Nothing at this severity right now.</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginTop: 10, color: '#15803D' }}>{t('anomaly.noTierAnomalies', { level: LEVEL_LABEL[tierModal].toLowerCase() })}</div>
+              <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 4 }}>{t('anomaly.nothingAtSeverity')}</div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -134,14 +136,15 @@ export function AnomalyDashboard() {
 }
 
 function MethodologyPanel() {
+  const { t } = useTranslation();
   const card: React.CSSProperties = { flex: 1, minWidth: 240, background: '#fff', border: '1px solid #EEF2F6', borderRadius: 16, padding: '16px 18px' };
   return (
     <div style={{ marginTop: 30 }}>
-      <SectionTitle>How it works · AI & data dependency</SectionTitle>
+      <SectionTitle>{t('anomaly.howItWorksTitle')}</SectionTitle>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
         <div style={card}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Cpu size={16} color="#2563EB" /><span style={{ fontWeight: 700, fontSize: 13, color: '#0F172A' }}>Statistical engine</span>
+            <Cpu size={16} color="#2563EB" /><span style={{ fontWeight: 700, fontSize: 13, color: '#0F172A' }}>{t('anomaly.statEngineTitle')}</span>
           </div>
           <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
             Deterministic detectors decide <strong>what</strong> is anomalous: rolling z-score, EWMA drift, robust MAD (outlier-tolerant), and IQR fences over engineered features. Severity tier = max(|z|, |robust-z|): mild ≥2σ, moderate ≥2.5σ, heavy ≥3.5σ, extreme ≥5σ.
@@ -149,7 +152,7 @@ function MethodologyPanel() {
         </div>
         <div style={card}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Sparkles size={16} color="#9333EA" /><span style={{ fontWeight: 700, fontSize: 13, color: '#0F172A' }}>AI analyst (NVIDIA)</span>
+            <Sparkles size={16} color="#9333EA" /><span style={{ fontWeight: 700, fontSize: 13, color: '#0F172A' }}>{t('anomaly.aiAnalystTitle')}</span>
           </div>
           <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
             Llama-3.3-70B explains <strong>why</strong> — the root-cause story and recommended action — given only the numbers the engine already computed. It never decides severity and never invents figures. Open any anomaly to see its analysis.
@@ -157,7 +160,7 @@ function MethodologyPanel() {
         </div>
         <div style={card}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Database size={16} color="#16A34A" /><span style={{ fontWeight: 700, fontSize: 13, color: '#0F172A' }}>Data dependency</span>
+            <Database size={16} color="#16A34A" /><span style={{ fontWeight: 700, fontSize: 13, color: '#0F172A' }}>{t('anomaly.dataDependencyTitle')}</span>
           </div>
           <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
             Financial detectors run on <strong>real BUSY data</strong> (live, ~2 months). Statistical baselines sharpen as more history accrues; thin metrics show as <em>calibrating</em> rather than false-firing. Engineered features are exported to <code style={{ fontSize: 11 }}>data/anomaly/*.csv</code>.

@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MentionTextarea } from '../../components/mentions';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
@@ -38,6 +39,7 @@ const URGENCY_OPTIONS = [
 
 /* ─── Tank slider widget ─── */
 function TankWidget({ tank }: { tank: Tank }) {
+  const { t } = useTranslation();
   const [pct, setPct] = useState(tank.defaultPct);
   const low = pct < 30;
 
@@ -59,19 +61,20 @@ function TankWidget({ tank }: { tank: Tank }) {
           {pct}%
         </div>
       </div>
-      {low && <div className="text-xs font-bold text-red-500 mb-2">⚠ Low level</div>}
+      {low && <div className="text-xs font-bold text-red-500 mb-2">⚠ {t('warehouse.lowLevel')}</div>}
       <input
         type="range" min={0} max={100} value={pct}
         onChange={e => setPct(Number(e.target.value))}
         className="w-full"
       />
-      <div className="text-xs text-slate-400 mt-1">{pct}% filled</div>
+      <div className="text-xs text-slate-400 mt-1">{t('warehouse.pctFilled', { pct })}</div>
     </div>
   );
 }
 
 /* ─── Drum row with editable physical count ─── */
 function DrumRowInput({ row }: { row: DrumRow }) {
+  const { t } = useTranslation();
   const [count, setCount] = useState(row.opening);
   const variance = count - row.opening;
   const hasVariance = count !== row.opening;
@@ -99,7 +102,7 @@ function DrumRowInput({ row }: { row: DrumRow }) {
               color:      variance < 0 ? '#DC2626' : '#16A34A',
             }}
           >
-            {variance > 0 ? '+' : ''}{variance} drums
+            {variance > 0 ? '+' : ''}{variance} {t('warehouse.drumsUnit')}
           </span>
         )}
       </td>
@@ -109,6 +112,7 @@ function DrumRowInput({ row }: { row: DrumRow }) {
 
 /* ─── Requisition form ─── */
 function RequisitionForm() {
+  const { t } = useTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
   const [item, setItem]           = useState('');
   const [qty, setQty]             = useState('');
@@ -145,13 +149,13 @@ function RequisitionForm() {
             <path d="M20 6 9 17l-5-5"/>
           </svg>
         </div>
-        <h3 className="text-xl font-extrabold mb-1">Requisition Raised ✓</h3>
-        <p className="text-sm text-slate-500 mb-6">Sent to Vijay Ji's approval queue.</p>
+        <h3 className="text-xl font-extrabold mb-1">{t('warehouse.requisitionRaised')} ✓</h3>
+        <p className="text-sm text-slate-500 mb-6">{t('warehouse.sentToApprovalQueue', { name: 'Vijay Ji' })}</p>
         <button
           onClick={() => { setItem(''); setQty(''); setRemarks(''); setPhotoName(null); setSubmitted(false); }}
           className="bg-slate-800 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-700"
         >
-          Raise Another
+          {t('warehouse.raiseAnother')}
         </button>
       </div>
     );
@@ -159,27 +163,27 @@ function RequisitionForm() {
 
   return (
     <div className="max-w-2xl bg-white rounded-2xl p-8 shadow-sm border border-slate-100">
-      <h2 className="text-xl font-bold mb-6">Raise Store Requisition</h2>
+      <h2 className="text-xl font-bold mb-6">{t('warehouse.raiseStoreRequisition')}</h2>
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label className="block text-sm font-bold text-slate-600 mb-1">Item Required *</label>
+          <label className="block text-sm font-bold text-slate-600 mb-1">{t('warehouse.itemRequired')} *</label>
           <input
             required value={item} onChange={e => setItem(e.target.value)}
-            type="text" placeholder="e.g., Cooling Tower Motor V-Belt"
+            type="text" placeholder={t('warehouse.itemPlaceholder')}
             className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 text-sm"
           />
         </div>
         <div className="grid grid-cols-2 gap-5">
           <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1">Quantity *</label>
+            <label className="block text-sm font-bold text-slate-600 mb-1">{t('warehouse.quantity')} *</label>
             <input
               required value={qty} onChange={e => setQty(e.target.value)}
-              type="text" placeholder="e.g., 2 nos / 10 kg"
+              type="text" placeholder={t('warehouse.quantityPlaceholder')}
               className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 text-sm"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold text-slate-600 mb-1">Urgency *</label>
+            <label className="block text-sm font-bold text-slate-600 mb-1">{t('warehouse.urgency')} *</label>
             <select
               value={urgency} onChange={e => setUrgency(e.target.value)}
               className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-sm"
@@ -188,23 +192,23 @@ function RequisitionForm() {
                 <option key={o.value} value={o.value}
                   style={o.value === 'high' ? { color: '#DC2626', fontWeight: 700 } : {}}
                 >
-                  {o.label}
+                  {t(`warehouse.urgency_${o.value}`)}
                 </option>
               ))}
             </select>
           </div>
         </div>
         <div>
-          <label className="block text-sm font-bold text-slate-600 mb-1">Reason / Remarks</label>
+          <label className="block text-sm font-bold text-slate-600 mb-1">{t('warehouse.reasonRemarks')}</label>
           <MentionTextarea
             value={remarks} onChange={setRemarks} rows={3}
-            placeholder="Belt snapped during batch 1228. Need urgent replacement. Type @ to tag."
+            placeholder={t('warehouse.remarksPlaceholder')}
             className="w-full p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none text-sm"
           />
         </div>
         <div>
           <label className="block text-sm font-bold text-slate-600 mb-1">
-            Photo Proof <span className="font-normal text-slate-400">(optional)</span>
+            {t('warehouse.photoProof')} <span className="font-normal text-slate-400">{t('warehouse.optional')}</span>
           </label>
           <input
             ref={fileRef} type="file" accept="image/*" capture="environment"
@@ -227,7 +231,7 @@ function RequisitionForm() {
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mb-2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
                 </svg>
-                <span className="text-sm font-medium">Click to upload photo of broken part</span>
+                <span className="text-sm font-medium">{t('warehouse.uploadPhotoHint')}</span>
               </>
             )}
           </div>
@@ -237,7 +241,7 @@ function RequisitionForm() {
           className="w-full text-white font-bold py-4 rounded-xl mt-2 shadow-lg hover:opacity-90 transition-opacity text-sm"
           style={{ background: '#2563EB', boxShadow: '0 8px 20px -4px rgba(37,99,235,0.35)' }}
         >
-          Submit to Approval Queue (Vijay Ji)
+          {t('warehouse.submitToApprovalQueue', { name: 'Vijay Ji' })}
         </button>
       </form>
     </div>
@@ -254,29 +258,30 @@ function WarehouseContent({
   stockSubmitted: boolean;
   setStockSubmitted: (v: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {tab === 'stock' && (
         <div className="space-y-6">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold">Physical Tank Levels</h2>
-            <span className="text-sm text-slate-500">Log visually checked levels</span>
+            <h2 className="text-xl font-bold">{t('warehouse.physicalTankLevels')}</h2>
+            <span className="text-sm text-slate-500">{t('warehouse.logVisuallyCheckedLevels')}</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-            {TANKS.map(t => <TankWidget key={t.id} tank={t} />)}
+            {TANKS.map(tk => <TankWidget key={tk.id} tank={tk} />)}
           </div>
           <div className="flex items-center justify-between mt-8 mb-2">
-            <h2 className="text-xl font-bold">Drum Stock (CP)</h2>
+            <h2 className="text-xl font-bold">{t('warehouse.drumStockCp')}</h2>
           </div>
           <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100">
             <table className="w-full text-left">
               <thead className="bg-slate-50 border-b">
                 <tr>
-                  <th className="p-4 text-sm text-slate-500">Density</th>
-                  <th className="p-4 text-sm text-slate-500">Location</th>
-                  <th className="p-4 text-sm text-slate-500">Opening Drums</th>
-                  <th className="p-4 text-sm text-slate-500">Physical Count</th>
-                  <th className="p-4 text-sm text-slate-500">Variance</th>
+                  <th className="p-4 text-sm text-slate-500">{t('warehouse.colDensity')}</th>
+                  <th className="p-4 text-sm text-slate-500">{t('warehouse.colLocation')}</th>
+                  <th className="p-4 text-sm text-slate-500">{t('warehouse.colOpeningDrums')}</th>
+                  <th className="p-4 text-sm text-slate-500">{t('warehouse.colPhysicalCount')}</th>
+                  <th className="p-4 text-sm text-slate-500">{t('warehouse.colVariance')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -290,14 +295,14 @@ function WarehouseContent({
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M20 6 9 17l-5-5"/>
                 </svg>
-                Daily register submitted ✓
+                {t('warehouse.dailyRegisterSubmitted')} ✓
               </div>
             ) : (
               <button
                 onClick={() => setStockSubmitted(true)}
                 className="bg-slate-800 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-700 shadow-lg transition-colors"
               >
-                Submit Daily Register
+                {t('warehouse.submitDailyRegister')}
               </button>
             )}
           </div>
@@ -315,6 +320,7 @@ interface WarehouseProps {
 
 /* ─── Main export ─── */
 export function Warehouse({ embedded = false }: WarehouseProps) {
+  const { t } = useTranslation();
   const [tab, setTab]                   = useState<Tab>('stock');
   const [stockSubmitted, setStockSubmitted] = useState(false);
 
@@ -324,17 +330,17 @@ export function Warehouse({ embedded = false }: WarehouseProps) {
       <div style={{ fontFamily: 'Inter, sans-serif' }}>
         {/* Pill tab switcher matching dashboard style */}
         <div className="flex gap-1 mb-5">
-          {(['stock', 'req'] as Tab[]).map(t => (
+          {(['stock', 'req'] as Tab[]).map(tb => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={tb}
+              onClick={() => setTab(tb)}
               className="px-4 py-2 rounded-full text-sm font-semibold transition-colors"
-              style={tab === t
+              style={tab === tb
                 ? { background: '#0F172A', color: '#fff' }
                 : { background: '#F1F5F9', color: '#64748B' }
               }
             >
-              {t === 'stock' ? 'Daily Stock Entry' : 'Raise Requisition'}
+              {tb === 'stock' ? t('warehouse.dailyStockEntry') : t('warehouse.raiseRequisition')}
             </button>
           ))}
         </div>
@@ -350,7 +356,7 @@ export function Warehouse({ embedded = false }: WarehouseProps) {
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-slate-800 text-white rounded-xl flex items-center justify-center font-bold text-xl">S</div>
           <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Warehouse Console (L1)</div>
+            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('warehouse.consoleTitle')}</div>
             <div className="text-lg font-bold">SCPL Plant</div>
           </div>
         </div>
@@ -364,7 +370,7 @@ export function Warehouse({ embedded = false }: WarehouseProps) {
               fontWeight: tab === 'stock' ? 700 : 500,
             }}
           >
-            Daily Stock Entry
+            {t('warehouse.dailyStockEntry')}
           </button>
           <button
             onClick={() => setTab('req')}
@@ -375,7 +381,7 @@ export function Warehouse({ embedded = false }: WarehouseProps) {
               fontWeight: tab === 'req' ? 700 : 500,
             }}
           >
-            Raise Requisition
+            {t('warehouse.raiseRequisition')}
           </button>
         </div>
       </header>

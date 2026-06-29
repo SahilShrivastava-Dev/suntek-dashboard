@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts';
@@ -41,6 +42,7 @@ const STATUS_CFG = {
 };
 
 export function PredictiveQCBoard() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, refetch } = useQuery<{ batches: BatchRow[]; readings: ReadingRow[] }>({
     queryKey: ['predictive-qc'],
     queryFn: async () => {
@@ -92,30 +94,30 @@ export function PredictiveQCBoard() {
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-4 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Live Predictive QC', what: 'Every running batch projected to where it will land — its live gravity curve against the proven golden-batch trajectory for that grade, hours before closure.', source: 'Derived', note: 'Golden curve per grade; projection = drift vs golden carried to the endpoint. Detector 4.1 raises flags into the Anomaly Center.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Running batches</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('predictiveQc.runningBatches')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{projections.length}</div>
         </div>
         <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Projection status</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('predictiveQc.projectionStatus')}</div>
           <div className="flex items-center gap-3 mt-2">
-            <span className="text-sm font-bold text-green-600">{counts.green} on track</span>
-            <span className="text-sm font-bold text-amber-600">{counts.amber} drifting</span>
-            <span className="text-sm font-bold text-red-600">{counts.red} at risk</span>
+            <span className="text-sm font-bold text-green-600">{t('predictiveQc.onTrackCount', { count: counts.green })}</span>
+            <span className="text-sm font-bold text-amber-600">{t('predictiveQc.driftingCount', { count: counts.amber })}</span>
+            <span className="text-sm font-bold text-red-600">{t('predictiveQc.atRiskCount', { count: counts.red })}</span>
           </div>
         </div>
         <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Golden-batch model</div>
-          <div className="text-sm font-semibold mt-2 text-slate-600">Per-grade trajectory overlay</div>
-          <div className="text-[11px] text-slate-500 mt-1">steer the live curve toward it</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('predictiveQc.goldenBatchModel')}</div>
+          <div className="text-sm font-semibold mt-2 text-slate-600">{t('predictiveQc.perGradeTrajectory')}</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('predictiveQc.steerHint')}</div>
         </div>
       </div>
 
       {isLoading ? (
         <div className="card p-5"><SkeletonRows rows={6} /></div>
       ) : isError ? (
-        <div className="card p-5"><ErrorState title="Couldn't load running batches" onRetry={() => refetch()} /></div>
+        <div className="card p-5"><ErrorState title={t('predictiveQc.errorLoadTitle')} onRetry={() => refetch()} /></div>
       ) : projections.length === 0 ? (
-        <div className="card p-5"><EmptyState title="No running batches" message="Start a batch in the Batch Logger; its live gravity readings will plot against the golden curve here." /></div>
+        <div className="card p-5"><EmptyState title={t('predictiveQc.emptyTitle')} message={t('predictiveQc.emptyMessage')} /></div>
       ) : (
         <div className="grid grid-cols-12 gap-5">
           {projections.map(p => {
@@ -124,11 +126,11 @@ export function PredictiveQCBoard() {
               <div key={p.batch.id} className="col-span-12 lg:col-span-6 card p-5" style={{ borderTop: `3px solid ${cfg.color}` }}>
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    <div className="text-base font-bold">Batch {p.batch.batch_no}</div>
-                    <div className="text-xs text-slate-500">{p.batch.plants?.name || '—'} · grade {p.grade} · {p.live.length} readings</div>
+                    <div className="text-base font-bold">{t('predictiveQc.batchLabel', { no: p.batch.batch_no })}</div>
+                    <div className="text-xs text-slate-500">{t('predictiveQc.batchMeta', { plant: p.batch.plants?.name || '—', grade: p.grade, count: p.live.length })}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{cfg.label}</span>
+                    <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{t('predictiveQc.status_' + p.status)}</span>
                     <NotesButton
                       entityType="active_batch"
                       entityId={p.batch.id}
@@ -150,7 +152,7 @@ export function PredictiveQCBoard() {
                   </ResponsiveContainer>
                 </div>
                 <div className="flex items-center justify-between mt-2 text-xs">
-                  <span className="text-slate-500">Projected final: <span className="font-bold num" style={{ color: cfg.color }}>{p.projected}</span> vs target {p.grade}</span>
+                  <span className="text-slate-500">{t('predictiveQc.projectedFinal')} <span className="font-bold num" style={{ color: cfg.color }}>{p.projected}</span> {t('predictiveQc.vsTarget', { grade: p.grade })}</span>
                   <span className="font-semibold" style={{ color: cfg.color }}>{p.devPct >= 0 ? '+' : ''}{p.devPct.toFixed(1)}%</span>
                 </div>
               </div>

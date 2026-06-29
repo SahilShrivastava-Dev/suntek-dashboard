@@ -11,6 +11,7 @@
  * Route: /dashboard/daily-log
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MentionTextarea } from '../../components/mentions';
 import { insertRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
@@ -67,6 +68,7 @@ function rowVal(r: EditableReading, key: keyof DailyLogReading): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function DailyLogPage() {
+  const { t } = useTranslation();
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
@@ -131,7 +133,7 @@ export function DailyLogPage() {
     setReadings((data.readings ?? []).map((r, i) => ({ ...r, _key: `r-${i}` })));
     setTankSummaries(
       [1, 2, 3].map(idx => {
-        const found = (data.tankSummaries ?? []).find(t => t.tankIndex === idx);
+        const found = (data.tankSummaries ?? []).find(tb => tb.tankIndex === idx);
         return found ?? { tankIndex: idx, shiftingToStorageTime: null, density: null, heatStabilizerQty: null, brightenerQty: null };
       })
     );
@@ -172,7 +174,7 @@ export function DailyLogPage() {
 
   const handleSave = async () => {
     if (saving) return; // double-submit guard
-    if (!date) { toast.error('Date is required.'); return; }
+    if (!date) { toast.error(t('dailyLog.date_required')); return; }
     setSaving(true);
 
     try {
@@ -218,14 +220,14 @@ export function DailyLogPage() {
       );
       if (hits.length) {
         const h = hits[0];
-        toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+        toast.error(t('dailyLog.blacklist_hit', { value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
       }
 
-      setDoneSummary(`${readings.length} hourly readings · ${date} · ${shift}`);
+      setDoneSummary(t('dailyLog.done_summary', { count: readings.length, date, shift }));
       setSaving(false);
       setSavedDone(true);
     } catch (e) {
-      toast.error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('dailyLog.save_failed', { error: e instanceof Error ? e.message : String(e) }));
       setSaving(false);
     }
   };
@@ -250,12 +252,12 @@ export function DailyLogPage() {
           <polyline points="20 6 9 17 4 12" />
         </svg>
       </div>
-      <div className="text-lg font-bold text-slate-800">Daily Log Saved!</div>
+      <div className="text-lg font-bold text-slate-800">{t('dailyLog.done_title')}</div>
       <div className="text-sm text-slate-500">{doneSummary}</div>
       <button onClick={reset}
         className="mt-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white"
         style={{ background: '#d97706' }}
-      >Upload Another Sheet</button>
+      >{t('dailyLog.upload_another')}</button>
     </div>
   );
 
@@ -263,13 +265,13 @@ export function DailyLogPage() {
   if (job.status === 'error') return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4 max-w-lg mx-auto">
       <div className="w-full bg-red-50 border border-red-200 rounded-xl p-4">
-        <div className="text-sm font-bold text-red-700 mb-1">Extraction failed</div>
+        <div className="text-sm font-bold text-red-700 mb-1">{t('dailyLog.extraction_failed')}</div>
         <div className="text-xs text-red-600 whitespace-pre-wrap break-words max-h-40 overflow-y-auto leading-relaxed">
           {error}
         </div>
       </div>
       <button onClick={reset} className="px-5 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition">
-        ↩ Try Again
+        ↩ {t('dailyLog.try_again')}
       </button>
     </div>
   );
@@ -284,8 +286,8 @@ export function DailyLogPage() {
         <circle cx="12" cy="12" r="10" stroke="#fde68a" strokeWidth="3" />
         <path d="M12 2 A10 10 0 0 1 22 12" stroke="#d97706" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      <div className="text-base font-bold text-slate-700">Reading daily log sheet…</div>
-      <div className="text-xs text-slate-400">Llama 3.2 Vision 90B scanning {(readings.length || '~13')} hourly rows</div>
+      <div className="text-base font-bold text-slate-700">{t('dailyLog.reading_sheet')}</div>
+      <div className="text-xs text-slate-400">{t('dailyLog.scanning_rows', { count: readings.length || '~13' })}</div>
     </div>
   );
 
@@ -296,7 +298,7 @@ export function DailyLogPage() {
         <circle cx="12" cy="12" r="10" stroke="#fde68a" strokeWidth="3" />
         <path d="M12 2 A10 10 0 0 1 22 12" stroke="#d97706" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      <div className="text-sm font-bold text-slate-700">Saving to database…</div>
+      <div className="text-sm font-bold text-slate-700">{t('dailyLog.saving_db')}</div>
     </div>
   );
 
@@ -323,7 +325,7 @@ export function DailyLogPage() {
         {previewUrl ? (
           <>
             <img src={previewUrl} alt="preview" className="rounded-xl max-h-52 object-cover shadow" style={{ objectPosition: 'top' }} />
-            <div className="text-xs text-slate-400">Tap to change</div>
+            <div className="text-xs text-slate-400">{t('dailyLog.tap_to_change')}</div>
           </>
         ) : (
           <>
@@ -336,16 +338,16 @@ export function DailyLogPage() {
                 <polyline points="10 9 9 9 8 9"/>
               </svg>
             </div>
-            <div className="text-base font-bold text-slate-700">Upload Daily Unit Log</div>
-            <div className="text-sm text-slate-400">Photo of the hourly monitoring sheet<br/>JPG · PNG · HEIC supported</div>
+            <div className="text-base font-bold text-slate-700">{t('dailyLog.upload_title')}</div>
+            <div className="text-sm text-slate-400">{t('dailyLog.upload_sub1')}<br/>{t('dailyLog.upload_sub2')}</div>
           </>
         )}
       </div>
 
       {!previewUrl && (
         <div className="mt-5 max-w-md text-xs text-slate-400 text-center leading-relaxed bg-amber-50 rounded-xl p-4 border border-amber-100">
-          <span className="font-bold text-amber-700">What this extracts: </span>
-          Hourly readings (Aux-1/2/3 temp, HCL temp, pressures A-D, HCL/CPW density, CPW transfer, blower, flow meters) + tank summaries + remarks.
+          <span className="font-bold text-amber-700">{t('dailyLog.what_extracts_label')} </span>
+          {t('dailyLog.what_extracts_body')}
         </div>
       )}
 
@@ -358,7 +360,7 @@ export function DailyLogPage() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
           </svg>
-          Extract with AI
+          {t('dailyLog.extract_with_ai')}
         </button>
       )}
     </div>
@@ -377,12 +379,12 @@ export function DailyLogPage() {
             </svg>
           </div>
           <div>
-            <div className="text-sm font-bold text-slate-800">Daily Log — Review & Confirm</div>
-            <div className="text-xs text-slate-400">{readings.length} hourly rows detected · Edit any cell before saving</div>
+            <div className="text-sm font-bold text-slate-800">{t('dailyLog.review_title')}</div>
+            <div className="text-xs text-slate-400">{t('dailyLog.rows_detected', { count: readings.length })}</div>
           </div>
         </div>
         <button onClick={reset} className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100 transition">
-          ✕ Cancel
+          ✕ {t('dailyLog.cancel')}
         </button>
       </div>
 
@@ -391,7 +393,7 @@ export function DailyLogPage() {
 
         {/* LEFT: Original image */}
         <div className="shrink-0 border-r border-slate-100 bg-slate-50 overflow-auto flex flex-col items-center p-3 gap-2" style={{ width: 200 }}>
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wide self-start">Original Sheet</div>
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wide self-start">{t('dailyLog.original_sheet')}</div>
           {previewUrl && (
             <img src={previewUrl} alt="original" className="w-full rounded-xl shadow border border-slate-200 object-contain" />
           )}
@@ -402,32 +404,32 @@ export function DailyLogPage() {
 
           {/* Header fields */}
           <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Sheet Header</div>
+            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('dailyLog.sheet_header')}</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
-                <label className={labelCls}>Date *</label>
+                <label className={labelCls}>{t('dailyLog.date_label')}</label>
                 <input type="text" value={date} onChange={e => setDate(e.target.value)} className={inputCls} placeholder="22/02/26" />
               </div>
               <div>
-                <label className={labelCls}>Shift</label>
+                <label className={labelCls}>{t('dailyLog.shift_label')}</label>
                 <select value={shift} onChange={e => setShift(e.target.value)} className={inputCls}>
-                  <option value="">Select</option>
-                  <option value="Morning">Morning</option>
-                  <option value="Evening">Evening</option>
-                  <option value="Night">Night</option>
+                  <option value="">{t('dailyLog.select_option')}</option>
+                  <option value="Morning">{t('dailyLog.morning')}</option>
+                  <option value="Evening">{t('dailyLog.evening')}</option>
+                  <option value="Night">{t('dailyLog.night')}</option>
                 </select>
               </div>
               <div>
-                <label className={labelCls}>Unit Name</label>
+                <label className={labelCls}>{t('dailyLog.unit_name_label')}</label>
                 <input type="text" value={unitName} onChange={e => setUnitName(e.target.value)} className={inputCls} placeholder="Unit - II" />
               </div>
               <div className="col-span-2">
-                <label className={labelCls}>Operators (comma separated)</label>
+                <label className={labelCls}>{t('dailyLog.operators_label')}</label>
                 <input type="text" value={operators} onChange={e => setOperators(e.target.value)} className={inputCls} placeholder="Sunny, Rohit, Anjani" />
               </div>
               <div>
-                <label className={labelCls}>Helper</label>
-                <input type="text" value={helper} onChange={e => setHelper(e.target.value)} className={inputCls} placeholder="Helper name" />
+                <label className={labelCls}>{t('dailyLog.helper_label')}</label>
+                <input type="text" value={helper} onChange={e => setHelper(e.target.value)} className={inputCls} placeholder={t('dailyLog.helper_placeholder')} />
               </div>
             </div>
           </div>
@@ -440,8 +442,7 @@ export function DailyLogPage() {
                 <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
               </svg>
               <div className="text-xs text-yellow-800">
-                <span className="font-bold">Partial extraction</span> — the AI response was cut off before finishing all rows.
-                The recovered rows are shown below. Please add the missing rows manually using "+ Add Row", or re-upload a smaller/clearer photo.
+                <span className="font-bold">{t('dailyLog.partial_extraction')}</span> {t('dailyLog.partial_extraction_body')}
               </div>
             </div>
           )}
@@ -450,22 +451,22 @@ export function DailyLogPage() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                Hourly Readings
+                {t('dailyLog.hourly_readings')}
                 <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold text-xs normal-case">
-                  {readings.length} rows
+                  {t('dailyLog.rows_count', { count: readings.length })}
                 </span>
               </div>
               <button onClick={addRow} className="text-xs font-bold text-amber-600 hover:text-amber-800 transition flex items-center gap-1">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
-                Add Row
+                {t('dailyLog.add_row')}
               </button>
             </div>
 
             {readings.length === 0 ? (
               <div className="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-                No readings extracted. Add rows manually or try a clearer photo.
+                {t('dailyLog.no_readings')}
               </div>
             ) : (
               <div className="rounded-xl border border-slate-200 overflow-auto" style={{ maxHeight: 340 }}>
@@ -497,7 +498,7 @@ export function DailyLogPage() {
                           </td>
                         ))}
                         <td className="px-1 py-0.5 text-center">
-                          <button onClick={() => deleteRow(r._key)} title="Remove"
+                          <button onClick={() => deleteRow(r._key)} title={t('dailyLog.remove_title')}
                             className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                               <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -514,16 +515,16 @@ export function DailyLogPage() {
 
           {/* Tank summaries */}
           <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Tank Summaries</div>
+            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('dailyLog.tank_summaries')}</div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {tankSummaries.map((t, ti) => (
-                <div key={t.tankIndex} className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-2">
-                  <div className="text-xs font-bold text-slate-600">Tank {t.tankIndex}</div>
+              {tankSummaries.map((tank, ti) => (
+                <div key={tank.tankIndex} className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-2">
+                  <div className="text-xs font-bold text-slate-600">{t('dailyLog.tank', { count: tank.tankIndex })}</div>
                   {[
-                    { label: 'Storage Time', val: t.shiftingToStorageTime ?? '', key: 'shiftingToStorageTime' as keyof DailyLogTankSummary },
-                    { label: 'Density',       val: t.density != null ? String(t.density) : '', key: 'density' as keyof DailyLogTankSummary },
-                    { label: 'Heat Stab. Qty',val: t.heatStabilizerQty ?? '', key: 'heatStabilizerQty' as keyof DailyLogTankSummary },
-                    { label: 'Brightener Qty',val: t.brightenerQty ?? '',     key: 'brightenerQty' as keyof DailyLogTankSummary },
+                    { label: t('dailyLog.storage_time'), val: tank.shiftingToStorageTime ?? '', key: 'shiftingToStorageTime' as keyof DailyLogTankSummary },
+                    { label: t('dailyLog.density'),       val: tank.density != null ? String(tank.density) : '', key: 'density' as keyof DailyLogTankSummary },
+                    { label: t('dailyLog.heat_stab_qty'),val: tank.heatStabilizerQty ?? '', key: 'heatStabilizerQty' as keyof DailyLogTankSummary },
+                    { label: t('dailyLog.brightener_qty'),val: tank.brightenerQty ?? '',     key: 'brightenerQty' as keyof DailyLogTankSummary },
                   ].map(({ label, val, key }) => (
                     <div key={key}>
                       <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">{label}</label>
@@ -549,17 +550,17 @@ export function DailyLogPage() {
           {/* Remarks + notes */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-1">
-              <label className={labelCls}>HNP Tank Note</label>
+              <label className={labelCls}>{t('dailyLog.hnp_tank_note')}</label>
               <input type="text" value={notesHnp} onChange={e => setNotesHnp(e.target.value)} className={inputCls} placeholder="HNP Tank 8-218" />
             </div>
             <div className="sm:col-span-1">
-              <label className={labelCls}>HCL Tank Note</label>
+              <label className={labelCls}>{t('dailyLog.hcl_tank_note')}</label>
               <input type="text" value={notesHcl} onChange={e => setNotesHcl(e.target.value)} className={inputCls} placeholder="HCL Tank-1 - 125" />
             </div>
             <div className="sm:col-span-1">
-              <label className={labelCls}>Remarks</label>
+              <label className={labelCls}>{t('dailyLog.remarks_label')}</label>
               <MentionTextarea value={remarks} onChange={setRemarks}
-                className={inputCls + ' resize-none'} rows={2} placeholder="Any remarks (Hindi text OK) · type @ to tag" />
+                className={inputCls + ' resize-none'} rows={2} placeholder={t('dailyLog.remarks_placeholder')} />
             </div>
           </div>
 
@@ -570,10 +571,10 @@ export function DailyLogPage() {
       <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center gap-3 shrink-0">
         <button onClick={reset}
           className="py-2.5 px-4 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-500 hover:bg-slate-100 transition whitespace-nowrap">
-          ↩ Re-upload
+          ↩ {t('dailyLog.reupload')}
         </button>
         <div className="flex-1 text-xs text-slate-400 text-center">
-          {readings.length} rows · {date || '(no date)'} · {shift || '(no shift)'}
+          {readings.length} {t('dailyLog.rows_word')} · {date || t('dailyLog.no_date')} · {shift || t('dailyLog.no_shift')}
         </div>
         <button onClick={handleSave} disabled={!date}
           className="py-2.5 px-6 rounded-xl text-sm font-bold text-white transition whitespace-nowrap flex items-center gap-2 disabled:opacity-40"
@@ -582,7 +583,7 @@ export function DailyLogPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <polyline points="20 6 9 17 4 12" />
           </svg>
-          Save {readings.filter(r => r.time).length} Readings
+          {t('dailyLog.save_readings', { count: readings.filter(r => r.time).length })}
         </button>
       </div>
     </div>

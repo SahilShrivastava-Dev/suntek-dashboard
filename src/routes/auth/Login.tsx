@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../hooks/useAuth';
 
 
 export function Login() {
+  const { t } = useTranslation();
   const { signIn, loading, error, session } = useAuth();
   const navigate = useNavigate();
 
@@ -34,7 +36,7 @@ export function Login() {
             <span className="text-white text-xl font-extrabold">S°</span>
           </div>
           <h1 className="serif text-[28px] leading-tight">Suntek Group</h1>
-          <p className="text-sm text-slate-500 mt-1">CaratSense Operations Dashboard · v0.2</p>
+          <p className="text-sm text-slate-500 mt-1">{t('login.subtitle')}</p>
         </div>
 
         {/* Form */}
@@ -42,7 +44,7 @@ export function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                Email address
+                {t('login.emailLabel')}
               </label>
               <input
                 type="email"
@@ -55,7 +57,7 @@ export function Login() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                Password
+                {t('login.passwordLabel')}
               </label>
               <input
                 type="password"
@@ -78,7 +80,7 @@ export function Login() {
               disabled={submitting || loading}
               className="w-full py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? 'Signing in…' : 'Sign in'}
+              {submitting ? t('login.signingIn') : t('login.signIn')}
             </button>
           </form>
 
@@ -86,15 +88,15 @@ export function Login() {
               a real Supabase sign-in (the dashboard auth gate enforces it). */}
           {import.meta.env.DEV && (
             <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <p className="text-xs text-amber-700 font-medium">Development Mode</p>
+              <p className="text-xs text-amber-700 font-medium">{t('login.devMode')}</p>
               <p className="text-xs text-amber-600 mt-0.5">
-                Skip auth to preview the dashboard with the role switcher.
+                {t('login.devModeHint')}
               </p>
               <button
                 onClick={() => navigate('/dashboard')}
                 className="mt-2 text-xs font-semibold text-amber-700 underline hover:no-underline"
               >
-                → Enter dashboard directly
+                {t('login.enterDashboard')}
               </button>
             </div>
           )}
@@ -103,10 +105,10 @@ export function Login() {
         {/* Role guide */}
         <div className="mt-4 grid grid-cols-2 gap-2">
           {[
-            { role: 'L1', label: 'Factory Operator', color: 'bg-amber-50 border-amber-200 text-amber-700' },
-            { role: 'L2', label: 'Unit Head', color: 'bg-amber-50 border-amber-200 text-amber-700' },
-            { role: 'L3', label: 'Procurement Head', color: 'bg-green-50 border-green-200 text-green-700' },
-            { role: 'L4', label: 'Admin (Sagar)', color: 'bg-red-50 border-red-200 text-red-700' },
+            { role: 'L1', label: t('login.roleFactoryOperator'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
+            { role: 'L2', label: t('login.roleUnitHead'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
+            { role: 'L3', label: t('login.roleProcurementHead'), color: 'bg-green-50 border-green-200 text-green-700' },
+            { role: 'L4', label: t('login.roleAdmin'), color: 'bg-red-50 border-red-200 text-red-700' },
           ].map(({ role, label, color }) => (
             <div key={role} className={`text-center p-2 rounded-lg border text-xs font-medium ${color}`}>
               <span className="font-bold">{role}</span> · {label}

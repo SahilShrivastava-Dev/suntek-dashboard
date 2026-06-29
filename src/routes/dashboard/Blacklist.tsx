@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
@@ -110,6 +111,7 @@ const BLANK_RESOLVE = { reason: '' };
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function Blacklist() {
+  const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
@@ -186,7 +188,7 @@ export function Blacklist() {
       is_active: true,
     };
     const { data: created, error } = await insertRows('blacklist', payload).select('id').single();
-    if (error) { toast.error(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(t('blacklist.toastFailed', { msg: error.message })); return; }
 
     // Audit: entity added to the blacklist.
     await logBlacklistEvent({
@@ -234,7 +236,7 @@ export function Blacklist() {
         resolved_reason: resolveForm.reason.trim(),
       })
       .eq('id', resolvingEntry.id);
-    if (error) { toast.error(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(t('blacklist.toastFailed', { msg: error.message })); return; }
 
     await logBlacklistEvent({
       blacklist_id: resolvingEntry.id,
@@ -275,7 +277,7 @@ export function Blacklist() {
   async function changeSeverity(entry: BlacklistEntry, newSeverity: BlacklistEntry['severity']) {
     if (newSeverity === entry.severity) return;
     const { error } = await updateRows('blacklist', { severity: newSeverity }).eq('id', entry.id);
-    if (error) { toast.error(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(t('blacklist.toastFailed', { msg: error.message })); return; }
     const escalated = SEV_RANK[newSeverity] > SEV_RANK[entry.severity];
     await logBlacklistEvent({
       blacklist_id: entry.id, event_type: 'escalated', entity_name: entry.name, entity_type: entry.type,
@@ -293,19 +295,23 @@ export function Blacklist() {
     }).then(() => {}, () => {});
     setDetailEntry({ ...entry, severity: newSeverity });
     await load();
-    toast.success(`Severity set to ${newSeverity}${newSeverity === 'low' ? ' · monitor only' : ' · access restricted'}`);
+    toast.success(
+      newSeverity === 'low'
+        ? t('blacklist.toastSeverityMonitor', { sev: newSeverity })
+        : t('blacklist.toastSeverityRestricted', { sev: newSeverity })
+    );
   }
 
   // ── Delete = resolve & close (kept in the audit trail) ──────────────────────
   async function deleteEntry(entry: BlacklistEntry) {
-    if (!window.confirm(`Delete "${entry.name}" from the blacklist?\n\nThis marks the entry resolved & closed (it stays in the audit trail and can be re-added later).`)) return;
+    if (!window.confirm(t('blacklist.confirmDelete', { name: entry.name }))) return;
     const { error } = await updateRows('blacklist', {
       is_active: false,
       resolved_at: new Date().toISOString(),
       resolved_by: activeProfile.name,
       resolved_reason: 'Deleted (resolved & closed) by admin',
     }).eq('id', entry.id);
-    if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+    if (error) { toast.error(t('blacklist.toastDeleteFailed', { msg: error.message })); return; }
     await logBlacklistEvent({
       blacklist_id: entry.id, event_type: 'resolved', entity_name: entry.name, entity_type: entry.type,
       workflow: 'Blacklist', source: 'lifecycle',
@@ -314,7 +320,7 @@ export function Blacklist() {
     });
     if (detailEntry?.id === entry.id) { setShowDetailPanel(false); setDetailEntry(null); }
     await load();
-    toast.success('Entry deleted · resolved & closed');
+    toast.success(t('blacklist.toastDeleted'));
   }
 
   // ── Re-blacklist ────────────────────────────────────────────────────────────
@@ -396,9 +402,9 @@ export function Blacklist() {
         exportToCsv(`blacklist-audit-trail-${today}`, EVENT_COLUMNS, eventRows, preamble);
       }
 
-      toast.success(`Audit report ready · ${entries.length} entries, ${evts.length} events`);
+      toast.success(t('blacklist.toastReportReady', { entries: entries.length, events: evts.length }));
     } catch (err) {
-      toast.error(`Report failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(t('blacklist.toastReportFailed', { msg: err instanceof Error ? err.message : String(err) }));
     } finally {
       setGeneratingReport(false);
     }
@@ -411,24 +417,24 @@ export function Blacklist() {
       {/* ── KPI row ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Active blacklist</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('blacklist.kpiActive')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-red-600">{active.length}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{entries.filter(e => !e.is_active).length} resolved</div>
+          <div className="text-[11px] text-slate-400 mt-1">{t('blacklist.kpiActiveSub', { count: entries.filter(e => !e.is_active).length })}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Persons</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('blacklist.kpiPersons')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{persons}</div>
-          <div className="text-[11px] text-slate-400 mt-1">individuals</div>
+          <div className="text-[11px] text-slate-400 mt-1">{t('blacklist.kpiPersonsSub')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Vehicles</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('blacklist.kpiVehicles')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{vehicles}</div>
-          <div className="text-[11px] text-slate-400 mt-1">registrations</div>
+          <div className="text-[11px] text-slate-400 mt-1">{t('blacklist.kpiVehiclesSub')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Vendors &amp; Other</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('blacklist.kpiVendorsOther')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{others}</div>
-          <div className="text-[11px] text-slate-400 mt-1">entities</div>
+          <div className="text-[11px] text-slate-400 mt-1">{t('blacklist.kpiVendorsOtherSub')}</div>
         </div>
       </div>
 
@@ -436,8 +442,8 @@ export function Blacklist() {
       <div className="card p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">Blacklist registry</div>
-            <div className="text-xs text-slate-500">Track restricted persons, vehicles, and vendors · admin + unit head only</div>
+            <div className="text-base font-bold">{t('blacklist.registryTitle')}</div>
+            <div className="text-xs text-slate-500">{t('blacklist.registrySubtitle')}</div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -446,14 +452,14 @@ export function Blacklist() {
               disabled={generatingReport}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
             >
-              📄 {generatingReport ? 'Generating…' : 'Audit report'}
+              📄 {generatingReport ? t('blacklist.generating') : t('blacklist.auditReport')}
             </button>
             <button
               className="btn-accent pill px-4 py-2 font-semibold text-sm"
               style={{ background: '#DC2626' }}
               onClick={() => { setForm({ ...BLANK_FORM }); setSaved(false); setShowPanel(true); }}
             >
-              + Add to blacklist
+              {t('blacklist.addBtn')}
             </button>
           </div>
         </div>
@@ -462,30 +468,30 @@ export function Blacklist() {
         <div className="flex gap-3 mb-4 flex-wrap">
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search name, reason, added by…"
+            placeholder={t('blacklist.searchPlaceholder')}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, outline: 'none', fontFamily: 'inherit', minWidth: 220 }}
           />
           <select value={filterType} onChange={e => setFilterType(e.target.value)}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, fontFamily: 'inherit', background: '#fff' }}>
-            <option value="all">All types</option>
-            <option value="person">Person</option>
-            <option value="vehicle">Vehicle</option>
-            <option value="vendor">Vendor</option>
-            <option value="other">Other</option>
+            <option value="all">{t('blacklist.filterAllTypes')}</option>
+            <option value="person">{t('blacklist.typePerson')}</option>
+            <option value="vehicle">{t('blacklist.typeVehicle')}</option>
+            <option value="vendor">{t('blacklist.typeVendor')}</option>
+            <option value="other">{t('blacklist.typeOther')}</option>
           </select>
           <select value={filterSev} onChange={e => setFilterSev(e.target.value)}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, fontFamily: 'inherit', background: '#fff' }}>
-            <option value="all">All severity</option>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
+            <option value="all">{t('blacklist.filterAllSeverity')}</option>
+            <option value="critical">{t('blacklist.sevCritical')}</option>
+            <option value="high">{t('blacklist.sevHigh')}</option>
+            <option value="medium">{t('blacklist.sevMedium')}</option>
+            <option value="low">{t('blacklist.sevLow')}</option>
           </select>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, fontFamily: 'inherit', background: '#fff' }}>
-            <option value="active">Active</option>
-            <option value="resolved">Resolved</option>
-            <option value="all">All</option>
+            <option value="active">{t('blacklist.statusActive')}</option>
+            <option value="resolved">{t('blacklist.statusResolved')}</option>
+            <option value="all">{t('blacklist.statusAll')}</option>
           </select>
         </div>
 
@@ -493,25 +499,25 @@ export function Blacklist() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Type</th>
-                <th>Name / Identifier</th>
-                <th>Reason</th>
-                <th>Severity</th>
-                <th>Added by</th>
-                <th>Date</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>{t('blacklist.colType')}</th>
+                <th>{t('blacklist.colNameId')}</th>
+                <th>{t('blacklist.colReason')}</th>
+                <th>{t('blacklist.colSeverity')}</th>
+                <th>{t('blacklist.colAddedBy')}</th>
+                <th>{t('blacklist.colDate')}</th>
+                <th>{t('blacklist.colStatus')}</th>
+                <th>{t('blacklist.colActions')}</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">Loading…</td></tr>
+                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{t('blacklist.loading')}</td></tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">
                   {filterStatus === 'active' && active.length === 0
-                    ? 'No active blacklist entries — all clear'
-                    : 'No entries match current filters'}
+                    ? t('blacklist.emptyAllClear')
+                    : t('blacklist.emptyNoMatch')}
                 </td></tr>
               )}
               {filtered.map(e => {
@@ -530,7 +536,7 @@ export function Blacklist() {
                     </td>
                     <td>
                       <div className="text-sm text-slate-700 max-w-[220px] truncate" title={e.reason}>{e.reason}</div>
-                      {e.reference_no && <div className="text-[11px] text-slate-400">Ref: {e.reference_no}</div>}
+                      {e.reference_no && <div className="text-[11px] text-slate-400">{t('blacklist.refPrefix')} {e.reference_no}</div>}
                     </td>
                     <td>
                       <span className="badge" style={{ background: sc.bg, color: sc.color, fontWeight: 700, fontSize: 11 }}>
@@ -544,10 +550,10 @@ export function Blacklist() {
                     <td className="text-slate-500 text-xs">{formatDate(e.created_at)}</td>
                     <td>
                       {e.is_active ? (
-                        <span className="badge" style={{ background: '#FEF2F2', color: '#DC2626', fontWeight: 700 }}>Active</span>
+                        <span className="badge" style={{ background: '#FEF2F2', color: '#DC2626', fontWeight: 700 }}>{t('blacklist.statusActive')}</span>
                       ) : (
                         <div>
-                          <span className="badge" style={{ background: '#F0FDF4', color: '#16A34A', fontWeight: 700 }}>Resolved</span>
+                          <span className="badge" style={{ background: '#F0FDF4', color: '#16A34A', fontWeight: 700 }}>{t('blacklist.statusResolved')}</span>
                           <div className="text-[10px] text-slate-400 mt-0.5">{formatDate(e.resolved_at)}</div>
                         </div>
                       )}
@@ -557,24 +563,24 @@ export function Blacklist() {
                         <button
                           onClick={() => { setDetailEntry(e); setShowDetailPanel(true); }}
                           style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#475569' }}
-                        >View</button>
+                        >{t('blacklist.actionView')}</button>
                         {e.is_active ? (
                           <>
                             <button
                               onClick={() => { setResolvingEntry(e); setResolveForm({ ...BLANK_RESOLVE }); setResolveSaved(false); setShowResolvePanel(true); }}
                               style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid #BBF7D0', background: '#F0FDF4', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#16A34A' }}
-                            >Resolve</button>
+                            >{t('blacklist.actionResolve')}</button>
                             <button
                               onClick={() => deleteEntry(e)}
-                              title="Delete (resolve & close)"
+                              title={t('blacklist.actionDeleteTitle')}
                               style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid #FECACA', background: '#FEF2F2', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#DC2626' }}
-                            >🗑 Delete</button>
+                            >{t('blacklist.actionDelete')}</button>
                           </>
                         ) : (
                           <button
                             onClick={() => reBlacklist(e)}
                             style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid #FECACA', background: '#FEF2F2', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#DC2626' }}
-                          >Re-add</button>
+                          >{t('blacklist.actionReadd')}</button>
                         )}
                       </div>
                     </td>
@@ -590,45 +596,45 @@ export function Blacklist() {
       <SlidePanel
         open={showPanel}
         onClose={() => { setShowPanel(false); setSaved(false); }}
-        title="Add to blacklist"
-        subtitle="Blacklist Registry · Admin"
+        title={t('blacklist.addPanelTitle')}
+        subtitle={t('blacklist.addPanelSubtitle')}
       >
-        <PanelField label="Type *">
+        <PanelField label={t('blacklist.fieldType')}>
           <PanelSelect value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as BlacklistEntry['type'] }))}>
-            <option value="person">👤 Person (individual)</option>
-            <option value="vehicle">🚛 Vehicle (registration)</option>
-            <option value="vendor">🏢 Vendor / supplier</option>
-            <option value="other">⚠ Other</option>
+            <option value="person">{t('blacklist.optPerson')}</option>
+            <option value="vehicle">{t('blacklist.optVehicle')}</option>
+            <option value="vendor">{t('blacklist.optVendor')}</option>
+            <option value="other">{t('blacklist.optOther')}</option>
           </PanelSelect>
         </PanelField>
 
         <div style={{ marginBottom: 16, background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 12, padding: '10px 14px', fontSize: 11, color: '#DC2626' }}>
-          <strong>Note:</strong> Blacklisted persons will have their dashboard access restricted and all activity will alert admin.
+          <strong>{t('blacklist.noteLabel')}</strong> {t('blacklist.addNote')}
         </div>
 
         <PanelRow>
-          <PanelField label={`${typeLabels.nameLabel} *`}>
+          <PanelField label={`${t(`blacklist.nameLabel_${form.type}`)} *`}>
             <PanelInput value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder={typeLabels.namePlaceholder} />
           </PanelField>
-          <PanelField label={typeLabels.identifierLabel}>
+          <PanelField label={t(`blacklist.identifierLabel_${form.type}`)}>
             <PanelInput value={form.identifier} onChange={e => setForm(f => ({ ...f, identifier: e.target.value }))} placeholder={typeLabels.identifierPlaceholder} />
           </PanelField>
         </PanelRow>
 
-        <PanelField label="Reason for blacklisting *">
+        <PanelField label={t('blacklist.fieldReason')}>
           <PanelTextarea
             value={form.reason}
             onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
-            placeholder="Describe the incident, fraud, breach, or safety concern that led to this blacklisting…"
+            placeholder={t('blacklist.reasonPlaceholder')}
           />
         </PanelField>
 
-        <PanelField label="Severity *">
+        <PanelField label={t('blacklist.fieldSeverity')}>
           <PanelSelect value={form.severity} onChange={e => setForm(f => ({ ...f, severity: e.target.value as BlacklistEntry['severity'] }))}>
-            <option value="critical">Critical — immediate halt</option>
-            <option value="high">High — block all access</option>
-            <option value="medium">Medium — caution, limited access</option>
-            <option value="low">Low — monitor only</option>
+            <option value="critical">{t('blacklist.sevOptCritical')}</option>
+            <option value="high">{t('blacklist.sevOptHigh')}</option>
+            <option value="medium">{t('blacklist.sevOptMedium')}</option>
+            <option value="low">{t('blacklist.sevOptLow')}</option>
           </PanelSelect>
         </PanelField>
 
@@ -638,13 +644,13 @@ export function Blacklist() {
         </div>
 
         <PanelRow>
-          <PanelField label="Reference number">
-            <PanelInput value={form.reference_no} onChange={e => setForm(f => ({ ...f, reference_no: e.target.value }))} placeholder="Incident report #, contract #…" />
+          <PanelField label={t('blacklist.fieldReferenceNo')}>
+            <PanelInput value={form.reference_no} onChange={e => setForm(f => ({ ...f, reference_no: e.target.value }))} placeholder={t('blacklist.referenceNoPlaceholder')} />
           </PanelField>
         </PanelRow>
 
-        <PanelField label="Internal notes">
-          <PanelTextarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any additional context, investigation details, or follow-up actions…" />
+        <PanelField label={t('blacklist.fieldInternalNotes')}>
+          <PanelTextarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder={t('blacklist.internalNotesPlaceholder')} />
         </PanelField>
 
         <PanelDivider />
@@ -652,11 +658,11 @@ export function Blacklist() {
           saved={saved}
           onCancel={() => { setShowPanel(false); }}
           onSave={handleSave}
-          saveLabel="Add to blacklist"
-          successLabel="Entry added"
-          successSub="Blacklist updated and admin notified"
+          saveLabel={t('blacklist.addBtnLabel')}
+          successLabel={t('blacklist.entryAdded')}
+          successSub={t('blacklist.entryAddedSub')}
           disabled={!form.name.trim() || !form.reason.trim()}
-          requiredHint="Name and reason are required"
+          requiredHint={t('blacklist.requiredNameReason')}
         />
       </SlidePanel>
 
@@ -664,8 +670,8 @@ export function Blacklist() {
       <SlidePanel
         open={showResolvePanel}
         onClose={() => { setShowResolvePanel(false); setResolveSaved(false); setResolvingEntry(null); }}
-        title="Resolve blacklist entry"
-        subtitle="Remove restriction · Blacklist Registry"
+        title={t('blacklist.resolvePanelTitle')}
+        subtitle={t('blacklist.resolvePanelSubtitle')}
       >
         {resolvingEntry && (
           <>
@@ -675,20 +681,20 @@ export function Blacklist() {
               </div>
               <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>{resolvingEntry.reason}</div>
               <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>
-                Added by {resolvingEntry.added_by} · {formatDate(resolvingEntry.created_at)}
+                {t('blacklist.addedByLine', { name: resolvingEntry.added_by, date: formatDate(resolvingEntry.created_at) })}
               </div>
             </div>
 
-            <PanelField label="Reason for resolving *">
+            <PanelField label={t('blacklist.fieldResolveReason')}>
               <PanelTextarea
                 value={resolveForm.reason}
                 onChange={e => setResolveForm(f => ({ ...f, reason: e.target.value }))}
-                placeholder="Describe why this restriction is being lifted — investigation concluded, issue resolved, misidentification, etc."
+                placeholder={t('blacklist.resolveReasonPlaceholder')}
               />
             </PanelField>
 
             <div style={{ marginBottom: 16, padding: '10px 14px', background: '#FFFBEB', borderRadius: 12, border: '1px solid #FDE68A', fontSize: 11, color: '#92400E' }}>
-              <strong>This will lift all restrictions</strong> on this entity. If they are a person, their dashboard access will be restored immediately.
+              <strong>{t('blacklist.resolveWarnBold')}</strong> {t('blacklist.resolveWarnRest')}
             </div>
 
             <PanelDivider />
@@ -696,11 +702,11 @@ export function Blacklist() {
               saved={resolveSaved}
               onCancel={() => { setShowResolvePanel(false); setResolvingEntry(null); }}
               onSave={handleResolve}
-              saveLabel="Confirm resolve"
-              successLabel="Entry resolved"
-              successSub="Restrictions lifted and admin notified"
+              saveLabel={t('blacklist.confirmResolve')}
+              successLabel={t('blacklist.entryResolved')}
+              successSub={t('blacklist.entryResolvedSub')}
               disabled={!resolveForm.reason.trim()}
-              requiredHint="Reason for resolving is required"
+              requiredHint={t('blacklist.requiredResolveReason')}
             />
           </>
         )}
@@ -710,8 +716,8 @@ export function Blacklist() {
       <SlidePanel
         open={showDetailPanel}
         onClose={() => { setShowDetailPanel(false); setDetailEntry(null); }}
-        title="Blacklist details"
-        subtitle="Entry information"
+        title={t('blacklist.detailPanelTitle')}
+        subtitle={t('blacklist.detailPanelSubtitle')}
       >
         {detailEntry && (
           <>
@@ -723,45 +729,45 @@ export function Blacklist() {
                 {SEV_CFG[detailEntry.severity].label}
               </span>
               {detailEntry.is_active
-                ? <span className="badge" style={{ background: '#FEF2F2', color: '#DC2626', fontWeight: 700 }}>Active</span>
-                : <span className="badge" style={{ background: '#F0FDF4', color: '#16A34A', fontWeight: 700 }}>Resolved</span>}
+                ? <span className="badge" style={{ background: '#FEF2F2', color: '#DC2626', fontWeight: 700 }}>{t('blacklist.statusActive')}</span>
+                : <span className="badge" style={{ background: '#F0FDF4', color: '#16A34A', fontWeight: 700 }}>{t('blacklist.statusResolved')}</span>}
             </div>
 
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Name</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{t('blacklist.detailName')}</div>
               <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>{detailEntry.name}</div>
               {detailEntry.identifier && <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{detailEntry.identifier}</div>}
             </div>
 
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Reason</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{t('blacklist.detailReason')}</div>
               <div style={{ fontSize: 13, color: '#334155', lineHeight: '1.6' }}>{detailEntry.reason}</div>
             </div>
 
             {detailEntry.notes && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Notes</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{t('blacklist.detailNotes')}</div>
                 <div style={{ fontSize: 13, color: '#334155', lineHeight: '1.6' }}>{detailEntry.notes}</div>
               </div>
             )}
 
             {detailEntry.reference_no && (
               <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Reference</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{t('blacklist.detailReference')}</div>
                 <div style={{ fontSize: 13, color: '#334155' }}>{detailEntry.reference_no}</div>
               </div>
             )}
 
             <div style={{ padding: '12px 14px', background: '#F8FAFC', borderRadius: 12, marginBottom: 12 }}>
               <div style={{ fontSize: 12, color: '#64748B' }}>
-                Added by <strong>{detailEntry.added_by}</strong>{detailEntry.added_by_role ? ` · ${detailEntry.added_by_role}` : ''}
+                {t('blacklist.addedByLabel')} <strong>{detailEntry.added_by}</strong>{detailEntry.added_by_role ? ` · ${detailEntry.added_by_role}` : ''}
               </div>
-              <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>on {formatDate(detailEntry.created_at)}</div>
+              <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>{t('blacklist.onLabel')} {formatDate(detailEntry.created_at)}</div>
             </div>
 
             {/* Notes — tagged people can add live notes about this entity */}
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Notes</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{t('blacklist.detailNotes')}</div>
               <NotesButton
                 entityType="blacklist"
                 entityId={detailEntry.id}
@@ -774,7 +780,7 @@ export function Blacklist() {
             {detailEntry.is_active && (
               <div style={{ padding: '14px', border: '1px solid #E2E8F0', borderRadius: 12, marginBottom: 12 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                  Escalate / change severity
+                  {t('blacklist.escalateTitle')}
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {SEV_ORDER.map((sev) => (
@@ -795,7 +801,7 @@ export function Blacklist() {
                   ))}
                 </div>
                 <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 8, lineHeight: 1.5 }}>
-                  <strong>Low</strong> = monitor only (access allowed, admin alerted on activity) · <strong>Medium/High/Critical</strong> = dashboard access blocked · <strong>High/Critical</strong> = urgent admin alert whenever anyone interacts with this entity.
+                  <strong>{t('blacklist.sevLow')}</strong> {t('blacklist.escLowText')} · <strong>{t('blacklist.escMidLabel')}</strong> {t('blacklist.escMidText')} · <strong>{t('blacklist.escHighLabel')}</strong> {t('blacklist.escHighText')}
                 </div>
               </div>
             )}
@@ -806,13 +812,13 @@ export function Blacklist() {
                 onClick={() => deleteEntry(detailEntry)}
                 style={{ width: '100%', padding: '11px 0', borderRadius: 12, border: '1px solid #FECACA', background: '#FEF2F2', fontSize: 13, fontWeight: 700, color: '#DC2626', cursor: 'pointer', fontFamily: 'inherit', marginTop: 4 }}
               >
-                🗑 Delete entry · resolve &amp; close
+                {t('blacklist.deleteEntryBtn')}
               </button>
             )}
 
             {!detailEntry.is_active && (
               <div style={{ padding: '12px 14px', background: '#F0FDF4', borderRadius: 12, border: '1px solid #BBF7D0' }}>
-                <div style={{ fontSize: 12, color: '#16A34A', fontWeight: 600 }}>Resolved by {detailEntry.resolved_by} on {formatDate(detailEntry.resolved_at)}</div>
+                <div style={{ fontSize: 12, color: '#16A34A', fontWeight: 600 }}>{t('blacklist.resolvedByLine', { name: detailEntry.resolved_by, date: formatDate(detailEntry.resolved_at) })}</div>
                 {detailEntry.resolved_reason && <div style={{ fontSize: 12, color: '#64748B', marginTop: 4 }}>{detailEntry.resolved_reason}</div>}
               </div>
             )}

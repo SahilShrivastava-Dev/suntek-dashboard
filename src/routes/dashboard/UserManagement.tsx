@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
 import { createLogin, updateLogin } from '../../lib/adminUsers';
@@ -105,6 +106,7 @@ const SYSTEM_USERS: DisplayUser[] = MOCK_PROFILES.map(p => ({
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function UserManagement() {
+  const { t } = useTranslation();
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
@@ -219,8 +221,8 @@ export function UserManagement() {
     // user is linked yet (new user, or enabling login on an existing directory row).
     const provisioningNewLogin = form.login_enabled && !existingAuthId;
     if (provisioningNewLogin) {
-      if (!form.email.trim()) { toast.error('Login email is required to create an account'); return; }
-      if (form.password.length < 8) { toast.error('Password must be at least 8 characters'); return; }
+      if (!form.email.trim()) { toast.error(t('userMgmt.errLoginEmailRequired')); return; }
+      if (form.password.length < 8) { toast.error(t('userMgmt.errPasswordMin')); return; }
     }
 
     const plant = plants.find(p => p.name === form.plant);
@@ -244,10 +246,10 @@ export function UserManagement() {
     let accountId = editingUser?.id || '';
     if (editingUser) {
       const { error } = await updateRows('user_accounts', payload).eq('id', editingUser.id);
-      if (error) { toast.error(`Update failed: ${error.message}`); return; }
+      if (error) { toast.error(t('userMgmt.errUpdateFailed', { msg: error.message })); return; }
     } else {
       const { data, error } = await insertRows('user_accounts', payload).select('id').single();
-      if (error) { toast.error(`Save failed: ${error.message}`); return; }
+      if (error) { toast.error(t('userMgmt.errSaveFailed', { msg: error.message })); return; }
       accountId = data?.id || '';
     }
 
@@ -263,7 +265,7 @@ export function UserManagement() {
           role_id: form.role_id,
           plant_id: plant?.id || null,
         });
-        if (error) { toast.error(`Login update failed: ${error}`); return; }
+        if (error) { toast.error(t('userMgmt.errLoginUpdateFailed', { msg: error })); return; }
       } else {
         const { error } = await createLogin({
           user_account_id: accountId,
@@ -273,7 +275,7 @@ export function UserManagement() {
           role_id: form.role_id,
           plant_id: plant?.id || null,
         });
-        if (error) { toast.error(`Login creation failed: ${error}`); return; }
+        if (error) { toast.error(t('userMgmt.errLoginCreateFailed', { msg: error })); return; }
       }
     }
 
@@ -336,19 +338,19 @@ export function UserManagement() {
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Total users</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('userMgmt.totalUsers')}</div>
           <div className="text-[28px] font-extrabold mt-1 num">{total}</div>
-          <div className="text-[11px] text-slate-500 mt-1">all roles</div>
+          <div className="text-[11px] text-slate-500 mt-1">{t('userMgmt.allRolesSub')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">Active</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('userMgmt.active')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-green-600">{activeCount}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{total - activeCount} inactive</div>
+          <div className="text-[11px] text-slate-400 mt-1">{t('userMgmt.inactiveCount', { count: total - activeCount })}</div>
         </div>
         <div className="col-span-12 lg:col-span-6 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-3">By role</div>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-3">{t('userMgmt.byRole')}</div>
           <div className="flex flex-wrap gap-2">
-            {roleBreakdown.length === 0 && <div className="text-[11px] text-slate-400">No users yet</div>}
+            {roleBreakdown.length === 0 && <div className="text-[11px] text-slate-400">{t('userMgmt.noUsersYet')}</div>}
             {roleBreakdown.map(r => {
               const lvl = LEVEL_COLOR[r.level] || { bg: '#F1F5F9', color: '#64748B' };
               return (
@@ -366,11 +368,11 @@ export function UserManagement() {
         {/* Header */}
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">User accounts</div>
-            <div className="text-xs text-slate-500">All staff registered in CaratSense · manage roles and access</div>
+            <div className="text-base font-bold">{t('userMgmt.userAccounts')}</div>
+            <div className="text-xs text-slate-500">{t('userMgmt.userAccountsSub')}</div>
           </div>
           <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAdd}>
-            + Add user
+            + {t('userMgmt.addUser')}
           </button>
         </div>
 
@@ -378,19 +380,19 @@ export function UserManagement() {
         <div className="flex gap-3 mb-4 flex-wrap">
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search name, mobile, email…"
+            placeholder={t('userMgmt.searchPlaceholder')}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, outline: 'none', fontFamily: 'inherit', minWidth: 220 }}
           />
           <select value={filterRole} onChange={e => setFilterRole(e.target.value)}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, fontFamily: 'inherit', background: '#fff' }}>
-            <option value="all">All roles</option>
+            <option value="all">{t('userMgmt.allRoles')}</option>
             {ROLE_OPTIONS.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, fontFamily: 'inherit', background: '#fff' }}>
-            <option value="all">All status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
+            <option value="all">{t('userMgmt.allStatus')}</option>
+            <option value="active">{t('userMgmt.active')}</option>
+            <option value="inactive">{t('userMgmt.inactive')}</option>
           </select>
         </div>
 
@@ -398,26 +400,26 @@ export function UserManagement() {
           <table className="dt">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Mobile</th>
-                <th>WhatsApp</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Level</th>
-                <th>Plant</th>
-                <th>Designation</th>
-                <th>Status</th>
-                <th>Added</th>
-                <th>Actions</th>
+                <th>{t('userMgmt.colName')}</th>
+                <th>{t('userMgmt.colMobile')}</th>
+                <th>{t('userMgmt.colWhatsApp')}</th>
+                <th>{t('userMgmt.colEmail')}</th>
+                <th>{t('userMgmt.colRole')}</th>
+                <th>{t('userMgmt.colLevel')}</th>
+                <th>{t('userMgmt.colPlant')}</th>
+                <th>{t('userMgmt.colDesignation')}</th>
+                <th>{t('userMgmt.colStatus')}</th>
+                <th>{t('userMgmt.colAdded')}</th>
+                <th>{t('userMgmt.colActions')}</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={11} className="text-center text-slate-400 py-6 text-sm">Loading…</td></tr>
+                <tr><td colSpan={11} className="text-center text-slate-400 py-6 text-sm">{t('userMgmt.loading')}</td></tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr><td colSpan={11} className="text-center text-slate-400 py-6 text-sm">
-                  {total === 0 ? 'No users added yet — add the first one' : 'No users match filters'}
+                  {total === 0 ? t('userMgmt.emptyNoUsers') : t('userMgmt.emptyNoMatch')}
                 </td></tr>
               )}
               {filtered.map(u => {
@@ -430,7 +432,7 @@ export function UserManagement() {
                       <div className="flex items-center gap-2">
                         <div className="font-semibold text-slate-800">{u.name}</div>
                         {u._isSystem && (
-                          <span className="badge" style={{ background: '#F1F5F9', color: '#94A3B8', fontSize: 10, padding: '1px 6px' }}>built-in</span>
+                          <span className="badge" style={{ background: '#F1F5F9', color: '#94A3B8', fontSize: 10, padding: '1px 6px' }}>{t('userMgmt.builtIn')}</span>
                         )}
                       </div>
                       {u.designation && <div className="text-[11px] text-slate-400">{u.designation}</div>}
@@ -445,7 +447,7 @@ export function UserManagement() {
                       <div className="flex items-center gap-1.5">
                         <span>{u.email || <span className="text-slate-300">—</span>}</span>
                         {!u._isSystem && u.auth_user_id && (
-                          <span className="badge" style={{ background: '#EFF6FF', color: '#2563EB', fontSize: 9.5, padding: '1px 6px' }}>🔑 login</span>
+                          <span className="badge" style={{ background: '#EFF6FF', color: '#2563EB', fontSize: 9.5, padding: '1px 6px' }}>🔑 {t('userMgmt.login')}</span>
                         )}
                       </div>
                     </td>
@@ -462,26 +464,26 @@ export function UserManagement() {
                     <td className="text-slate-500 text-xs">{u.plants?.name || u.plant_name || <span className="text-slate-300">—</span>}</td>
                     <td className="text-slate-500 text-xs">{u.designation || <span className="text-slate-300">—</span>}</td>
                     <td>
-                      <span className="badge" style={{ background: sc.bg, color: sc.color, fontWeight: 700 }}>{sc.label}</span>
+                      <span className="badge" style={{ background: sc.bg, color: sc.color, fontWeight: 700 }}>{u.is_active ? t('userMgmt.active') : t('userMgmt.inactive')}</span>
                     </td>
                     <td className="text-slate-400 text-xs">{u._isSystem ? <span className="text-slate-300">—</span> : formatDate(u.created_at)}</td>
                     <td>
                       {u._isSystem ? (
-                        <span className="text-[11px] text-slate-400 italic">System profile</span>
+                        <span className="text-[11px] text-slate-400 italic">{t('userMgmt.systemProfile')}</span>
                       ) : (
                         <div className="flex gap-2">
                           <button onClick={() => openEdit(u)}
                             style={{ padding: '5px 12px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#475569' }}>
-                            Edit
+                            {t('userMgmt.edit')}
                           </button>
                           <button onClick={() => toggleStatus(u)}
                             style={{ padding: '5px 12px', borderRadius: 10, border: `1px solid ${u.is_active ? '#FECACA' : '#BBF7D0'}`, background: u.is_active ? '#FEF2F2' : '#F0FDF4', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: u.is_active ? '#DC2626' : '#16A34A' }}>
-                            {u.is_active ? 'Deactivate' : 'Activate'}
+                            {u.is_active ? t('userMgmt.deactivate') : t('userMgmt.activate')}
                           </button>
-                          <button onClick={() => openHistory(u)} title="View change history"
+                          <button onClick={() => openHistory(u)} title={t('userMgmt.viewHistory')}
                             style={{ padding: '5px 12px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#64748B', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
-                            History
+                            {t('userMgmt.history')}
                           </button>
                         </div>
                       )}
@@ -498,31 +500,31 @@ export function UserManagement() {
       <SlidePanel
         open={showPanel}
         onClose={() => { setShowPanel(false); setSaved(false); setEditingUser(null); }}
-        title={editingUser ? 'Edit user' : 'Add user'}
-        subtitle="User Management · Admin"
+        title={editingUser ? t('userMgmt.editUser') : t('userMgmt.addUser')}
+        subtitle={t('userMgmt.panelSubtitle')}
       >
         {/* Name + Mobile */}
         <PanelRow>
-          <PanelField label="Full name *">
-            <PanelInput value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Ramesh Yadav" />
+          <PanelField label={t('userMgmt.fullName')}>
+            <PanelInput value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder={t('userMgmt.fullNamePlaceholder')} />
           </PanelField>
-          <PanelField label="Mobile number *">
-            <PanelInput type="tel" value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} placeholder="e.g. 9876543210" />
+          <PanelField label={t('userMgmt.mobileNumber')}>
+            <PanelInput type="tel" value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} placeholder={t('userMgmt.mobilePlaceholder')} />
           </PanelField>
         </PanelRow>
 
         {/* WhatsApp + Email */}
         <PanelRow>
-          <PanelField label="WhatsApp (if different)">
-            <PanelInput type="tel" value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))} placeholder="Leave blank if same as mobile" />
+          <PanelField label={t('userMgmt.whatsappLabel')}>
+            <PanelInput type="tel" value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))} placeholder={t('userMgmt.whatsappPlaceholder')} />
           </PanelField>
-          <PanelField label="Email">
-            <PanelInput type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="e.g. ramesh@suntek.in" />
+          <PanelField label={t('userMgmt.emailLabel')}>
+            <PanelInput type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder={t('userMgmt.emailPlaceholder')} />
           </PanelField>
         </PanelRow>
 
         {/* Role + Level preview */}
-        <PanelField label="Role *">
+        <PanelField label={t('userMgmt.roleLabel')}>
           <PanelSelect value={form.role_id} onChange={e => setForm(f => ({ ...f, role_id: e.target.value }))}>
             {ROLE_OPTIONS.map(r => (
               <option key={r.id} value={r.id}>{r.level} · {r.label}</option>
@@ -544,27 +546,27 @@ export function UserManagement() {
 
         {/* Plant + Designation */}
         <PanelRow>
-          <PanelField label="Plant / location">
+          <PanelField label={t('userMgmt.plantLabel')}>
             <PanelSelect value={form.plant} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}>
-              <option value="">— Select plant —</option>
+              <option value="">{t('userMgmt.selectPlant')}</option>
               {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
           </PanelField>
-          <PanelField label="Designation / job title">
-            <PanelInput value={form.designation} onChange={e => setForm(f => ({ ...f, designation: e.target.value }))} placeholder="e.g. Store In-Charge" />
+          <PanelField label={t('userMgmt.designationLabel')}>
+            <PanelInput value={form.designation} onChange={e => setForm(f => ({ ...f, designation: e.target.value }))} placeholder={t('userMgmt.designationPlaceholder')} />
           </PanelField>
         </PanelRow>
 
         {/* Preferred language */}
-        <PanelField label="Preferred language">
+        <PanelField label={t('userMgmt.preferredLanguage')}>
           <PanelSelect value={form.preferred_language} onChange={e => setForm(f => ({ ...f, preferred_language: e.target.value }))}>
             {LANGUAGE_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
           </PanelSelect>
         </PanelField>
 
         {/* Access note */}
-        <PanelField label="Access note (optional)">
-          <PanelTextarea value={form.access_note} onChange={e => setForm(f => ({ ...f, access_note: e.target.value }))} placeholder="Any notes about this user's access scope, restrictions, or special permissions…" />
+        <PanelField label={t('userMgmt.accessNoteLabel')}>
+          <PanelTextarea value={form.access_note} onChange={e => setForm(f => ({ ...f, access_note: e.target.value }))} placeholder={t('userMgmt.accessNotePlaceholder')} />
         </PanelField>
 
         {/* ── Login access ─────────────────────────────────────────────────── */}
@@ -572,10 +574,10 @@ export function UserManagement() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>
-                Dashboard login {editingUser?.auth_user_id && <span style={{ fontSize: 11, color: '#16A34A', fontWeight: 700 }}>· account exists</span>}
+                {t('userMgmt.dashboardLogin')} {editingUser?.auth_user_id && <span style={{ fontSize: 11, color: '#16A34A', fontWeight: 700 }}>{t('userMgmt.accountExists')}</span>}
               </div>
               <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
-                Give this person a sign-in. They'll log in with the email above and the password you set here.
+                {t('userMgmt.loginHelper')}
               </div>
             </div>
             <button
@@ -595,19 +597,19 @@ export function UserManagement() {
             <div style={{ marginTop: 12 }}>
               {!form.email.trim() && (
                 <div style={{ fontSize: 11, color: '#DC2626', marginBottom: 8 }}>
-                  ⚠ Set the <strong>Email</strong> field above — it's the login username.
+                  {t('userMgmt.setEmailWarnPre')}<strong>{t('userMgmt.emailField')}</strong>{t('userMgmt.setEmailWarnPost')}
                 </div>
               )}
-              <PanelField label={editingUser?.auth_user_id ? 'Set new password (leave blank to keep current)' : 'Password *'}>
+              <PanelField label={editingUser?.auth_user_id ? t('userMgmt.setNewPassword') : t('userMgmt.passwordLabel')}>
                 <PanelInput
                   type="password"
                   value={form.password}
                   onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                  placeholder={editingUser?.auth_user_id ? 'Leave blank to keep existing password' : 'Min 8 characters — share with the user securely'}
+                  placeholder={editingUser?.auth_user_id ? t('userMgmt.passwordKeepPlaceholder') : t('userMgmt.passwordNewPlaceholder')}
                 />
               </PanelField>
               <div style={{ fontSize: 11, color: '#94A3B8' }}>
-                The account is activated immediately — the user can sign in right away. You can change email or reset the password here anytime.
+                {t('userMgmt.accountActivatedHelper')}
               </div>
             </div>
           )}
@@ -616,8 +618,8 @@ export function UserManagement() {
         {/* Active toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, padding: '12px 14px', background: '#F8FAFC', borderRadius: 12, border: '1px solid #E2E8F0' }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>Account active</div>
-            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>Inactive users can't log in</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{t('userMgmt.accountActive')}</div>
+            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>{t('userMgmt.accountActiveHelper')}</div>
           </div>
           <button
             onClick={() => setForm(f => ({ ...f, is_active: !f.is_active }))}
@@ -640,11 +642,11 @@ export function UserManagement() {
           saved={saved}
           onCancel={() => { setShowPanel(false); setEditingUser(null); }}
           onSave={handleSave}
-          saveLabel={editingUser ? 'Save changes' : 'Add user'}
-          successLabel={editingUser ? 'User updated' : 'User added'}
-          successSub={editingUser ? 'Changes saved successfully' : 'User account created successfully'}
+          saveLabel={editingUser ? t('userMgmt.saveChanges') : t('userMgmt.addUser')}
+          successLabel={editingUser ? t('userMgmt.userUpdated') : t('userMgmt.userAdded')}
+          successSub={editingUser ? t('userMgmt.userUpdatedSub') : t('userMgmt.userAddedSub')}
           disabled={!form.name.trim() || !form.mobile.trim()}
-          requiredHint="Fill in name and mobile number to add user"
+          requiredHint={t('userMgmt.requiredHint')}
         />
       </SlidePanel>
 
@@ -652,13 +654,13 @@ export function UserManagement() {
       <SlidePanel
         open={!!historyUser}
         onClose={() => setHistoryUser(null)}
-        title="Profile history"
-        subtitle={historyUser ? `${historyUser.name} · User Management` : ''}
+        title={t('userMgmt.profileHistory')}
+        subtitle={historyUser ? `${historyUser.name} · ${t('userMgmt.panelSubtitleHistory')}` : ''}
       >
         {historyLoading ? (
-          <div className="text-sm text-slate-400 py-6 text-center">Loading…</div>
+          <div className="text-sm text-slate-400 py-6 text-center">{t('userMgmt.loading')}</div>
         ) : historyEvents.length === 0 ? (
-          <div className="text-sm text-slate-400 py-6 text-center">No recorded actions yet for this profile.</div>
+          <div className="text-sm text-slate-400 py-6 text-center">{t('userMgmt.noHistory')}</div>
         ) : (
           <div className="flex flex-col gap-2.5">
             {historyEvents.map(ev => {
@@ -671,7 +673,7 @@ export function UserManagement() {
                   </div>
                   {ev.details && <div className="text-[13px] text-slate-700 leading-snug">{ev.details}</div>}
                   <div className="text-[11px] text-slate-400 mt-1">
-                    by {ev.actor_name || 'Unknown'}{ev.actor_role ? ` · ${ev.actor_role}` : ''}
+                    {t('userMgmt.by')} {ev.actor_name || t('userMgmt.unknown')}{ev.actor_role ? ` · ${ev.actor_role}` : ''}
                   </div>
                 </div>
               );

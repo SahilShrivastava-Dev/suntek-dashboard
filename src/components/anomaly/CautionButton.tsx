@@ -32,6 +32,14 @@ export function CautionButton() {
 
   useEffect(() => { setOpen(false); }, [activeProfile.id]);
 
+  // Close when the page scrolls behind the (fixed) panel.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [open]);
+
   // RBAC: only show the caution button if this role can reach the anomaly dashboard
   if (!profileCanAccess(activeProfile, '/dashboard/anomalies')) return null;
 

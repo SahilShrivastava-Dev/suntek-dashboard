@@ -27,6 +27,14 @@ export function LanguageSwitcher() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Close when the page scrolls behind the (fixed) menu.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [open]);
+
   async function choose(code: string) {
     setOpen(false);
     applyLanguage(code); // instant UI + remembered for next boot

@@ -73,6 +73,15 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
   // Close on profile change
   useEffect(() => { setOpen(false); }, [activeProfile.id]);
 
+  // Close when the page scrolls behind the (fixed) panel. A no-capture window
+  // listener fires only for page scroll, not the panel's own inner scroll.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [open]);
+
   function handleNotifClick(n: AppNotification) {
     markRead(n.id);
     if (n.route) { navigate(n.route); setOpen(false); }

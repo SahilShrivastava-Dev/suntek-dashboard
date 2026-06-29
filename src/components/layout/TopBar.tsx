@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { RoleSwitchButton } from './RoleSwitchButton';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { CautionButton } from '../anomaly/CautionButton';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
@@ -43,6 +45,7 @@ interface TopBarProps {
 
 export function TopBar({ title, breadcrumb }: TopBarProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
   const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady } = useNotifications();
   const [open, setOpen] = useState(false);
@@ -72,11 +75,11 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
   function formatAge(ts: string) {
     const diff = Date.now() - new Date(ts).getTime();
     const m = Math.floor(diff / 60000);
-    if (m < 1) return 'just now';
-    if (m < 60) return `${m}m ago`;
+    if (m < 1) return t('time.justNow');
+    if (m < 60) return t('time.minutesAgo', { count: m });
     const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
-    return `${Math.floor(h / 24)}d ago`;
+    if (h < 24) return t('time.hoursAgo', { count: h });
+    return t('time.daysAgo', { count: Math.floor(h / 24) });
   }
 
   const roleId = activeProfile?.id ?? 'admin';
@@ -97,9 +100,12 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
         {/* Live sync pill */}
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-full text-[12px]">
           <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-          <span className="font-medium">Live</span>
-          <span className="text-slate-400">· last sync 12s</span>
+          <span className="font-medium">{t('topbar.live')}</span>
+          <span className="text-slate-400">· {t('topbar.lastSync')}</span>
         </div>
+
+        {/* Language switcher */}
+        <LanguageSwitcher />
 
         {/* Anomaly caution button (renders only for roles with anomaly access) */}
         <CautionButton />
@@ -144,7 +150,7 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
             <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid #F1F5F9', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>Notifications</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>{t('topbar.notifications')}</div>
                   <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
                     {activeProfile.roleLabel} · {activeProfile.name}
                   </div>
@@ -159,20 +165,20 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
                         padding: '4px 8px', borderRadius: 8, fontFamily: 'inherit',
                       }}
                     >
-                      Mark all read
+                      {t('topbar.markAllRead')}
                     </button>
                   )}
                   {notifications.length > 0 && (
                     <button
                       onClick={clearAll}
-                      title="Remove all notifications from your view"
+                      title={t('topbar.clearAllHint')}
                       style={{
                         fontSize: 11, fontWeight: 600, color: '#94A3B8',
                         background: 'none', border: 'none', cursor: 'pointer',
                         padding: '4px 8px', borderRadius: 8, fontFamily: 'inherit',
                       }}
                     >
-                      Clear all
+                      {t('topbar.clearAll')}
                     </button>
                   )}
                 </div>
@@ -183,12 +189,12 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {!tableReady ? (
                 <div style={{ padding: '32px 18px', textAlign: 'center', color: '#94A3B8', fontSize: 12 }}>
-                  <div style={{ marginBottom: 6 }}>Notification table not set up yet.</div>
-                  <div style={{ fontSize: 11, color: '#CBD5E1' }}>Run the SQL migration in Supabase to enable live notifications.</div>
+                  <div style={{ marginBottom: 6 }}>{t('topbar.tableMissing')}</div>
+                  <div style={{ fontSize: 11, color: '#CBD5E1' }}>{t('topbar.tableMissingHint')}</div>
                 </div>
               ) : notifications.length === 0 ? (
                 <div style={{ padding: '40px 18px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
-                  No notifications yet
+                  {t('topbar.empty')}
                 </div>
               ) : (
                 notifications.map(n => {
@@ -224,7 +230,7 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
                           <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3, lineHeight: 1.4 }}>{n.body}</div>
                         )}
                         {n.actor_name && (
-                          <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>by {n.actor_name}</div>
+                          <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>{t('topbar.by', { name: n.actor_name })}</div>
                         )}
                         <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>{formatAge(n.created_at)}</div>
                       </div>
@@ -240,7 +246,7 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
             {/* Footer */}
             <div style={{ padding: '10px 18px', borderTop: '1px solid #F1F5F9', flexShrink: 0 }}>
               <div style={{ fontSize: 11, color: '#94A3B8', textAlign: 'center' }}>
-                Live · <strong>{activeProfile.roleLabel}</strong>
+                {t('topbar.live')} · <strong>{activeProfile.roleLabel}</strong>
                 {activeProfile.plant ? ` · ${activeProfile.plant}` : ''}
               </div>
             </div>

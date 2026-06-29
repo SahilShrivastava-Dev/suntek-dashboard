@@ -3,6 +3,7 @@ import { MOCK_PROFILES, DEFAULT_PROFILE } from '../lib/profiles';
 import type { MockProfile } from '../lib/profiles';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
+import { applyLanguage } from '../i18n';
 
 type DbUser = Pick<
   Database['public']['Tables']['user_accounts']['Row'],
@@ -102,11 +103,14 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       }
       const { data } = await supabase
         .from('profiles')
-        .select('role, plant_id, name')
+        .select('role, plant_id, name, preferred_language')
         .eq('id', userId)
         .maybeSingle()
-        .returns<{ role: string | null; plant_id: string | null; name: string | null }>();
+        .returns<{ role: string | null; plant_id: string | null; name: string | null; preferred_language: string | null }>();
       if (cancelled) return;
+
+      // Boot the UI in the user's saved language (falls back to English).
+      applyLanguage(data?.preferred_language);
 
       const template = MOCK_PROFILES.find((p) => p.id === data?.role);
       if (!template) {

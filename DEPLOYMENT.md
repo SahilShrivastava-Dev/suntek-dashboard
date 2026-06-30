@@ -29,24 +29,109 @@ Supabase via a separate sync script on the BUSY VM (out of scope here).
 - ☐ Sign in to supabase.com with the **client email**, create a new project.
 - ☐ Save the project's **DB password** (you set it at creation) somewhere safe.
 
-### 1.2 Create the schema — one paste
-- ☐ Dashboard → **SQL Editor** → New query.
-- ☐ Paste the entire contents of **`supabase-queries/00_full_setup.sql`** → **Run**.
-- ☐ Confirm "Success". This creates **38 tables**, all foreign keys, RLS policies,
-  indexes, realtime, and seeds `plants`, `detector_config`, `tanks`, `cpm_drum_stock`.
+### 1.2 Replicate the database — EXACT clone (primary method)
 
-> `00_full_setup.sql` is the reconciliation of all 24 `supabase-queries/` files
-> **plus** 5 tables that previously lived only in `supabase/migrations/`
-> (`tanks`, `cpm_drum_stock`, `alerts`, `operator_sessions`, `anomaly_flags`).
-> It is idempotent — safe to re-run. Do **not** also run the individual files.
+> **Goal: a byte-identical copy** — every table, column, relationship, constraint,
+> index, and RLS policy exactly as in the source DB. The only method that
+> *guarantees* this is to dump the live database and restore it (Supabase is plain
+> Postgres). There is **no dashboard button** to copy a project across accounts;
+> "Transfer project" only moves the *same* project between orgs. So we dump/restore.
+>
+> Pick **Option A** (Supabase CLI — recommended) or **Option B** (raw `pg_dump`).
+> Both produce an exact clone; A is tuned for Supabase, B uses only the standard
+> Postgres client.
 
-### 1.3 Verify realtime
+#### Both options need: the two database connection strings
+- ☐ **Source (your) DB URI** — old project → Dashboard → **Project Settings →
+  Database → Connection string → URI**. Copy it; it already contains the password.
+  (If it shows `[YOUR-PASSWORD]`, paste in the DB password you set at project creation.)
+- ☐ **Target (client) DB URI** — same place in the **new** client project.
+- ☐ Keep both handy; below they're referred to as `$OLD` and `$NEW`:
+  ```bash
+  OLD="postgresql://postgres:[OLD_PW]@db.<old-ref>.supabase.co:5432/postgres"
+  NEW="postgresql://postgres:[NEW_PW]@db.<new-ref>.supabase.co:5432/postgres"
+  ```
+  > If a direct connection refuses, use the **Session pooler** URI shown on the same
+  > page (port `5432`, host `aws-0-<region>.pooler.supabase.com`). Works the same.
+
+---
+
+#### Option A — Supabase CLI (recommended)
+
+**What you need + how to get it**
+- ☐ **Supabase CLI installed** — `brew install supabase/tap/supabase`
+  (macOS) or `npm i -g supabase`. Verify: `supabase --version`.
+- ☐ **`psql`** (Postgres client) to load the dumps — `brew install libpq`
+  then `brew link --force libpq` (macOS), or install the PostgreSQL package.
+  Verify: `psql --version`.
+- ☐ The `$OLD` and `$NEW` URIs from above.
+
+**Steps**
+```bash
+# 1. Structure: tables, relations, constraints, indexes, RLS, functions
+supabase db dump --db-url "$OLD" -f schema.sql
+
+# 2. Auth logins (so the exact same users exist) — restore BEFORE data,
+#    because profiles refers to auth.users
+supabase db dump --db-url "$OLD" --schema auth --data-only --use-copy -f auth_users.sql
+
+# 3. App data, exactly as-is
+supabase db dump --db-url "$OLD" --data-only --use-copy -f data.sql
+
+# 4. Restore into the client project IN THIS ORDER
+psql "$NEW" -f schema.sql
+psql "$NEW" -f auth_users.sql
+psql "$NEW" -f data.sql
+```
+- ☐ Each command finishes without error (a few "already exists" notices on
+  Supabase-managed objects are normal and harmless).
+
+---
+
+#### Option B — raw `pg_dump` (no CLI install)
+
+**What you need + how to get it**
+- ☐ **PostgreSQL client tools** (`pg_dump` + `psql`) — `brew install libpq &&
+  brew link --force libpq` (macOS), or install PostgreSQL. The client major
+  version should be **≥** the server's (Supabase runs PG 15). Verify:
+  `pg_dump --version`.
+- ☐ The `$OLD` and `$NEW` URIs from above.
+
+**Steps**
+```bash
+# 1. Structure + app data of the public schema in one file
+pg_dump "$OLD" --schema=public --no-owner --no-privileges -f clone.sql
+
+# 2. Auth logins (optional but needed for the same users to exist)
+pg_dump "$OLD" --schema=auth --data-only --no-owner --no-privileges -f auth_users.sql
+
+# 3. Restore into the client project — auth users first, then everything else
+psql "$NEW" -f auth_users.sql
+psql "$NEW" -f clone.sql
+```
+- ☐ Completes without fatal errors.
+
+> **Note:** `--schema=public` includes your tables, foreign keys, indexes, and RLS
+> policies. It does **not** include the 6 edge functions (those aren't in the DB —
+> see 1.4) or Supabase-managed `storage` config (you use Cloudinary, so N/A).
+
+---
+
+### 1.3 Fallback only — rebuild from the consolidated script
+Use this **only** if you cannot get the DB connection strings (e.g. no DB
+password). It is a hand-reconstruction, not a guaranteed-identical clone.
+- ☐ Dashboard → **SQL Editor** → paste all of **`supabase-queries/00_full_setup.sql`**
+  → **Run**. Creates 38 tables + RLS + realtime + seed (`plants`, `detector_config`,
+  `tanks`, `cpm_drum_stock`). Idempotent. Then do the 1.6 admin bootstrap manually
+  (no auth users are migrated in this path).
+
+### 1.4 Verify realtime
 - ☐ Database → **Replication** → `supabase_realtime`. Confirm these are ON
-  (the script adds them, but verify): `notifications`, `anomaly_log`,
-  `entity_notes`, `entity_note_receipts`, `entity_watchers`, `blacklist_events`,
-  `tanks`, `cpm_drum_stock`, `alerts`, `anomaly_flags`.
+  (a clone usually carries publication membership, but verify): `notifications`,
+  `anomaly_log`, `entity_notes`, `entity_note_receipts`, `entity_watchers`,
+  `blacklist_events`, `tanks`, `cpm_drum_stock`, `alerts`, `anomaly_flags`.
 
-### 1.4 Deploy the 6 Edge Functions
+### 1.5 Deploy the 6 Edge Functions
 These power OCR + admin user provisioning. From the repo root:
 ```bash
 supabase login                                  # client account
@@ -60,7 +145,7 @@ supabase functions deploy admin-users
 ```
 - ☐ All 6 deploy without error.
 
-### 1.5 Set Edge Function secrets
+### 1.6 Set Edge Function secrets
 ```bash
 supabase secrets set NVIDIA_API_KEY=<new client NVIDIA key>
 # SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY are injected
@@ -68,9 +153,10 @@ supabase secrets set NVIDIA_API_KEY=<new client NVIDIA key>
 ```
 - ☐ `supabase secrets list` shows `NVIDIA_API_KEY`.
 
-### 1.6 Bootstrap the first admin login
-Real logins are provisioned in-app by an admin, but the **first** admin must be
-seeded by hand (the `admin-users` function only lets an existing admin create others):
+### 1.7 Bootstrap the first admin login  ·  *skip if you cloned auth users (1.2 A/B)*
+If you used the **exact clone** (Option A or B), the logins already exist — skip this.
+Only needed on the **fallback** path (1.3): the **first** admin must be seeded by
+hand (the `admin-users` function only lets an existing admin create others):
 - ☐ Authentication → Users → **Add user** (set a password, `email_confirm = true`).
 - ☐ Copy that user's UUID, then in SQL Editor:
   ```sql
@@ -80,7 +166,7 @@ seeded by hand (the `admin-users` function only lets an existing admin create ot
   ```
 - ☐ Log in as that admin → provision everyone else from the **User Management** page.
 
-### 1.7 Grab the new keys (for step 4)
+### 1.8 Grab the new keys (for step 4)
 - ☐ Settings → API → copy **Project URL** and **anon public key**.
 
 ---
@@ -97,7 +183,7 @@ seeded by hand (the `admin-users` function only lets an existing admin create ot
 ## 3. NVIDIA API (simple)
 - ☐ Create an NVIDIA API key under the client account.
 - ☐ It's used in **two** places — set it in both:
-  - Supabase Edge Function secret `NVIDIA_API_KEY` (step 1.5) ✅ secure.
+  - Supabase Edge Function secret `NVIDIA_API_KEY` (step 1.6) ✅ secure.
   - The frontend env `VITE_NVIDIA_API_KEY` (step 4) ⚠️ **see security note below**.
 
 > ⚠️ **`VITE_NVIDIA_API_KEY` is bundled into the public JS** — anyone can extract it

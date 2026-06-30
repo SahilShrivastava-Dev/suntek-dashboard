@@ -27,6 +27,7 @@ interface GpsData {
   isOnSite: boolean;
   statusLabel: string;
   distanceM: number;
+  radiusM: number;
 }
 
 interface CheckInProps {
@@ -88,7 +89,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: 'environment',  // rear camera on mobile
+          facingMode: 'user',  // FRONT camera — this is a selfie compliance check-in
           width:  { ideal: 1280 },
           height: { ideal: 720 },
         },
@@ -181,6 +182,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
           isOnSite:    result.isOnSite,
           statusLabel: result.statusLabel,
           distanceM:   result.distanceM,
+          radiusM:     result.radiusM,
         });
         setGpsState('done');
       },
@@ -200,7 +202,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
     // Warn if out of zone, but allow override
     if (!gpsData.isOnSite) {
       const ok = window.confirm(
-        `⚠️ Out of Zone\n\nYou are ${gpsData.distanceM.toLocaleString()} m away from ${PLANT_NAME}.\n\nThis check-in will be flagged for review. Submit anyway?`
+        `${t('checkin.outOfZoneTitle')}\n\n${t('checkin.outOfZoneBody', { dist: gpsData.distanceM.toLocaleString(), plant: PLANT_NAME })}`
       );
       if (!ok) return;
     }
@@ -378,7 +380,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
           </div>
           <div className="text-sm" style={{ color: gpsData?.isOnSite ? '#15803D' : '#B45309' }}>
             {gpsData
-              ? gpsData.statusLabel
+              ? (gpsData.isOnSite ? t('checkin.withinGeofence', { dist: gpsData.distanceM }) : t('checkin.outsideZoneLabel', { dist: gpsData.distanceM, radius: gpsData.radiusM }))
               : t('checkin.complianceHint')}
           </div>
         </div>
@@ -593,7 +595,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
                     className="text-sm font-medium"
                     style={{ color: gpsData.isOnSite ? '#15803D' : '#DC2626' }}
                   >
-                    {gpsData.statusLabel}
+                    {gpsData.isOnSite ? t('checkin.withinGeofence', { dist: gpsData.distanceM }) : t('checkin.outsideZoneLabel', { dist: gpsData.distanceM, radius: gpsData.radiusM })}
                   </div>
                 </>
               )}

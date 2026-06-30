@@ -32,6 +32,8 @@ export interface GeofenceResult {
   distanceM: number;
   isOnSite: boolean;
   status: 'on_site' | 'out_of_zone';
+  /** Allowed radius (m) — for building a localized status label in the UI. */
+  radiusM: number;
   statusLabel: string;
 }
 
@@ -58,6 +60,7 @@ export function validateGeofence(
     distanceM: Math.round(distanceM),
     isOnSite,
     status: isOnSite ? 'on_site' : 'out_of_zone',
+    radiusM,
     statusLabel: isOnSite
       ? `Within Factory Geofence (${Math.round(distanceM)}m from centre)`
       : `Outside Zone — ${Math.round(distanceM)}m from centre (limit: ${radiusM}m)`,

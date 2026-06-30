@@ -9,6 +9,7 @@ import { Search } from 'lucide-react';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { useSearchPalette } from '../../contexts/SearchPaletteContext';
+import { dropdownStyle } from '../../lib/uiPosition';
 import type { AppNotification } from '../../contexts/NotificationsContext';
 
 type NType = 'critical' | 'urgent' | 'warning' | 'info';
@@ -43,9 +44,11 @@ function TypeIcon({ type }: { type: NType }) {
 interface TopBarProps {
   title: string;
   breadcrumb: string;
+  /** Open the mobile sidebar drawer (shown only below md). */
+  onMenu?: () => void;
 }
 
-export function TopBar({ title, breadcrumb }: TopBarProps) {
+export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { openPalette } = useSearchPalette();
@@ -70,6 +73,15 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
   // Close on profile change
   useEffect(() => { setOpen(false); }, [activeProfile.id]);
 
+  // Close when the page scrolls behind the (fixed) panel. A no-capture window
+  // listener fires only for page scroll, not the panel's own inner scroll.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [open]);
+
   function handleNotifClick(n: AppNotification) {
     markRead(n.id);
     if (n.route) { navigate(n.route); setOpen(false); }
@@ -91,15 +103,25 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
   return (
     <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
       {/* Left: title block */}
-      <div className="flex items-center gap-3">
-        <div>
+      <div className="flex items-center gap-2.5 min-w-0">
+        {/* Mobile hamburger — opens the sidebar drawer */}
+        <button
+          onClick={onMenu}
+          aria-label="Menu"
+          className="md:hidden w-10 h-10 shrink-0 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <div className="min-w-0">
           <div className="text-[12px] text-slate-500">{breadcrumb}</div>
-          <h1 className="serif text-[34px] leading-[1] mt-0.5">{title}</h1>
+          <h1 className="serif text-[22px] md:text-[34px] leading-[1.05] md:leading-[1] mt-0.5">{title}</h1>
         </div>
       </div>
 
       {/* Right: live indicator + notifications + profile switcher */}
-      <div className="flex items-center gap-2" style={{ position: 'relative' }}>
+      <div className="flex items-center gap-2 flex-wrap justify-end w-full md:w-auto" style={{ position: 'relative' }}>
         {/* Live sync pill */}
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-full text-[12px]">
           <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
@@ -109,7 +131,7 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
 
         {/* Global quick-search (Cmd/Ctrl+K) */}
         <button
-          onClick={openPalette}
+          onClick={() => openPalette()}
           title={`${t('nav.quickSearch')} (⌘K)`}
           aria-label={t('nav.quickSearch')}
           className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
@@ -126,7 +148,7 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
         {/* Bell button */}
         <button
           ref={btnRef}
-          className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
+          className={`w-10 h-10 rounded-full border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
           onClick={() => setOpen(v => !v)}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -135,8 +157,8 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
           </svg>
           {unread > 0 && (
             <span style={{
-              position: 'absolute', top: 6, right: 6,
-              width: 16, height: 16, borderRadius: '50%',
+              position: 'absolute', top: -2, right: -2,
+              minWidth: 16, height: 16, padding: '0 3px', borderRadius: 999,
               background: '#F47651', border: '2px solid #fff',
               fontSize: 9, fontWeight: 700, color: '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -151,8 +173,7 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
           <div
             ref={panelRef}
             style={{
-              position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-              width: 360, maxHeight: 520,
+              ...dropdownStyle(btnRef.current, 360, 520),
               background: '#fff', border: '1px solid #E2E8F0',
               borderRadius: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
               zIndex: 200, display: 'flex', flexDirection: 'column',
@@ -266,11 +287,13 @@ export function TopBar({ title, breadcrumb }: TopBarProps) {
           </div>
         )}
 
-        {/* Role preview switcher (admin only) — ⇅ icon, separate from the account menu */}
-        <RoleSwitchButton />
-
-        {/* Personal account menu (Settings · Sign out) */}
-        <ProfileSwitcher />
+        {/* Account controls — separated from the info icons */}
+        <div className="flex items-center gap-2 ml-1 pl-2 border-l border-slate-200">
+          {/* Role preview switcher (admin only) — ⇅ icon */}
+          <RoleSwitchButton />
+          {/* Personal account menu (Settings · Sign out) */}
+          <ProfileSwitcher />
+        </div>
       </div>
     </div>
   );

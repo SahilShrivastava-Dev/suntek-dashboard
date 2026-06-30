@@ -4,6 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useAnomalies } from '../../contexts/AnomalyContext';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { profileCanAccess } from '../../lib/profiles';
+import { dropdownStyle } from '../../lib/uiPosition';
 import type { Severity } from '../../lib/anomaly/types';
 
 const ICON_BG: Record<Severity, string> = { urgent: '#FEE2E2', warning: '#FEF3C7', info: '#DBEAFE' };
@@ -31,6 +32,14 @@ export function CautionButton() {
 
   useEffect(() => { setOpen(false); }, [activeProfile.id]);
 
+  // Close when the page scrolls behind the (fixed) panel.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [open]);
+
   // RBAC: only show the caution button if this role can reach the anomaly dashboard
   if (!profileCanAccess(activeProfile, '/dashboard/anomalies')) return null;
 
@@ -51,14 +60,14 @@ export function CautionButton() {
       <button
         ref={btnRef}
         title="Anomaly detection"
-        className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
+        className={`w-10 h-10 rounded-full border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
         onClick={() => setOpen(v => !v)}
       >
-        <AlertTriangle size={16} color={criticalCount > 0 ? badgeColor : '#64748B'} strokeWidth={2} />
+        <AlertTriangle size={16} color={open ? '#fff' : (criticalCount > 0 ? badgeColor : '#64748B')} strokeWidth={2} />
         {criticalCount > 0 && (
           <span style={{
-            position: 'absolute', top: 6, right: 6,
-            width: 16, height: 16, borderRadius: '50%',
+            position: 'absolute', top: -2, right: -2,
+            minWidth: 16, height: 16, padding: '0 3px', borderRadius: 999,
             background: badgeColor, border: '2px solid #fff',
             fontSize: 9, fontWeight: 700, color: '#fff',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -72,8 +81,7 @@ export function CautionButton() {
         <div
           ref={panelRef}
           style={{
-            position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-            width: 380, maxHeight: 540,
+            ...dropdownStyle(btnRef.current, 380, 540),
             background: '#fff', border: '1px solid #E2E8F0',
             borderRadius: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
             zIndex: 200, display: 'flex', flexDirection: 'column', overflow: 'hidden',

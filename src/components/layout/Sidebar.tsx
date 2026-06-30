@@ -10,6 +10,10 @@ import { profileCanAccess } from '../../lib/profiles';
 interface SidebarProps {
   user: AuthUser | null;
   onSignOut: () => void;
+  /** Drawer open state on mobile (md+ is always shown). */
+  mobileOpen?: boolean;
+  /** Close the mobile drawer (called after navigation). */
+  onClose?: () => void;
 }
 
 /**
@@ -176,7 +180,7 @@ function SectionHeader({ label }: { label: string }) {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
-export function Sidebar({ user, onSignOut }: SidebarProps) {
+export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
@@ -297,11 +301,12 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
 
   function navTo(path: string) {
     navigate(path);
+    onClose?.(); // close the mobile drawer after navigating
   }
 
   return (
     <aside
-      className="fixed left-0 top-0 bottom-0 bg-white border-r border-slate-100 p-5 overflow-y-auto z-40"
+      className={`fixed left-0 top-0 bottom-0 bg-white border-r border-slate-100 p-5 overflow-y-auto z-50 transition-transform duration-200 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
       style={{ width: '260px' }}
     >
       {/* Logo */}
@@ -318,7 +323,7 @@ export function Sidebar({ user, onSignOut }: SidebarProps) {
       {/* Quick Search */}
       <button
         className="btn-accent pill px-4 py-2.5 font-semibold text-[13px] flex items-center gap-2 mb-2 w-full justify-center"
-        onClick={openPalette}
+        onClick={() => { openPalette(); onClose?.(); }}
       >
         <IconSearch />
         <span>{t('nav.quickSearch')}</span>

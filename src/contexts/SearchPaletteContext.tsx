@@ -2,8 +2,8 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { CommandPalette } from '../components/search/CommandPalette';
 
 interface SearchPaletteValue {
-  /** Open the global quick-search palette. */
-  openPalette: () => void;
+  /** Open the global quick-search palette, optionally pre-filled with a query. */
+  openPalette: (initialQuery?: string) => void;
 }
 
 const SearchPaletteContext = createContext<SearchPaletteValue>({ openPalette: () => {} });
@@ -19,7 +19,8 @@ export function useSearchPalette(): SearchPaletteValue {
  */
 export function SearchPaletteProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
-  const openPalette = useCallback(() => setOpen(true), []);
+  const [initialQuery, setInitialQuery] = useState('');
+  const openPalette = useCallback((q = '') => { setInitialQuery(q); setOpen(true); }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -35,7 +36,7 @@ export function SearchPaletteProvider({ children }: { children: React.ReactNode 
   return (
     <SearchPaletteContext.Provider value={{ openPalette }}>
       {children}
-      <CommandPalette open={open} onClose={() => setOpen(false)} />
+      <CommandPalette open={open} initialQuery={initialQuery} onClose={() => setOpen(false)} />
     </SearchPaletteContext.Provider>
   );
 }

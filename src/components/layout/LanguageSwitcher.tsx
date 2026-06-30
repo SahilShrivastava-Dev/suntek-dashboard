@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { updateRows } from '../../lib/db';
 import { applyLanguage, AVAILABLE_LANGUAGES } from '../../i18n';
+import { dropdownStyle } from '../../lib/uiPosition';
 
 /**
  * Globe dropdown in the top bar — change the UI language on the fly. The choice
@@ -25,6 +26,14 @@ export function LanguageSwitcher() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // Close when the page scrolls behind the (fixed) menu.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [open]);
 
   async function choose(code: string) {
     setOpen(false);
@@ -49,7 +58,7 @@ export function LanguageSwitcher() {
         onClick={() => setOpen((v) => !v)}
         title={t('topbar.language')}
         aria-label={t('topbar.language')}
-        className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
+        className={`w-10 h-10 rounded-full border flex items-center justify-center ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="10" />
@@ -62,7 +71,7 @@ export function LanguageSwitcher() {
         <div
           ref={menuRef}
           style={{
-            position: 'absolute', top: 'calc(100% + 8px)', right: 0, minWidth: 180,
+            ...dropdownStyle(btnRef.current, 200, 400),
             background: '#fff', border: '1px solid #E2E8F0', borderRadius: 14,
             boxShadow: '0 12px 40px rgba(0,0,0,0.12)', zIndex: 200, overflow: 'hidden', padding: 6,
           }}

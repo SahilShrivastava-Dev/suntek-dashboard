@@ -49,6 +49,9 @@ interface RoleContextValue {
    * null for the static archetypes / dev (they see everything).
    */
   activeAccountFloor: string | null;
+  /** False until the session/profile has been resolved (show a loader, not the
+   * locked fallback, while this is false). */
+  authResolved: boolean;
   /** The logged-in user's own profile (who they actually are). */
   authProfile: MockProfile | null;
   allProfiles: MockProfile[];
@@ -90,11 +93,16 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   // The logged-in Supabase auth user id — the exact link to this person's
   // directory (db) identity, used to bridge notification ids. null = no session.
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  // False until the logged-in user's profile has been resolved (or determined
+  // absent). Lets the UI show a loading state instead of flashing the locked /
+  // "Access Restricted" fallback while the profile fetch is still in flight.
+  const [authResolved, setAuthResolved] = useState(false);
   // The auth user whose saved language we've already applied this session. Auth
   // events (token refresh, tab focus) fire resolveFromSession repeatedly — we
   // must apply the DB language only ONCE per login, never re-apply it, so it
   // can't clobber a language the user switched to at runtime.
   const langAppliedForRef = useRef<string | null>(null);
+  const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // ── Resolve the logged-in user → locked MockProfile ────────────────────────
   useEffect(() => {
@@ -104,16 +112,23 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       if (!cancelled) setSessionUserId(userId);
       if (!userId) {
         langAppliedForRef.current = null; // signed out → re-apply on next login
-        if (!cancelled) setAuthProfile(null);
+        if (!cancelled) { setAuthProfile(null); setAuthResolved(true); }
         return;
       }
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('role, plant_id, name, preferred_language')
         .eq('id', userId)
         .maybeSingle()
         .returns<{ role: string | null; plant_id: string | null; name: string | null; preferred_language: string | null }>();
       if (cancelled) return;
+
+      // Transient fetch failure (flaky mobile network) → retry instead of failing
+      // closed to "No access". The loader stays up until it resolves.
+      if (error) {
+        retryRef.current = setTimeout(() => { if (!cancelled) resolveFromSession(userId); }, 1500);
+        return;
+      }
 
       // Language source of truth = the user's local choice (localStorage). The
       // DB preference only SEEDS the language on a fresh device that has no
@@ -128,9 +143,11 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       if (!template) {
         // Logged in but no recognizable role → fail closed.
         setAuthProfile({ ...LOCKED_FALLBACK, name: data?.name || LOCKED_FALLBACK.name });
+        setAuthResolved(true);
         return;
       }
       setAuthProfile({ ...template, name: data?.name || template.name });
+      setAuthResolved(true);
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -140,7 +157,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       setPreviewProfileId(null); // reset any preview on login/logout
       resolveFromSession(session?.user?.id ?? null);
     });
-    return () => { cancelled = true; subscription.unsubscribe(); };
+    return () => { cancelled = true; clearTimeout(retryRef.current); subscription.unsubscribe(); };
   }, []);
 
   // ── Extra (DB-created) profiles — only used for the admin preview switcher ──
@@ -251,6 +268,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         activeIdentityIds,
         activePersonId,
         activeAccountFloor,
+        authResolved,
         authProfile,
         allProfiles,
         switchProfile,

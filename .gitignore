@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Env files — NEVER commit (secrets). Keep only *.example
+.env
+.env.*
+!.env.example
+!.env*.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -35,3 +41,9 @@ __pycache__/
 *.pyc
 .venv/
 analytics/.env
+
+# DB clone script — contains live credentials, never commit
+clone-db.sh
+
+# Supabase CLI local state (machine-specific link info, not for the repo)
+supabase/.temp/

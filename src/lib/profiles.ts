@@ -77,12 +77,38 @@ export function initialsFrom(name: string): string {
 }
 
 /**
+ * Avatar gradient palette. These exact class strings are SAFELISTED in
+ * tailwind.config.js — Tailwind can't see DB-sourced class names, so any gradient
+ * used here must also be in that safelist or it gets purged (white avatar bug).
+ */
+export const AVATAR_PALETTE: [string, string][] = [
+  ['from-orange-300', 'to-orange-500'],
+  ['from-blue-400', 'to-blue-600'],
+  ['from-teal-400', 'to-teal-600'],
+  ['from-indigo-400', 'to-indigo-600'],
+  ['from-purple-400', 'to-purple-600'],
+  ['from-lime-400', 'to-lime-600'],
+  ['from-cyan-400', 'to-cyan-600'],
+  ['from-fuchsia-400', 'to-fuchsia-600'],
+  ['from-rose-400', 'to-rose-600'],
+  ['from-amber-400', 'to-amber-600'],
+];
+
+/** Deterministic gradient for a role/user that has no avatar color set. */
+export function avatarFor(key: string): [string, string] {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}
+
+/**
  * Map a `roles` table row → the MockProfile shape consumed throughout the app.
  * `overrides` (name, ids, plant, etc. for a provisioned user) are applied last.
  * Initials are derived from the final name.
  */
 export function roleToProfile(role: RoleRow, overrides?: Partial<MockProfile>): MockProfile {
   const name = overrides?.name ?? '';
+  const [fallbackFrom, fallbackTo] = avatarFor(role.id);
   const base: MockProfile = {
     id: role.id,
     name,
@@ -90,8 +116,8 @@ export function roleToProfile(role: RoleRow, overrides?: Partial<MockProfile>): 
     roleLabel: role.label,
     roleDescription: role.description ?? '',
     initials: initialsFrom(name),
-    avatarFrom: role.avatar_from ?? 'from-slate-300',
-    avatarTo: role.avatar_to ?? 'to-slate-500',
+    avatarFrom: role.avatar_from || fallbackFrom,
+    avatarTo: role.avatar_to || fallbackTo,
     homeRoute: role.home_route,
     allowedDashboardRoutes: role.allowed_routes ?? [],
     standaloneOnly: role.standalone_only,

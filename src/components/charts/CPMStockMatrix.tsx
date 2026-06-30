@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
-import { CP_LOCATIONS, CP_DENSITIES, CP_MATRIX } from '../../data/mockData';
+import { supabase } from '../../lib/supabase';
+import type { Database } from '../../lib/database.types';
 import { clamp } from '../../lib/utils/formatting';
+
+type DrumRow = Database['public']['Tables']['cpm_drum_stock']['Row'];
 
 /** Heat-map intensity: 0 = empty (white), 1 = max stock (darkest green) */
 const MAX_DRUMS = 400;
@@ -17,27 +20,57 @@ function cellColor(qty: number): string {
 }
 
 export function CPMStockMatrix() {
-  // Column totals
-  const colTotals = CP_DENSITIES.map((d) =>
-    CP_LOCATIONS.reduce((sum, p) => {
-      const idx = CP_DENSITIES.indexOf(d);
-      return sum + (CP_MATRIX[p]?.[idx] ?? 0);
-    }, 0)
-  );
+  const [rows, setRows] = useState<DrumRow[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Row totals
-  const rowTotals = CP_LOCATIONS.map((p) =>
-    CP_DENSITIES.reduce((sum, d) => {
-      const idx = CP_DENSITIES.indexOf(d);
-      return sum + (CP_MATRIX[p]?.[idx] ?? 0), 0;
-    }, 0)
-  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('cpm_drum_stock')
+        .select('*')
+        .returns<DrumRow[]>();
+      if (!cancelled) {
+        setRows(data || []);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-  // Re-calculate row totals and grand total correctly
-  const calculatedRowTotals = CP_LOCATIONS.map((p) => {
-    return (CP_MATRIX[p] || []).reduce((sum: number, val: number) => sum + val, 0);
-  });
-  const grandTotal = calculatedRowTotals.reduce((a: number, b: number) => a + b, 0);
+  // Derive locations (sorted) and densities (ascending) from the live rows.
+  const locations = [...new Set(rows.map((r) => r.location))].sort();
+  const densities = [...new Set(rows.map((r) => r.density))].sort((a, b) => a - b);
+
+  // matrix[location][density] = drums (0 if missing)
+  const lookup = new Map(rows.map((r) => [`${r.location}|${r.density}`, r.drums]));
+  const drumsAt = (loc: string, d: number) => lookup.get(`${loc}|${d}`) ?? 0;
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-gray-200 shadow-sm p-6 text-center text-sm text-gray-400">
+        Loading…
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-gray-200 shadow-sm p-8 text-center text-sm text-gray-400">
+        No drum stock recorded yet.
+      </div>
+    );
+  }
+
+  // Column totals (per density)
+  const colTotals = densities.map((d) =>
+    locations.reduce((sum, loc) => sum + drumsAt(loc, d), 0)
+  );
+  // Row totals (per location)
+  const rowTotals = locations.map((loc) =>
+    densities.reduce((sum, d) => sum + drumsAt(loc, d), 0)
+  );
+  const grandTotal = rowTotals.reduce((a, b) => a + b, 0);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
@@ -47,7 +80,7 @@ export function CPMStockMatrix() {
             <th className="px-3 py-2 text-left font-semibold text-gray-600 sticky left-0 bg-gray-50 min-w-[120px]">
               Plant / Density
             </th>
-            {CP_DENSITIES.map((d) => (
+            {densities.map((d) => (
               <th key={d} className="px-2 py-2 text-center font-semibold text-gray-600 min-w-[60px]">
                 {d}
               </th>
@@ -58,14 +91,13 @@ export function CPMStockMatrix() {
           </tr>
         </thead>
         <tbody>
-          {CP_LOCATIONS.map((plant: string, pi: number) => (
+          {locations.map((plant, pi) => (
             <tr key={plant} className="border-b border-gray-100 last:border-0">
               <td className="px-3 py-1.5 font-medium text-gray-700 sticky left-0 bg-white whitespace-nowrap">
                 {plant}
               </td>
-              {CP_DENSITIES.map((density: number) => {
-                const idx = CP_DENSITIES.indexOf(density);
-                const qty = CP_MATRIX[plant]?.[idx] ?? 0;
+              {densities.map((density) => {
+                const qty = drumsAt(plant, density);
                 return (
                   <td
                     key={density}
@@ -77,7 +109,7 @@ export function CPMStockMatrix() {
                 );
               })}
               <td className="px-2 py-1.5 text-center font-semibold text-gray-800 bg-gray-50">
-                {calculatedRowTotals[pi]}
+                {rowTotals[pi]}
               </td>
             </tr>
           ))}
@@ -87,7 +119,7 @@ export function CPMStockMatrix() {
             <td className="px-3 py-1.5 font-bold text-gray-700 sticky left-0 bg-gray-100">
               Total
             </td>
-            {colTotals.map((total: number, i: number) => (
+            {colTotals.map((total, i) => (
               <td key={i} className="px-2 py-1.5 text-center font-semibold text-gray-700">
                 {total > 0 ? total : '—'}
               </td>

@@ -1,8 +1,8 @@
 /**
  * @-mention tagging, CC / watchers, and per-entity notes.
  *
- * "People" you can tag are the merged profile directory from RoleContext
- * (built-in MOCK_PROFILES + active user_accounts rows). A tag is just a
+ * "People" you can tag are the profile directory from RoleContext
+ * (active user_accounts rows mapped through the DB role catalog). A tag is just a
  * profile id, which is the SAME id the notification system already targets
  * via `notifications.target_roles` — so tagging a person lights up their
  * TopBar bell + realtime feed with no extra plumbing.

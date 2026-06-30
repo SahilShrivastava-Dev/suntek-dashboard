@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { VoiceSearch } from '../../components/search/VoiceSearch';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { MODULES, BATCH_GRID_PATTERN } from '../../data/mockData';
 import { supabase } from '../../lib/supabase';
 import type { Database } from '../../lib/database.types';
 
@@ -31,6 +30,27 @@ function toast(msg: string) {
 const COMPANIES = ['All', 'SCPL', 'SPPL', 'KG', 'Madan'];
 const PERIODS   = ['FY 26-27 · Q1', 'FY 26-27 · Q2', 'FY 26-27 · Q3', 'FY 26-27 · Q4', 'FY 26-27 · Full Year'];
 
+// Module nav cards. `countKey` (optional) wires a live pending count from the DB;
+// modules without one simply render no badge.
+type ModuleDef = {
+  name: string;
+  page: string;
+  sub: string;
+  accent?: boolean;
+  countKey?: 'purchase' | 'batch';
+};
+const MODULES: ModuleDef[] = [
+  { name: 'Purchase',         page: 'purchase',  sub: 'FAR · Maint · Activity · Store Req · POs · Marine · Labour', accent: true, countKey: 'purchase' },
+  { name: 'Sales',            page: 'sales',     sub: 'Contracts · dispatch · HCL/Acid' },
+  { name: 'CPM Stock',        page: 'stock',     sub: 'Tanks · drums · 400+ store SKUs' },
+  { name: 'Batch Sheet',      page: 'batch',     sub: 'Reactor runs · QC · oil-ratio', countKey: 'batch' },
+  { name: 'Customer History', page: 'customers', sub: 'Ledger · density · payments' },
+  { name: 'Night Manager',    page: 'nightmgr',  sub: 'On-duty · GPS · photos' },
+];
+
+// Purely-visual batch status dot grid (35 dots): 3 = orange, 2 = light-orange, 1 = grey.
+const BATCH_GRID_PATTERN = [3,3,3,2,2,2,1,1,1,3,3,2,2,1,3,3,2,3,3,3,1,2,3,2,3,3,2,2,3,2,1,3,1,3,3];
+
 /** Map movement type → dashboard route */
 const MOVE_ROUTE: Record<string, string> = {
   batch:    '/dashboard/batches',
@@ -57,18 +77,45 @@ export function Overview() {
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [tanks, setTanks] = useState<TankRow[]>([]);
   const [drumRows, setDrumRows] = useState<DrumRow[]>([]);
+
+  // Live pending counts (replace former hardcoded badge numbers)
+  const [pendingStoreReq, setPendingStoreReq] = useState<number | null>(null);
+  const [activeBatchCount, setActiveBatchCount] = useState<number | null>(null);
+  const [avgBatchHours, setAvgBatchHours] = useState<number | null>(null);
+
   useEffect(() => {
     (async () => {
-      const [alertsRes, tanksRes, drumsRes] = await Promise.all([
+      const [alertsRes, tanksRes, drumsRes, storeReqRes, batchesRes] = await Promise.all([
         supabase.from('alerts').select('*').eq('is_resolved', false).order('created_at', { ascending: false }).returns<AlertRow[]>(),
         supabase.from('tanks').select('*').order('sort_order', { ascending: true }).returns<TankRow[]>(),
         supabase.from('cpm_drum_stock').select('*').returns<DrumRow[]>(),
+        supabase.from('store_requisitions').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        supabase.from('active_batches').select('started_at').eq('status', 'active').returns<{ started_at: string }[]>(),
       ]);
       setAlerts(alertsRes.data || []);
       setTanks(tanksRes.data || []);
       setDrumRows(drumsRes.data || []);
+
+      setPendingStoreReq(storeReqRes.error ? null : (storeReqRes.count ?? 0));
+
+      const batches = batchesRes.data || [];
+      setActiveBatchCount(batchesRes.error ? null : batches.length);
+      if (batches.length > 0) {
+        const avgMs = batches.reduce(
+          (sum, b) => sum + (Date.now() - new Date(b.started_at).getTime()), 0,
+        ) / batches.length;
+        setAvgBatchHours(Math.max(0, Math.round(avgMs / 3_600_000)));
+      } else {
+        setAvgBatchHours(null);
+      }
     })();
   }, []);
+
+  // Map module countKey → live count (omit badge when count is falsy/unknown).
+  const moduleCounts: Record<NonNullable<ModuleDef['countKey']>, number | null> = {
+    purchase: pendingStoreReq,
+    batch: activeBatchCount,
+  };
 
   // Pivot drum rows into the density×location matrix (same shape as CPMStock).
   const densities = [...new Set(drumRows.map(r => r.density))].sort((a, b) => a - b);
@@ -137,7 +184,7 @@ export function Overview() {
               onClick={() => navigate('/dashboard/purchase/storereq')}
             >
               <span>{t('overview.pendingApprovals')}</span>
-              <span className="bg-white/20 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">7</span>
+              <span className="bg-white/20 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">{pendingStoreReq ?? '…'}</span>
             </button>
 
             {/* Company filter chip — functional dropdown */}
@@ -247,7 +294,7 @@ export function Overview() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M20 6 9 17l-5-5"/>
               </svg>
-              {t('overview.approve')} <span className="bg-white/15 px-1.5 rounded">7</span>
+              {t('overview.approve')} <span className="bg-white/15 px-1.5 rounded">{pendingStoreReq ?? '…'}</span>
             </button>
             <button
               className="btn-ghost pill py-3 font-semibold text-sm flex items-center justify-center gap-2"
@@ -373,7 +420,7 @@ export function Overview() {
             style={{ position: 'relative' }}
             onClick={() => navigate('/dashboard/batches')}
           >
-            <KpiInfoButton info={{ title: 'Active Batches', what: 'Count of CP manufacturing batches currently running across all 4 factory plants, with average elapsed time. The dot grid visualises batch status — orange = active, light = aging, grey = queued. Click to open full Batch Sheet.', source: 'Mock data', note: 'Dummy data from BATCH_GRID_PATTERN. Future: Supabase batches table, real-time status.' }} />
+            <KpiInfoButton info={{ title: 'Active Batches', what: 'Count of CP manufacturing batches currently running across all factory plants, with average elapsed time. Click to open the full Batch Sheet.', source: 'Supabase', tables: ['active_batches'], filter: "status = 'active' · avg elapsed from started_at", note: 'The dot grid is a fixed visual status pattern, not live data.' }} />
             <div className="flex items-center justify-between mb-2">
               <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -382,8 +429,12 @@ export function Overview() {
               </div>
               <div className="text-[11px] text-slate-500">{t('overview.acrossFactories', { count: 4 })}</div>
             </div>
-            <div className="text-[26px] font-extrabold leading-none">{t('overview.batchesCount', { count: 7 })}</div>
-            <div className="text-[11px] text-slate-500 mb-3">{t('overview.batchesRunningAvg', { hours: 41 })}</div>
+            <div className="text-[26px] font-extrabold leading-none">{t('overview.batchesCount', { count: activeBatchCount ?? 0 })}</div>
+            <div className="text-[11px] text-slate-500 mb-3">
+              {avgBatchHours != null
+                ? t('overview.batchesRunningAvg', { hours: avgBatchHours })
+                : t('overview.acrossFactories', { count: 4 })}
+            </div>
             {/* Batch dot grid */}
             <div className="grid grid-cols-7 gap-1.5">
               {BATCH_GRID_PATTERN.slice(0, 35).map((s, i) => {
@@ -633,7 +684,7 @@ export function Overview() {
 
         {/* Modules card */}
         <div className="col-span-12 lg:col-span-4 card p-6" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Modules Directory', what: 'Quick navigation to all operational modules in the dashboard. The badge counts (e.g. "7 open") are mock data placeholders — future releases will pull live pending counts from the relevant Supabase or BUSY tables.', source: 'Mock data', note: 'Module list and pending counts are hardcoded in MODULES constant (mockData.ts).' }} />
+          <KpiInfoButton info={{ title: 'Modules Directory', what: 'Quick navigation to all operational modules in the dashboard. Badge counts are live: Purchase shows pending store requisitions, Batch Sheet shows active batches. Modules with no live count show no badge.', source: 'Supabase', tables: ['store_requisitions', 'active_batches'], filter: "store_requisitions.status='pending' · active_batches.status='active'" }} />
           <div className="flex items-center justify-between mb-2">
             <div>
               <div className="text-base font-bold">{t('overview.modules')}</div>
@@ -667,11 +718,11 @@ export function Overview() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <div className="font-semibold text-sm">{m.name}</div>
-                    {m.pending && (
+                    {m.countKey && moduleCounts[m.countKey] ? (
                       <span className="badge" style={{ background: 'var(--accent-soft)', color: 'var(--accent-deep)' }}>
-                        {t('overview.openCount', { count: m.pending })}
+                        {t('overview.openCount', { count: moduleCounts[m.countKey] as number })}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="text-xs text-slate-500">{m.sub}</div>
                 </div>

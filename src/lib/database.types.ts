@@ -43,6 +43,28 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['profiles']['Insert']>;
       };
 
+      // Role catalog — the single source of truth for RBAC. Replaces the old
+      // hardcoded MOCK_PROFILES role templates. See migration for `roles`.
+      roles: {
+        Row: {
+          id: string;            // text PK, slug ('admin', 'unit_head', …)
+          label: string;
+          level: string;         // 'L1' | 'L2' | 'L3' | 'L4'
+          description: string | null;
+          home_route: string;
+          allowed_routes: string[]; // exact route strings; ['*'] = all
+          standalone_only: boolean;
+          is_admin: boolean;
+          is_system: boolean;    // can't be deleted
+          avatar_from: string | null;
+          avatar_to: string | null;
+          sort_order: number | null;
+          created_at?: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['roles']['Row'], 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['roles']['Insert']>;
+      };
+
       plants: {
         Row: {
           id: string;

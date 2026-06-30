@@ -1,11 +1,8 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { SAMARTH_HISTORY, SAMARTH_DENSITY } from '../../data/mockData';
 import { useOverviewKPIs, useTopCustomers, useCustomerList, useAnalyticsKPIs, fmtINR } from '../../hooks/useBusyData';
 import { ConcentrationBar, MiniBarChart } from '../../components/charts/AnalyticsViz';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
-
-const maxBar = Math.max(...SAMARTH_HISTORY.map(s => s.d));
 
 export function CustomerHistory() {
   const { t } = useTranslation();
@@ -171,35 +168,21 @@ export function CustomerHistory() {
       {/* Charts row */}
       <div className="grid grid-cols-12 gap-5">
         <div className="col-span-12 lg:col-span-6 card p-6" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Samarth Polymers Dispatch History', what: 'Monthly drums dispatched to Samarth Polymers over the last 6 months. Used to spot seasonal patterns and forecast next order. This is a demo chart using hardcoded sample data.', source: 'Mock data', note: 'Data from SAMARTH_HISTORY constant (mockData.ts). Future: pull from Tran1 WHERE MasterCode1 = Samarth\'s code.' }} />
-          <div className="text-base font-bold">Samarth Polymers · {t('customers.last6Months')}</div>
+          <KpiInfoButton info={{ title: 'Dispatch History', what: 'Monthly drums dispatched to the top customer over the last 6 months. Used to spot seasonal patterns and forecast the next order.', source: 'BUSY DB', note: 'No per-month per-customer dispatch series is available yet — shows an empty state instead of sample numbers. Future: pull from Tran1 WHERE MasterCode1 = customer code, grouped by month.' }} />
+          <div className="text-base font-bold">
+            {topCustomer ? topCustomer.name : t('customers.densityPreference')} · {t('customers.last6Months')}
+          </div>
           <div className="text-xs text-slate-500 mb-4">{t('customers.drumsDispatchedPerMonth')}</div>
-          <div className="space-y-2">
-            {SAMARTH_HISTORY.map(s => (
-              <div key={s.m} className="flex items-center gap-3">
-                <div className="w-10 text-[11px] text-slate-500 font-semibold">{s.m}</div>
-                <div className="flex-1 progress" style={{ height: '14px' }}>
-                  <div style={{ width: `${s.d / maxBar * 100}%`, background: 'linear-gradient(90deg,#F47651,#FF8A66)' }}></div>
-                </div>
-                <div className="w-12 text-right text-sm font-bold num">{s.d}</div>
-              </div>
-            ))}
+          <div className="py-10 text-center text-sm text-slate-400">
+            No dispatch history available yet.
           </div>
         </div>
         <div className="col-span-12 lg:col-span-6 card p-6" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Density Preference Chart', what: 'Breakdown of Samarth Polymers\' order volume by CP density grade (1300, 1400, 1450, 1500). Shows which density grades they predominantly purchase — important for production planning and stock allocation.', source: 'Mock data', note: 'Data from SAMARTH_DENSITY constant (mockData.ts). Future: derived from Tran1 joined with item/density metadata.' }} />
+          <KpiInfoButton info={{ title: 'Density Preference Chart', what: 'Breakdown of the customer\'s order volume by CP density grade (1300, 1400, 1450, 1500). Shows which density grades they predominantly purchase — important for production planning and stock allocation.', source: 'BUSY DB', note: 'No per-customer density breakdown source is available yet — shows an empty state instead of sample numbers. Future: derived from Tran1 joined with item/density metadata.' }} />
           <div className="text-base font-bold">{t('customers.densityPreference')}</div>
           <div className="text-xs text-slate-500 mb-4">{t('customers.whereVolumeSits')}</div>
-          <div className="space-y-2">
-            {SAMARTH_DENSITY.map(d => (
-              <div key={d.d} className="flex items-center gap-3">
-                <div className="w-14"><span className="density-pill">{d.d}</span></div>
-                <div className="flex-1 progress" style={{ height: '14px' }}>
-                  <div style={{ width: `${d.pct}%` }}></div>
-                </div>
-                <div className="w-10 text-right text-sm font-bold num">{d.pct}%</div>
-              </div>
-            ))}
+          <div className="py-10 text-center text-sm text-slate-400">
+            No density breakdown available yet.
           </div>
         </div>
       </div>

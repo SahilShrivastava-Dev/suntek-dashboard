@@ -5,8 +5,8 @@ import { insertRows, updateRows } from '../../lib/db';
 import { createLogin, updateLogin } from '../../lib/adminUsers';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
-import { MOCK_PROFILES } from '../../lib/profiles';
 import { useRoleContext } from '../../contexts/RoleContext';
+import type { RoleRow } from '../../lib/profiles';
 import { logUserAccountEvent, LANGUAGE_OPTIONS } from '../../lib/userEvents';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
@@ -44,18 +44,46 @@ interface DisplayUser {
 
 // ── Role options ──────────────────────────────────────────────────────────────
 
-const ROLE_OPTIONS = [
-  { id: 'admin',               label: 'Owner · Admin',           level: 'L4' },
-  { id: 'unit_head',           label: 'Unit Head',               level: 'L3' },
-  { id: 'warehouse_manager',   label: 'Warehouse Dispatch',      level: 'L2' },
-  { id: 'store_manager_maint', label: 'Store Manager · Maint',   level: 'L2' },
-  { id: 'labour_manager',      label: 'Labour Manager',          level: 'L2' },
-  { id: 'accountant_delhi',    label: 'Accountant · Delhi',      level: 'L2' },
-  { id: 'accountant_other',    label: 'Accountant · Other',      level: 'L2' },
-  { id: 'night_manager',       label: 'Night Manager',           level: 'L1' },
-  { id: 'factory_operator',    label: 'Technical Team · Operator', level: 'L1' },
-  { id: 'technician_shd',      label: 'Technician',              level: 'L1' },
+type RoleOption = { id: string; label: string; level: string };
+
+// Every dashboard section a role's `allowed_routes` can grant. The union of all
+// routes across the seeded roles, with human labels — used by the Role Manager's
+// permission checkbox list.
+const ALL_DASHBOARD_SECTIONS: { route: string; label: string }[] = [
+  { route: '/dashboard',                  label: 'Overview' },
+  { route: '/dashboard/batches',          label: 'Batch Sheets' },
+  { route: '/dashboard/stock',            label: 'CPM Stock' },
+  { route: '/dashboard/night-manager',    label: 'Night Manager Board' },
+  { route: '/dashboard/night-entry',      label: 'Night Check-in (entry)' },
+  { route: '/dashboard/batch-entry',      label: 'Batch Logger (entry)' },
+  { route: '/dashboard/daily-log',        label: 'Daily Unit Log' },
+  { route: '/dashboard/warehouse-entry',  label: 'Warehouse Console (entry)' },
+  { route: '/dashboard/sales',            label: 'Sales' },
+  { route: '/dashboard/customers',        label: 'Customers' },
+  { route: '/dashboard/anomalies',        label: 'Anomaly Detection' },
+  { route: '/dashboard/anomaly-center',   label: 'Anomaly Operations Center' },
+  { route: '/dashboard/cost-intelligence',label: 'Cost & Margin Intelligence' },
+  { route: '/dashboard/benchmarking',     label: 'Multi-Plant Benchmarking' },
+  { route: '/dashboard/predictive-qc',    label: 'Predictive QC' },
+  { route: '/dashboard/working-capital',  label: 'Working Capital & Cash' },
+  { route: '/dashboard/oil-ratio',        label: 'Oil Ratio Reference' },
+  { route: '/dashboard/audit',            label: 'Audit Trail' },
+  { route: '/dashboard/blacklist',        label: 'Blacklist Registry' },
+  { route: '/dashboard/purchase/far',     label: 'Fixed Asset Register' },
+  { route: '/dashboard/purchase/maint',   label: 'Maintenance' },
+  { route: '/dashboard/purchase/activity',label: 'Plant Activity Log' },
+  { route: '/dashboard/purchase/storereq',label: 'Store Requisitions' },
+  { route: '/dashboard/purchase/purchase',label: 'Purchase Orders' },
+  { route: '/dashboard/purchase/marine',  label: 'Marine Insurance' },
+  { route: '/dashboard/purchase/labour',  label: 'Labour Costs' },
 ];
+
+const LEVEL_OPTIONS = ['L1', 'L2', 'L3', 'L4'];
+
+/** Auto-derive a slug id from a role label. */
+function slugify(s: string): string {
+  return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
 
 const LEVEL_COLOR: Record<string, { bg: string; color: string }> = {
   L4: { bg: '#FFF7ED', color: '#EA580C' },
@@ -82,27 +110,6 @@ const BLANK_FORM = {
   preferred_language: 'en',
 };
 
-// Built-in profiles derived from MOCK_PROFILES — always shown, cannot be deleted
-const SYSTEM_USERS: DisplayUser[] = MOCK_PROFILES.map(p => ({
-  id: p.id,
-  name: p.name,
-  mobile: null,
-  whatsapp: null,
-  email: null,
-  role_id: p.id,
-  role_label: p.roleLabel,
-  plant_name: p.plant || null,
-  plants: null,
-  designation: null,
-  access_note: p.accessNote || null,
-  is_active: true,
-  created_at: null,
-  auth_user_id: null,
-  login_enabled: false,
-  preferred_language: 'en',
-  _isSystem: true,
-}));
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function UserManagement() {
@@ -110,7 +117,10 @@ export function UserManagement() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
-  const { activeProfile } = useRoleContext();
+  const { activeProfile, roles, rolesStatus, refreshRoles } = useRoleContext();
+  const isAdmin = activeProfile.id === 'admin';
+  // Role dropdown options sourced from the live role catalog.
+  const roleOptions: RoleOption[] = roles.map(r => ({ id: r.id, label: r.label, level: r.level }));
   const [users, setUsers] = useState<DisplayUser[]>([]);
   const [plants, setPlants] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,19 +155,116 @@ export function UserManagement() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [search, setSearch] = useState('');
 
+  // ── Role Management (admin-only) ──────────────────────────────────────────
+  const [showRoleManager, setShowRoleManager] = useState(false);
+  const [editingRole, setEditingRole] = useState<RoleRow | null>(null); // null + showRoleForm = creating
+  const [showRoleForm, setShowRoleForm] = useState(false);
+  const [savingRole, setSavingRole] = useState(false);
+  const [deletingRoleId, setDeletingRoleId] = useState<string | null>(null);
+  const [roleForm, setRoleForm] = useState<{
+    label: string; id: string; level: string; home_route: string;
+    standalone_only: boolean; allowed_routes: string[];
+  }>({ label: '', id: '', level: 'L1', home_route: '/dashboard', standalone_only: false, allowed_routes: [] });
+  // While creating, keep the slug auto-synced to the label until the user edits it.
+  const [slugTouched, setSlugTouched] = useState(false);
+
+  function openRoleAdd() {
+    setEditingRole(null);
+    setSlugTouched(false);
+    setRoleForm({ label: '', id: '', level: 'L1', home_route: '/dashboard', standalone_only: false, allowed_routes: [] });
+    setShowRoleForm(true);
+  }
+
+  function openRoleEdit(r: RoleRow) {
+    if (r.is_admin || r.is_system) return; // locked — full access, not editable
+    setEditingRole(r);
+    setSlugTouched(true);
+    setRoleForm({
+      label: r.label,
+      id: r.id,
+      level: r.level,
+      home_route: r.home_route || '/dashboard',
+      standalone_only: r.standalone_only,
+      allowed_routes: r.allowed_routes?.includes('*') ? [] : (r.allowed_routes || []),
+    });
+    setShowRoleForm(true);
+  }
+
+  function toggleRoleRoute(route: string) {
+    setRoleForm(f => ({
+      ...f,
+      allowed_routes: f.allowed_routes.includes(route)
+        ? f.allowed_routes.filter(x => x !== route)
+        : [...f.allowed_routes, route],
+    }));
+  }
+
+  async function handleSaveRole() {
+    const label = roleForm.label.trim();
+    if (!label) { toast.error('Role name is required'); return; }
+    const id = editingRole ? editingRole.id : (slugTouched ? slugify(roleForm.id) : slugify(label));
+    if (!id) { toast.error('A valid slug id is required'); return; }
+    if (savingRole) return;
+    setSavingRole(true);
+    try {
+      if (!editingRole && roles.some(r => r.id === id)) {
+        toast.error(`A role with id "${id}" already exists`);
+        return;
+      }
+      const payload = {
+        label,
+        level: roleForm.level,
+        home_route: roleForm.home_route.trim() || '/dashboard',
+        allowed_routes: roleForm.allowed_routes,
+        standalone_only: roleForm.standalone_only,
+      };
+      if (editingRole) {
+        const { error } = await updateRows('roles', payload).eq('id', editingRole.id);
+        if (error) { toast.error(`Save failed: ${error.message}`); return; }
+      } else {
+        const { error } = await insertRows('roles', {
+          id, ...payload, is_admin: false, is_system: false,
+          description: null, avatar_from: null, avatar_to: null,
+          sort_order: (roles.reduce((m, r) => Math.max(m, r.sort_order ?? 0), 0)) + 1,
+        });
+        if (error) { toast.error(`Create failed: ${error.message}`); return; }
+      }
+      await refreshRoles();
+      setShowRoleForm(false);
+      setEditingRole(null);
+      toast.success(editingRole ? 'Role updated' : 'Role created');
+    } finally {
+      setSavingRole(false);
+    }
+  }
+
+  async function handleDeleteRole(r: RoleRow) {
+    if (r.is_admin || r.is_system) return;
+    if (users.some(u => u.role_id === r.id)) {
+      toast.error(`Cannot delete "${r.label}" — users are still assigned to it`);
+      return;
+    }
+    if (!window.confirm(`Delete role "${r.label}"? This cannot be undone.`)) return;
+    setDeletingRoleId(r.id);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.from('roles') as any).delete().eq('id', r.id);
+      if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+      await refreshRoles();
+      toast.success('Role deleted');
+    } finally {
+      setDeletingRoleId(null);
+    }
+  }
+
   const loadData = useCallback(async () => {
     setLoading(true);
     const [{ data: usersData }, { data: plantsData }] = await Promise.all([
       supabase.from('user_accounts').select('*, plants(name)').order('created_at', { ascending: false }).returns<DisplayUser[]>(),
       supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
     ]);
-    // Merge: built-in profiles first, then any extra DB-only users
-    const dbUsers: DisplayUser[] = usersData || [];
-    const merged = [
-      ...SYSTEM_USERS,
-      ...dbUsers,
-    ];
-    setUsers(merged);
+    // The user list is purely the DB directory (user_accounts + plants join).
+    setUsers(usersData || []);
     if (plantsData?.length) setPlants(plantsData);
     setLoading(false);
   }, []);
@@ -167,7 +274,7 @@ export function UserManagement() {
   const plantNames = plants.map(p => p.name);
   const total = users.length;
   const activeCount = users.filter(u => u.is_active).length;
-  const roleBreakdown = ROLE_OPTIONS.map(r => ({
+  const roleBreakdown = roleOptions.map(r => ({
     ...r, count: users.filter(u => u.role_id === r.id).length,
   })).filter(r => r.count > 0);
 
@@ -233,7 +340,7 @@ export function UserManagement() {
       email,
       whatsapp: form.whatsapp.trim() || null,
       role_id: form.role_id,
-      role_label: ROLE_OPTIONS.find(r => r.id === form.role_id)?.label || form.role_id,
+      role_label: roleOptions.find(r => r.id === form.role_id)?.label || form.role_id,
       plant_id: plant?.id || null,
       plant_name: form.plant || null,
       designation: form.designation.trim() || null,
@@ -298,7 +405,7 @@ export function UserManagement() {
       await logUserAccountEvent({
         userAccountId: accountId, targetName: form.name.trim(), targetEmail: email,
         action: 'created',
-        details: `Created${form.login_enabled ? ' with login' : ' (directory only)'} · role ${ROLE_OPTIONS.find(r => r.id === form.role_id)?.label || form.role_id}`,
+        details: `Created${form.login_enabled ? ' with login' : ' (directory only)'} · role ${roleOptions.find(r => r.id === form.role_id)?.label || form.role_id}`,
         ...actor,
       });
     }
@@ -331,7 +438,7 @@ export function UserManagement() {
     await loadData();
   }
 
-  const selectedRole = ROLE_OPTIONS.find(r => r.id === form.role_id);
+  const selectedRole = roles.find(r => r.id === form.role_id);
 
   return (
     <>
@@ -371,9 +478,20 @@ export function UserManagement() {
             <div className="text-base font-bold">{t('userMgmt.userAccounts')}</div>
             <div className="text-xs text-slate-500">{t('userMgmt.userAccountsSub')}</div>
           </div>
-          <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAdd}>
-            + {t('userMgmt.addUser')}
-          </button>
+          <div className="flex gap-2">
+            {isAdmin && (
+              <button
+                className="pill px-4 py-2 font-semibold text-sm"
+                style={{ border: '1.5px solid #E2E8F0', background: '#fff', color: '#475569', cursor: 'pointer' }}
+                onClick={() => setShowRoleManager(true)}
+              >
+                ⚙ {t('userMgmt.manageRoles', 'Manage Roles')}
+              </button>
+            )}
+            <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAdd}>
+              + {t('userMgmt.addUser')}
+            </button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -386,7 +504,7 @@ export function UserManagement() {
           <select value={filterRole} onChange={e => setFilterRole(e.target.value)}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, fontFamily: 'inherit', background: '#fff' }}>
             <option value="all">{t('userMgmt.allRoles')}</option>
-            {ROLE_OPTIONS.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+            {roleOptions.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
             style={{ padding: '8px 14px', borderRadius: 12, border: '1.5px solid #E2E8F0', fontSize: 13, fontFamily: 'inherit', background: '#fff' }}>
@@ -423,7 +541,7 @@ export function UserManagement() {
                 </td></tr>
               )}
               {filtered.map(u => {
-                const ro = ROLE_OPTIONS.find(r => r.id === u.role_id);
+                const ro = roleOptions.find(r => r.id === u.role_id);
                 const lvl = ro ? LEVEL_COLOR[ro.level] : { bg: '#F1F5F9', color: '#64748B' };
                 const sc = u.is_active ? STATUS_CFG.active : STATUS_CFG.inactive;
                 return (
@@ -526,7 +644,7 @@ export function UserManagement() {
         {/* Role + Level preview */}
         <PanelField label={t('userMgmt.roleLabel')}>
           <PanelSelect value={form.role_id} onChange={e => setForm(f => ({ ...f, role_id: e.target.value }))}>
-            {ROLE_OPTIONS.map(r => (
+            {roleOptions.map(r => (
               <option key={r.id} value={r.id}>{r.level} · {r.label}</option>
             ))}
           </PanelSelect>
@@ -539,7 +657,7 @@ export function UserManagement() {
               {selectedRole.level} · {selectedRole.label}
             </div>
             <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>
-              {getRoleDescription(selectedRole.id)}
+              {selectedRole.description || 'Custom access'}
             </div>
           </div>
         )}
@@ -681,6 +799,156 @@ export function UserManagement() {
           </div>
         )}
       </SlidePanel>
+
+      {/* ── Role Manager: list roles, create / edit / delete ─────────────────── */}
+      <SlidePanel
+        open={showRoleManager}
+        onClose={() => setShowRoleManager(false)}
+        title={t('userMgmt.roleManager', 'Role Management')}
+        subtitle={t('userMgmt.roleManagerSub', 'Define roles and what each can access')}
+      >
+        <div className="flex justify-end mb-3">
+          <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openRoleAdd}>
+            + {t('userMgmt.addRole', 'New Role')}
+          </button>
+        </div>
+        <div className="flex flex-col gap-2.5">
+          {rolesStatus === 'loading' && roles.length === 0 && (
+            <div className="text-sm text-slate-400 py-6 text-center">{t('userMgmt.loading')}</div>
+          )}
+          {rolesStatus === 'failed' && (
+            <div className="text-sm text-rose-500 py-6 text-center">
+              {t('userMgmt.rolesLoadFailed', 'Could not load roles. Check the database connection and that the roles table exists.')}
+            </div>
+          )}
+          {rolesStatus === 'ready' && roles.length === 0 && (
+            <div className="text-sm text-slate-400 py-6 text-center">
+              {t('userMgmt.noRoles', 'No roles yet. Click “New Role” to create one.')}
+            </div>
+          )}
+          {roles.map(r => {
+            const locked = r.is_admin || r.is_system;
+            const lvl = LEVEL_COLOR[r.level] || { bg: '#F1F5F9', color: '#64748B' };
+            const userCount = users.filter(u => u.role_id === r.id).length;
+            const access = r.allowed_routes?.includes('*')
+              ? 'All sections'
+              : `${r.allowed_routes?.length || 0} section${(r.allowed_routes?.length || 0) === 1 ? '' : 's'}`;
+            return (
+              <div key={r.id} style={{ border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px' }}>
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="badge" style={{ background: lvl.bg, color: lvl.color, fontSize: 11, fontWeight: 700 }}>{r.level}</span>
+                      <span className="font-semibold text-slate-800 text-sm">{r.label}</span>
+                      {locked && (
+                        <span className="badge" style={{ background: '#FFF7ED', color: '#EA580C', fontSize: 9.5, padding: '1px 6px' }}>🔒 {t('userMgmt.locked', 'Locked')}</span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      {r.id} · {access} · {userCount} user{userCount === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={locked}
+                      onClick={() => openRoleEdit(r)}
+                      style={{ padding: '5px 12px', borderRadius: 10, border: '1px solid #E2E8F0', background: locked ? '#F8FAFC' : '#fff', fontSize: 12, cursor: locked ? 'not-allowed' : 'pointer', fontWeight: 600, color: locked ? '#CBD5E1' : '#475569' }}>
+                      {t('userMgmt.edit')}
+                    </button>
+                    <button
+                      disabled={locked || deletingRoleId === r.id}
+                      onClick={() => handleDeleteRole(r)}
+                      style={{ padding: '5px 12px', borderRadius: 10, border: `1px solid ${locked ? '#E2E8F0' : '#FECACA'}`, background: locked ? '#F8FAFC' : '#FEF2F2', fontSize: 12, cursor: locked ? 'not-allowed' : 'pointer', fontWeight: 600, color: locked ? '#CBD5E1' : '#DC2626' }}>
+                      {deletingRoleId === r.id ? '…' : t('userMgmt.delete', 'Delete')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </SlidePanel>
+
+      {/* ── Role form: create / edit a role ──────────────────────────────────── */}
+      <SlidePanel
+        open={showRoleForm}
+        onClose={() => { setShowRoleForm(false); setEditingRole(null); }}
+        title={editingRole ? t('userMgmt.editRole', 'Edit Role') : t('userMgmt.addRole', 'New Role')}
+        subtitle={t('userMgmt.roleFormSub', 'Name, level and dashboard access')}
+      >
+        <PanelRow>
+          <PanelField label={t('userMgmt.roleNameLabel', 'Role name')}>
+            <PanelInput
+              value={roleForm.label}
+              onChange={e => setRoleForm(f => ({
+                ...f,
+                label: e.target.value,
+                id: editingRole || slugTouched ? f.id : slugify(e.target.value),
+              }))}
+              placeholder="e.g. Quality Inspector"
+            />
+          </PanelField>
+          <PanelField label={t('userMgmt.roleSlugLabel', 'Slug / id')}>
+            <PanelInput
+              value={roleForm.id}
+              disabled={!!editingRole}
+              onChange={e => { setSlugTouched(true); setRoleForm(f => ({ ...f, id: e.target.value })); }}
+              placeholder="quality_inspector"
+            />
+          </PanelField>
+        </PanelRow>
+
+        <PanelRow>
+          <PanelField label={t('userMgmt.roleLevelLabel', 'Level')}>
+            <PanelSelect value={roleForm.level} onChange={e => setRoleForm(f => ({ ...f, level: e.target.value }))}>
+              {LEVEL_OPTIONS.map(l => <option key={l} value={l}>{l}</option>)}
+            </PanelSelect>
+          </PanelField>
+          <PanelField label={t('userMgmt.roleHomeRouteLabel', 'Home route')}>
+            <PanelInput value={roleForm.home_route} onChange={e => setRoleForm(f => ({ ...f, home_route: e.target.value }))} placeholder="/dashboard" />
+          </PanelField>
+        </PanelRow>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, padding: '12px 14px', background: '#F8FAFC', borderRadius: 12, border: '1px solid #E2E8F0' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{t('userMgmt.standaloneLabel', 'Standalone only')}</div>
+            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>{t('userMgmt.standaloneHelper', 'No dashboard — uses a standalone app')}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRoleForm(f => ({ ...f, standalone_only: !f.standalone_only }))}
+            style={{ width: 44, height: 24, borderRadius: 12, background: roleForm.standalone_only ? '#2563EB' : '#CBD5E1', border: 'none', cursor: 'pointer', position: 'relative', flexShrink: 0 }}
+          >
+            <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, transition: 'left 0.2s', left: roleForm.standalone_only ? 22 : 4 }} />
+          </button>
+        </div>
+
+        <PanelField label={t('userMgmt.allowedSectionsLabel', 'Dashboard sections this role can access')}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, maxHeight: 320, overflowY: 'auto', padding: 4 }}>
+            {ALL_DASHBOARD_SECTIONS.map(s => {
+              const on = roleForm.allowed_routes.includes(s.route);
+              return (
+                <label key={s.route} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#334155', cursor: 'pointer', padding: '6px 8px', borderRadius: 8, background: on ? '#EFF6FF' : 'transparent' }}>
+                  <input type="checkbox" checked={on} onChange={() => toggleRoleRoute(s.route)} />
+                  <span>{s.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </PanelField>
+
+        <PanelDivider />
+        <PanelFooter
+          saved={false}
+          onCancel={() => { setShowRoleForm(false); setEditingRole(null); }}
+          onSave={handleSaveRole}
+          saveLabel={editingRole ? t('userMgmt.saveChanges') : t('userMgmt.addRole', 'Create Role')}
+          successLabel=""
+          successSub=""
+          disabled={!roleForm.label.trim() || savingRole}
+          requiredHint={t('userMgmt.requiredHint')}
+        />
+      </SlidePanel>
     </>
   );
 }
@@ -698,18 +966,3 @@ function formatEventTime(d: string) {
   return new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function getRoleDescription(roleId: string): string {
-  const map: Record<string, string> = {
-    admin:               'Full access to all modules, data, and user management',
-    unit_head:           'Ops oversight, procurement approvals, maintenance approvals',
-    warehouse_manager:   'Dispatch, shipping, inventory out — no financial data',
-    store_manager_maint: 'Spare parts store, availability check, handover docs upload',
-    labour_manager:      'Labour cost tracking and worker activity log only',
-    night_manager:       'GPS check-in form only — no other dashboard access',
-    factory_operator:    'Batch entry and OCR upload — data entry only',
-    technician_shd:      'Maintenance tickets only — repairs and photo proof upload',
-    accountant_delhi:    'Delhi factory financial and operational data — read-only purchase',
-    accountant_other:    'All factories except Delhi — read-only purchase data',
-  };
-  return map[roleId] || 'Custom access';
-}

@@ -35,3 +35,6 @@ __pycache__/
 *.pyc
 .venv/
 analytics/.env
+
+# DB clone script — contains live credentials, never commit
+clone-db.sh

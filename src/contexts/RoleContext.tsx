@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
-import { MOCK_PROFILES, DEFAULT_PROFILE } from '../lib/profiles';
-import type { MockProfile } from '../lib/profiles';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { roleToProfile, ADMIN_FALLBACK } from '../lib/profiles';
+import type { MockProfile, RoleRow } from '../lib/profiles';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
 import { applyLanguage, hasStoredLanguage } from '../i18n';
@@ -10,17 +10,26 @@ type DbUser = Pick<
   'id' | 'name' | 'role_id' | 'role_label' | 'plant_name' | 'access_note' | 'auth_user_id' | 'created_at'
 >;
 
+/** The DB profile data we resolve for the logged-in user (before role mapping). */
+type SessionProfile = { role: string | null; name: string | null };
+
+type RolesStatus = 'loading' | 'ready' | 'failed';
+
 /**
  * Fail-closed identity for a logged-in user whose profiles.role doesn't match any
- * known role template (missing/unknown role). Grants NO dashboard access — never
+ * role in the catalog (missing/unknown role). Grants NO dashboard access — never
  * default an unrecognized login to admin.
  */
 const LOCKED_FALLBACK: MockProfile = {
-  ...DEFAULT_PROFILE,
   id: 'locked',
   name: 'Restricted',
+  role: 'L1',
   roleLabel: 'No access',
   roleDescription: 'No role assigned — contact admin',
+  initials: '?',
+  avatarFrom: 'from-slate-300',
+  avatarTo: 'to-slate-500',
+  homeRoute: '/dashboard',
   allowedDashboardRoutes: [],
   standaloneOnly: false,
 };
@@ -55,6 +64,12 @@ interface RoleContextValue {
   /** The logged-in user's own profile (who they actually are). */
   authProfile: MockProfile | null;
   allProfiles: MockProfile[];
+  /** The role catalog from the `roles` table (sorted by sort_order). */
+  roles: RoleRow[];
+  /** Load state of the role catalog: 'loading' | 'ready' | 'failed'. */
+  rolesStatus: RolesStatus;
+  /** Re-fetch the role catalog (e.g. after admin edits roles). */
+  refreshRoles: () => Promise<void>;
   switchProfile: (profileId: string) => void;
   /** True when the active profile differs from the user's own profile (admin preview). */
   isViewingAs: boolean;
@@ -84,19 +99,22 @@ function identitiesFor(profile: MockProfile, directory: MockProfile[]): string[]
 }
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
-  // The logged-in user's locked identity, resolved from their profiles row.
-  // null = no session yet (loading, signed out, or the dev bypass).
-  const [authProfile, setAuthProfile] = useState<MockProfile | null>(null);
+  // ── Role catalog (single source of truth for RBAC) ──────────────────────────
+  const [roles, setRoles] = useState<RoleRow[]>([]);
+  const [rolesStatus, setRolesStatus] = useState<RolesStatus>('loading');
+  // DB directory (active user_accounts rows).
+  const [dbUsers, setDbUsers] = useState<DbUser[]>([]);
+
+  // The DB profile data resolved for the logged-in user (role id + name), before
+  // it's mapped through the role catalog. null = no session / still resolving.
+  const [sessionProfile, setSessionProfile] = useState<SessionProfile | null>(null);
+  // True once the session resolution attempt has completed (with or without a user).
+  const [sessionResolved, setSessionResolved] = useState(false);
   // Admin-only "preview as" selection. null = view as self.
   const [previewProfileId, setPreviewProfileId] = useState<string | null>(null);
-  const [extraProfiles, setExtraProfiles] = useState<MockProfile[]>([]);
   // The logged-in Supabase auth user id — the exact link to this person's
   // directory (db) identity, used to bridge notification ids. null = no session.
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
-  // False until the logged-in user's profile has been resolved (or determined
-  // absent). Lets the UI show a loading state instead of flashing the locked /
-  // "Access Restricted" fallback while the profile fetch is still in flight.
-  const [authResolved, setAuthResolved] = useState(false);
   // The auth user whose saved language we've already applied this session. Auth
   // events (token refresh, tab focus) fire resolveFromSession repeatedly — we
   // must apply the DB language only ONCE per login, never re-apply it, so it
@@ -104,7 +122,31 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const langAppliedForRef = useRef<string | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // ── Resolve the logged-in user → locked MockProfile ────────────────────────
+  // ── Load the role catalog ───────────────────────────────────────────────────
+  const refreshRoles = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('roles')
+      .select('*')
+      .order('sort_order')
+      .returns<RoleRow[]>();
+    if (error) {
+      setRolesStatus('failed');
+      return;
+    }
+    setRoles(data ?? []);
+    setRolesStatus('ready');
+  }, []);
+
+  useEffect(() => { refreshRoles(); }, [refreshRoles]);
+
+  // Fast lookup id → role row.
+  const roleMap = useMemo(() => {
+    const m = new Map<string, RoleRow>();
+    for (const r of roles) m.set(r.id, r);
+    return m;
+  }, [roles]);
+
+  // ── Resolve the logged-in user's DB profile (role id + name) ─────────────────
   useEffect(() => {
     let cancelled = false;
 
@@ -112,7 +154,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       if (!cancelled) setSessionUserId(userId);
       if (!userId) {
         langAppliedForRef.current = null; // signed out → re-apply on next login
-        if (!cancelled) { setAuthProfile(null); setAuthResolved(true); }
+        if (!cancelled) { setSessionProfile(null); setSessionResolved(true); }
         return;
       }
       const { data, error } = await supabase
@@ -139,15 +181,8 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         if (!hasStoredLanguage()) applyLanguage(data?.preferred_language);
       }
 
-      const template = MOCK_PROFILES.find((p) => p.id === data?.role);
-      if (!template) {
-        // Logged in but no recognizable role → fail closed.
-        setAuthProfile({ ...LOCKED_FALLBACK, name: data?.name || LOCKED_FALLBACK.name });
-        setAuthResolved(true);
-        return;
-      }
-      setAuthProfile({ ...template, name: data?.name || template.name });
-      setAuthResolved(true);
+      setSessionProfile({ role: data?.role ?? null, name: data?.name ?? null });
+      setSessionResolved(true);
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -160,7 +195,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; clearTimeout(retryRef.current); subscription.unsubscribe(); };
   }, []);
 
-  // ── Extra (DB-created) profiles — only used for the admin preview switcher ──
+  // ── DB directory — built from active user_accounts rows ─────────────────────
   useEffect(() => {
     async function loadDbUsers() {
       const { data } = await supabase
@@ -168,46 +203,79 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         .select('id, name, role_id, role_label, plant_name, access_note, auth_user_id, created_at')
         .eq('is_active', true)
         .returns<DbUser[]>();
-      if (!data?.length) return;
-      const extras: MockProfile[] = [];
-      for (const u of data) {
-        const template = MOCK_PROFILES.find((p) => p.id === u.role_id);
-        if (!template) continue;
-        // Skip if this name already maps to an existing built-in profile
-        if (MOCK_PROFILES.some((p) => p.name.toLowerCase() === u.name.trim().toLowerCase())) continue;
-        const parts = u.name.trim().split(/\s+/);
-        const initials = parts.length >= 2
-          ? `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-          : parts[0].slice(0, 2).toUpperCase();
-        extras.push({
-          ...template,
-          id: `db_${u.id}`,
-          baseRoleId: template.id, // keep the role link so role-targeted notifications still reach this person
-          authUserId: u.auth_user_id ?? undefined, // exact session ↔ directory link
-          accountCreatedAt: u.created_at ?? undefined, // notification floor
-          name: u.name,
-          initials,
-          roleLabel: u.role_label || template.roleLabel,
-          plant: u.plant_name || template.plant,
-          accessNote: u.access_note || template.accessNote,
-        });
-      }
-      setExtraProfiles(extras);
+      if (data) setDbUsers(data);
     }
     loadDbUsers();
   }, []);
 
-  const allProfiles = useMemo(() => [...MOCK_PROFILES, ...extraProfiles], [extraProfiles]);
+  // The directory of all real (provisioned) people, mapped through the role
+  // catalog. A user whose role_id isn't in the catalog is mapped to a locked
+  // (no-access) profile so they still appear but can't be impersonated into access.
+  const directory = useMemo<MockProfile[]>(() => {
+    if (rolesStatus !== 'ready') return [];
+    const out: MockProfile[] = [];
+    for (const u of dbUsers) {
+      const role = u.role_id ? roleMap.get(u.role_id) : undefined;
+      const overrides: Partial<MockProfile> = {
+        id: `db_${u.id}`,
+        name: u.name,
+        baseRoleId: u.role_id ?? undefined, // keep the role link so role-targeted notifications still reach this person
+        authUserId: u.auth_user_id ?? undefined, // exact session ↔ directory link
+        accountCreatedAt: u.created_at ?? undefined, // notification floor
+        plant: u.plant_name ?? undefined,
+        accessNote: u.access_note ?? undefined,
+      };
+      if (role) {
+        out.push(roleToProfile(role, overrides));
+      } else {
+        // Unknown role → a locked directory entry (no access), still taggable.
+        out.push({
+          ...LOCKED_FALLBACK,
+          ...overrides,
+          name: u.name,
+          roleLabel: u.role_label || LOCKED_FALLBACK.roleLabel,
+          initials: LOCKED_FALLBACK.initials,
+        });
+      }
+    }
+    return out;
+  }, [dbUsers, roleMap, rolesStatus]);
+
+  const allProfiles = directory;
+
+  // The logged-in user's own identity, derived from their DB profile + the catalog.
+  const authProfile = useMemo<MockProfile | null>(() => {
+    if (!sessionUserId || !sessionProfile) return null;
+    const role = sessionProfile.role ? roleMap.get(sessionProfile.role) : undefined;
+    if (role) return roleToProfile(role, { name: sessionProfile.name ?? '' });
+    // Role not found in the catalog.
+    if (rolesStatus === 'failed' && sessionProfile.role === 'admin') {
+      // Catalog failed to load entirely → don't lock the owner out.
+      return { ...ADMIN_FALLBACK, name: sessionProfile.name || 'Owner' };
+    }
+    if (rolesStatus !== 'ready') return null; // still loading — hold for the catalog
+    return { ...LOCKED_FALLBACK, name: sessionProfile.name || LOCKED_FALLBACK.name };
+  }, [sessionUserId, sessionProfile, roleMap, rolesStatus]);
+
+  // False until BOTH the session resolution and the role catalog load have
+  // settled — so the UI shows a loader instead of flashing the locked fallback.
+  const authResolved = sessionResolved && rolesStatus !== 'loading';
 
   // Who can preview/switch: a real admin login, OR the dev bypass (no session in
   // a dev build, where Login lets you skip auth to demo the role switcher).
   const isAdmin = authProfile?.id === 'admin';
-  const devBypass = import.meta.env.DEV && !authProfile;
+  const devBypass = import.meta.env.DEV && sessionResolved && !sessionUserId;
   const canSwitch = isAdmin || devBypass;
+
+  // An admin profile sourced from the catalog (fallback if catalog unavailable).
+  const adminProfile = useMemo<MockProfile>(() => {
+    const role = roleMap.get('admin');
+    return role ? roleToProfile(role, { name: 'Owner' }) : { ...ADMIN_FALLBACK, name: 'Owner' };
+  }, [roleMap]);
 
   // The user's own identity. In a dev bypass we present as admin (the demo owner).
   const selfProfile: MockProfile = authProfile
-    ?? (devBypass ? DEFAULT_PROFILE : LOCKED_FALLBACK);
+    ?? (devBypass ? adminProfile : LOCKED_FALLBACK);
 
   // Active = (admin's preview selection) else self. Non-admins can never deviate.
   const activeProfile: MockProfile = useMemo(() => {
@@ -219,19 +287,19 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
 
   // Every id the active person answers to (self id + role id + db twin id).
   const activeIdentityIds = useMemo(() => {
-    const ids = new Set(identitiesFor(activeProfile, extraProfiles));
+    const ids = new Set(identitiesFor(activeProfile, directory));
     // Exact bridge for the logged-in self: map this auth session straight to its
     // directory `db_<uuid>` identity (name-independent, the robust link). Only
     // when viewing as self — an admin previewing someone else keeps their ids.
     if (sessionUserId && activeProfile.id === selfProfile.id) {
-      const mine = extraProfiles.find((p) => p.authUserId === sessionUserId);
+      const mine = directory.find((p) => p.authUserId === sessionUserId);
       if (mine) {
         ids.add(mine.id);
         if (mine.baseRoleId) ids.add(mine.baseRoleId);
       }
     }
     return [...ids];
-  }, [activeProfile, extraProfiles, sessionUserId, selfProfile]);
+  }, [activeProfile, directory, sessionUserId, selfProfile]);
 
   // The active person's unique personal id (their db twin if provisioned, else
   // their profile id). NEVER the shared role id — used for "is this mine /
@@ -239,21 +307,21 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const activePersonId = useMemo(() => {
     if (activeProfile.id.startsWith('db_')) return activeProfile.id; // already personal
     if (sessionUserId && activeProfile.id === selfProfile.id) {
-      const mine = extraProfiles.find((p) => p.authUserId === sessionUserId);
+      const mine = directory.find((p) => p.authUserId === sessionUserId);
       if (mine) return mine.id; // exact auth link
     }
     const key = activeProfile.name.trim().toLowerCase();
-    const twin = extraProfiles.find((p) => p.name.trim().toLowerCase() === key);
-    return twin?.id ?? activeProfile.id; // name twin, else the (mock) profile id
-  }, [activeProfile, extraProfiles, sessionUserId, selfProfile]);
+    const twin = directory.find((p) => p.name.trim().toLowerCase() === key);
+    return twin?.id ?? activeProfile.id; // name twin, else the profile id
+  }, [activeProfile, directory, sessionUserId, selfProfile]);
 
   // The active person's provisioning date (notification floor). Resolved from
   // whichever directory entry matches their personal id; null for archetypes.
   const activeAccountFloor = useMemo(() => {
     if (activeProfile.accountCreatedAt) return activeProfile.accountCreatedAt;
-    const mine = extraProfiles.find((p) => p.id === activePersonId);
+    const mine = directory.find((p) => p.id === activePersonId);
     return mine?.accountCreatedAt ?? null;
-  }, [activeProfile, extraProfiles, activePersonId]);
+  }, [activeProfile, directory, activePersonId]);
 
   function switchProfile(profileId: string) {
     if (!canSwitch) return; // locked users cannot change their role
@@ -271,6 +339,9 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         authResolved,
         authProfile,
         allProfiles,
+        roles,
+        rolesStatus,
+        refreshRoles,
         switchProfile,
         canSwitch,
         isViewingAs: activeProfile.id !== selfProfile.id,

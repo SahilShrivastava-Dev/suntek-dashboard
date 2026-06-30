@@ -5,7 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import { insertRows, updateRows } from '../../../lib/db';
 import { resizeImageToDataUrl, extractSupplierBill } from '../../../lib/nvidiaOcr';
 import { useRoleContext } from '../../../contexts/RoleContext';
-import { MOCK_PROFILES } from '../../../lib/profiles';
+import type { RoleRow } from '../../../lib/profiles';
 import { useBlacklist } from '../../../contexts/BlacklistContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
@@ -30,10 +30,11 @@ type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
 function fmtDT(d: string | null | undefined): string {
   return d ? new Date(d).toLocaleString('en-IN') : '';
 }
-// Map a stored role id (e.g. 'technician_shd') to its human label.
-function roleLabelFor(roleId: string | null | undefined): string {
+// Map a stored role id (e.g. 'technician_shd') to its human label using the
+// role catalog (from RoleContext). Falls back to the raw id when unknown.
+function roleLabelFor(roleId: string | null | undefined, roles: RoleRow[]): string {
   if (!roleId) return '';
-  return MOCK_PROFILES.find((p) => p.id === roleId)?.roleLabel || roleId;
+  return roles.find((r) => r.id === roleId)?.label || roleId;
 }
 
 // CSV layout for the maintenance report — the full life of each ticket.
@@ -143,12 +144,11 @@ async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?
     .eq('id', ticketId);
 }
 
-// People/teams an admin can assign a maintenance task to. Name-based so the
-// blacklist guard (which matches on person name) can flag a restricted assignee.
+// Role ids whose (real) holders an admin can assign a maintenance task to. The
+// actual people are resolved from the directory (allProfiles) inside the
+// component. Name-based so the blacklist guard (which matches on person name)
+// can flag a restricted assignee.
 const ASSIGNABLE_ROLE_IDS = ['technician_shd', 'store_manager_maint', 'factory_operator', 'unit_head'];
-const ASSIGNABLE_STAFF = MOCK_PROFILES
-  .filter((p) => ASSIGNABLE_ROLE_IDS.includes(p.id))
-  .map((p) => ({ name: p.name, label: `${p.name} · ${p.roleLabel}` }));
 
 // ── Jharkhand procurement units — store requests route to the matching store manager.
 type Unit = 'chlorides' | 'plasticiser';
@@ -271,7 +271,7 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function Maintenance() {
-  const { activeProfile } = useRoleContext();
+  const { activeProfile, allProfiles, roles } = useRoleContext();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const toast = useToast();
   const { t } = useTranslation();
@@ -280,6 +280,12 @@ export function Maintenance() {
   const screenBlacklist = useBlacklistGuard();
   const actionBusyRef = useRef(false); // guards one-shot workflow actions from double-clicks
   const role = activeProfile.id;
+
+  // Real people (from the DB directory) an admin can assign a task to — those
+  // whose role is in ASSIGNABLE_ROLE_IDS. baseRoleId is the directory entry's role.
+  const ASSIGNABLE_STAFF = allProfiles
+    .filter((p) => ASSIGNABLE_ROLE_IDS.includes(p.baseRoleId ?? p.id))
+    .map((p) => ({ name: p.name, label: `${p.name} · ${p.roleLabel}` }));
 
   // ── @-mention / watcher plumbing for tickets ────────────────────────────────
   const ticketRef = (t: TicketRow) => ({
@@ -693,7 +699,7 @@ export function Maintenance() {
           status: STATUS_CFG[t.status]?.label || t.status,
           stage: STAGE_LABELS[t.status] || '',
           raised_by: t.raised_by || '',
-          raised_role: roleLabelFor(t.raised_role),
+          raised_role: roleLabelFor(t.raised_role, roles),
           assigned_to: t.assigned_to || '',
           created: fmtDT(t.created_at),
           closed: fmtDT(t.closed_at),
@@ -1244,7 +1250,7 @@ export function Maintenance() {
     let body: React.ReactNode = <div style={{ fontSize: 12.5, color: '#94A3B8' }}>No details captured for this step.</div>;
     switch (stage) {
       case 'open':
-        body = <>{line('Raised by', t.raised_by)}{line('Role', roleLabelFor(t.raised_role))}{line('When', formatDate(t.created_at))}{t.description && <div style={{ fontSize: 12.5, color: '#334155', marginTop: 6 }}><MentionText text={t.description} /></div>}</>;
+        body = <>{line('Raised by', t.raised_by)}{line('Role', roleLabelFor(t.raised_role, roles))}{line('When', formatDate(t.created_at))}{t.description && <div style={{ fontSize: 12.5, color: '#334155', marginTop: 6 }}><MentionText text={t.description} /></div>}</>;
         break;
       case 'in_progress':
         body = <>{line('Handled by', t.assigned_to || t.raised_by)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>{sr ? 'Needs a part — store request raised.' : 'Decided to fix in-house.'}</div></>;

@@ -4,6 +4,23 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  // Avatar gradient classes come from the DB (roles.avatar_from/_to) at runtime,
+  // so Tailwind's scanner can't see them and would purge them → white avatars.
+  // Safelist every gradient in AVATAR_PALETTE (src/lib/profiles.ts) + slate fallback.
+  safelist: [
+    'bg-gradient-to-br',
+    'from-orange-300', 'to-orange-500',
+    'from-blue-400', 'to-blue-600',
+    'from-teal-400', 'to-teal-600',
+    'from-indigo-400', 'to-indigo-600',
+    'from-purple-400', 'to-purple-600',
+    'from-lime-400', 'to-lime-600',
+    'from-cyan-400', 'to-cyan-600',
+    'from-fuchsia-400', 'to-fuchsia-600',
+    'from-rose-400', 'to-rose-600',
+    'from-amber-400', 'to-amber-600',
+    'from-slate-300', 'to-slate-500',
+  ],
   theme: {
     extend: {
       fontFamily: {

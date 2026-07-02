@@ -10,7 +10,7 @@ import { supabase } from './supabase';
 
 export interface CreateLoginInput {
   user_account_id: string;
-  email: string;
+  email?: string | null; // optional — omit/empty to use a phone-only login
   password: string;
   name: string;
   role_id: string;

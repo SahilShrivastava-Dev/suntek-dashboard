@@ -95,9 +95,63 @@ export function useAuth() {
 
 
 
-  async function signIn(email: string, password: string) {
+  /**
+   * Sign in with EITHER an email or a phone number, plus password.
+   *
+   * Supabase authenticates on a unique email, so we first resolve the typed
+   * identifier to the account's `login_email` (the exact email registered in
+   * auth.users) via the user_accounts directory, then sign in with that:
+   *   • phone  → matched on the normalized number (unique) → one account.
+   *   • email  → matched on the real email; if it's shared across accounts the
+   *              match is ambiguous, so we ask the user to use their phone.
+   * Falls back to signing in with the raw identifier when no directory row
+   * resolves (e.g. the bootstrap admin created directly in auth).
+   */
+  async function signIn(identifier: string, password: string) {
     setState((s) => ({ ...s, loading: true, error: null }));
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    const id = identifier.trim();
+    const isEmail = id.includes('@');
+    let authEmail = id; // default: try the identifier as-is (bootstrap admin)
+
+    // Only rows with a provisioned login (auth_user_id) count. We filter that in
+    // JS rather than a .not() DB filter to keep the query on the same typed path
+    // the rest of the app uses.
+    type LoginRow = { login_email: string | null; email: string | null; auth_user_id: string | null };
+
+    if (isEmail) {
+      const { data } = await supabase
+        .from('user_accounts')
+        .select('login_email, email, auth_user_id')
+        .eq('email', id.toLowerCase())
+        .returns<LoginRow[]>();
+      const rows = (data ?? []).filter((r) => r.auth_user_id);
+      if (rows.length > 1) {
+        setState((s) => ({ ...s, loading: false, error: 'This email is used by more than one account. Please log in with your phone number instead.' }));
+        return false;
+      }
+      if (rows.length === 1) authEmail = rows[0].login_email || rows[0].email || id;
+    } else {
+      // Phone: normalize to the last 10 digits to match user_accounts.mobile_norm.
+      const norm = id.replace(/\D/g, '').slice(-10);
+      if (!norm) {
+        setState((s) => ({ ...s, loading: false, error: 'Enter a valid email or phone number.' }));
+        return false;
+      }
+      const { data } = await supabase
+        .from('user_accounts')
+        .select('login_email, email, auth_user_id')
+        .eq('mobile_norm', norm)
+        .returns<LoginRow[]>();
+      const row = (data ?? []).find((r) => r.auth_user_id);
+      if (!row || !(row.login_email || row.email)) {
+        setState((s) => ({ ...s, loading: false, error: 'No login found for that phone number.' }));
+        return false;
+      }
+      authEmail = row.login_email || row.email!;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password });
     if (error) {
       setState((s) => ({ ...s, loading: false, error: error.message }));
       return false;

@@ -13,7 +13,9 @@
  *
  * POST body (JSON):
  *   { action: 'create',
- *     user_account_id, email, password, name, role_id, plant_id? }
+ *     user_account_id, password, name, role_id, email?, plant_id? }
+ *     // email optional — if absent or already taken, a synthetic unique auth
+ *     // email is used and the login is reached by phone instead.
  *   { action: 'update',
  *     auth_user_id, email?, password?, name?, role_id?, plant_id? }
  *   { action: 'disable' | 'enable', auth_user_id }   // bans / unbans the login
@@ -112,30 +114,61 @@ function requireStr(v: unknown, field: string): string {
   return s;
 }
 
-/** Create a new auth login + profiles row, and link it back to the directory row. */
+/** True when createUser/updateUser failed because the email is already taken. */
+function isDuplicateEmail(err: { message?: string; code?: string } | null): boolean {
+  if (!err) return false;
+  const code = (err.code ?? '').toLowerCase();
+  if (code === 'email_exists') return true;
+  return /already.*(regist|exist)|duplicate|email.*taken/i.test(err.message ?? '');
+}
+
+/**
+ * Create a new auth login + profiles row, and link it back to the directory row.
+ *
+ * The login can be identified by email OR phone. Since auth.users.email must be
+ * globally unique, we register the REAL email as the auth email only when it's
+ * free; otherwise (shared or absent email) we register a synthetic unique address
+ * derived from the directory row id. Either way the resolved auth email is stored
+ * on user_accounts.login_email — that's what the login flow signs in with.
+ */
 async function handleCreate(admin: Admin, body: Record<string, unknown>) {
-  const email = requireStr(body.email, 'email').toLowerCase();
   const password = requireStr(body.password, 'password');
   const role_id = requireStr(body.role_id, 'role_id');
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const plant_id = (body.plant_id as string) || null;
-  const user_account_id = (body.user_account_id as string) || null;
+  const user_account_id = requireStr(body.user_account_id, 'user_account_id');
+  const realEmail = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
 
   if (password.length < 8) {
     return json({ error: 'Password must be at least 8 characters' }, 400);
   }
 
-  // Auto-confirm so the admin-set password works for first login immediately.
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { name, role_id },
-  });
-  if (createErr || !created?.user) {
-    return json({ error: createErr?.message ?? 'Failed to create auth user' }, 400);
+  // The synthetic fallback is stable + unique because the directory row id is.
+  const syntheticEmail = `u-${user_account_id}@login.suntek.local`;
+  const opts = { password, email_confirm: true, user_metadata: { name, role_id } };
+
+  // Try the real email first; on a uniqueness clash (shared email), fall back to
+  // the synthetic address so the account still gets a working login.
+  let authEmail = realEmail;
+  let created: { user?: { id: string } } | null = null;
+  if (realEmail) {
+    const r = await admin.auth.admin.createUser({ email: realEmail, ...opts });
+    if (r.error) {
+      if (!isDuplicateEmail(r.error)) return json({ error: r.error.message }, 400);
+      authEmail = ''; // clash → use synthetic below
+    } else {
+      created = r.data;
+    }
   }
-  const authId = created.user.id;
+  if (!created) {
+    authEmail = syntheticEmail;
+    const r = await admin.auth.admin.createUser({ email: syntheticEmail, ...opts });
+    if (r.error || !r.data?.user) {
+      return json({ error: r.error?.message ?? 'Failed to create auth user' }, 400);
+    }
+    created = r.data;
+  }
+  const authId = created!.user!.id;
 
   // profiles row is the source of truth for RoleContext lock-to-role.
   const { error: profErr } = await admin
@@ -147,34 +180,37 @@ async function handleCreate(admin: Admin, body: Record<string, unknown>) {
     return json({ error: `Profile link failed: ${profErr.message}` }, 500);
   }
 
-  // Link the directory row (if one was passed) to the new login.
-  if (user_account_id) {
-    await admin
-      .from('user_accounts')
-      .update({ auth_user_id: authId, email, login_enabled: true })
-      .eq('id', user_account_id);
-  }
+  // Link the directory row to the new login. login_email is the auth identity we
+  // sign in with; the real email/phone stay as the client wrote them.
+  await admin
+    .from('user_accounts')
+    .update({ auth_user_id: authId, login_email: authEmail, login_enabled: true })
+    .eq('id', user_account_id);
 
-  return json({ ok: true, auth_user_id: authId });
+  return json({ ok: true, auth_user_id: authId, login_email: authEmail });
 }
 
 /** Update an existing login: email / password / role / plant. */
 async function handleUpdate(admin: Admin, body: Record<string, unknown>) {
   const authId = requireStr(body.auth_user_id, 'auth_user_id');
+  const user_account_id = typeof body.user_account_id === 'string' ? body.user_account_id : '';
 
-  const authPatch: Record<string, unknown> = {};
-  if (typeof body.email === 'string' && body.email.trim()) {
-    authPatch.email = body.email.trim().toLowerCase();
-  }
+  // Password change (kept independent of email so it always applies).
   if (typeof body.password === 'string' && body.password) {
     if (body.password.length < 8) {
       return json({ error: 'Password must be at least 8 characters' }, 400);
     }
-    authPatch.password = body.password;
-  }
-  if (Object.keys(authPatch).length) {
-    const { error } = await admin.auth.admin.updateUserById(authId, authPatch);
+    const { error } = await admin.auth.admin.updateUserById(authId, { password: body.password });
     if (error) return json({ error: error.message }, 400);
+  }
+
+  // Email change: point the auth login at the new real email when it's free; if
+  // it clashes (shared email) we leave the current auth email untouched — login
+  // by phone still works, and the real (shared) email lives on user_accounts.
+  if (typeof body.email === 'string' && body.email.trim()) {
+    const nextEmail = body.email.trim().toLowerCase();
+    const { error } = await admin.auth.admin.updateUserById(authId, { email: nextEmail });
+    if (error && !isDuplicateEmail(error)) return json({ error: error.message }, 400);
   }
 
   // Keep profiles in sync (role / plant / name drive access + display).
@@ -187,12 +223,15 @@ async function handleUpdate(admin: Admin, body: Record<string, unknown>) {
     await admin.from('profiles').upsert(profPatch, { onConflict: 'id' });
   }
 
-  // Reflect a new email on the directory row too.
-  if (authPatch.email && typeof body.user_account_id === 'string' && body.user_account_id) {
-    await admin
-      .from('user_accounts')
-      .update({ email: authPatch.email })
-      .eq('id', body.user_account_id);
+  // Sync login_email to whatever the auth login actually resolved to.
+  if (user_account_id) {
+    const { data: fresh } = await admin.auth.admin.getUserById(authId);
+    if (fresh?.user?.email) {
+      await admin
+        .from('user_accounts')
+        .update({ login_email: fresh.user.email })
+        .eq('id', user_account_id);
+    }
   }
 
   return json({ ok: true, auth_user_id: authId });

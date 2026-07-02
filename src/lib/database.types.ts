@@ -96,6 +96,8 @@ export interface Database {
           created_at: string;
           auth_user_id: string | null;   // linked auth.users id once a login is provisioned
           login_enabled: boolean | null; // true when this row has an active login
+          login_email: string | null;    // exact email registered in auth.users (may be synthetic)
+          mobile_norm: string | null;    // generated: normalized last-10-digit phone, used as login key
           preferred_language: string | null;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['user_accounts']['Row'], 'id' | 'created_at'>>;

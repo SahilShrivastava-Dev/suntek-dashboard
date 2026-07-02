@@ -321,15 +321,26 @@ export function UserManagement() {
   }
 
   async function handleSave() {
-    if (!form.name.trim() || !form.mobile.trim()) return;
+    // A user needs a name and at least one contact identifier (email or phone).
+    if (!form.name.trim() || (!form.email.trim() && !form.mobile.trim())) return;
 
     const existingAuthId = editingUser?.auth_user_id || null;
     // A brand-new login is being provisioned when login is enabled but no auth
     // user is linked yet (new user, or enabling login on an existing directory row).
     const provisioningNewLogin = form.login_enabled && !existingAuthId;
     if (provisioningNewLogin) {
-      if (!form.email.trim()) { toast.error(t('userMgmt.errLoginEmailRequired')); return; }
+      // Login can be by email OR phone — need at least one so the user can be found.
+      if (!form.email.trim() && !form.mobile.trim()) { toast.error(t('userMgmt.errLoginIdentifierRequired')); return; }
       if (form.password.length < 8) { toast.error(t('userMgmt.errPasswordMin')); return; }
+    }
+
+    // Provisioning a login hits the admin edge function, which requires a REAL
+    // admin session. Guard up-front so we never create a half-user (directory row
+    // saved, login failed) when there's no session — e.g. the dev "enter
+    // dashboard" bypass or an expired token.
+    if (form.login_enabled) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { toast.error(t('userMgmt.errNoSessionForLogin')); return; }
     }
 
     const plant = plants.find(p => p.name === form.plant);
@@ -356,7 +367,11 @@ export function UserManagement() {
       if (error) { toast.error(t('userMgmt.errUpdateFailed', { msg: error.message })); return; }
     } else {
       const { data, error } = await insertRows('user_accounts', payload).select('id').single();
-      if (error) { toast.error(t('userMgmt.errSaveFailed', { msg: error.message })); return; }
+      if (error) {
+        const dupMobile = /duplicate|unique/i.test(error.message) && /mobile/i.test(error.message);
+        toast.error(dupMobile ? t('userMgmt.errDuplicateMobile') : t('userMgmt.errSaveFailed', { msg: error.message }));
+        return;
+      }
       accountId = data?.id || '';
     }
 
@@ -376,13 +391,24 @@ export function UserManagement() {
       } else {
         const { error } = await createLogin({
           user_account_id: accountId,
-          email: email!,
+          email: email ?? undefined, // omit → phone-only login (synthetic auth email)
           password: form.password,
           name: form.name.trim(),
           role_id: form.role_id,
           plant_id: plant?.id || null,
         });
-        if (error) { toast.error(t('userMgmt.errLoginCreateFailed', { msg: error })); return; }
+        if (error) {
+          // Login provisioning failed. If we just inserted a brand-new directory
+          // row for this user, roll it back so no half-created (login-disabled)
+          // account is left behind — otherwise a retry hits the unique-phone
+          // constraint and throws a confusing duplicate error.
+          if (!editingUser && accountId) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (supabase.from('user_accounts') as any).delete().eq('id', accountId);
+          }
+          toast.error(t('userMgmt.errLoginCreateFailed', { msg: error }));
+          return;
+        }
       }
     }
 
@@ -640,6 +666,9 @@ export function UserManagement() {
             <PanelInput type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder={t('userMgmt.emailPlaceholder')} />
           </PanelField>
         </PanelRow>
+        <div style={{ fontSize: 11, color: '#94A3B8', marginTop: -8, marginBottom: 14 }}>
+          {t('userMgmt.contactHint')}
+        </div>
 
         {/* Role + Level preview */}
         <PanelField label={t('userMgmt.roleLabel')}>
@@ -713,9 +742,9 @@ export function UserManagement() {
 
           {form.login_enabled && (
             <div style={{ marginTop: 12 }}>
-              {!form.email.trim() && (
+              {!form.email.trim() && !form.mobile.trim() && (
                 <div style={{ fontSize: 11, color: '#DC2626', marginBottom: 8 }}>
-                  {t('userMgmt.setEmailWarnPre')}<strong>{t('userMgmt.emailField')}</strong>{t('userMgmt.setEmailWarnPost')}
+                  {t('userMgmt.setLoginIdentifierWarn')}
                 </div>
               )}
               <PanelField label={editingUser?.auth_user_id ? t('userMgmt.setNewPassword') : t('userMgmt.passwordLabel')}>
@@ -763,7 +792,7 @@ export function UserManagement() {
           saveLabel={editingUser ? t('userMgmt.saveChanges') : t('userMgmt.addUser')}
           successLabel={editingUser ? t('userMgmt.userUpdated') : t('userMgmt.userAdded')}
           successSub={editingUser ? t('userMgmt.userUpdatedSub') : t('userMgmt.userAddedSub')}
-          disabled={!form.name.trim() || !form.mobile.trim()}
+          disabled={!form.name.trim() || (!form.email.trim() && !form.mobile.trim())}
           requiredHint={t('userMgmt.requiredHint')}
         />
       </SlidePanel>

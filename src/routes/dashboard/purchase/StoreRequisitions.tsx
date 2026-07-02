@@ -8,6 +8,8 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRo
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { usePlantScope } from '../../../contexts/PlantScopeContext';
+import { withEmbedFallback } from '../../../lib/scopedList';
 import type { Database } from '../../../lib/database.types';
 
 type ReqRow = Database['public']['Tables']['store_requisitions']['Row'] & { plants?: { name: string | null } | null };
@@ -70,6 +72,7 @@ export function StoreRequisitions() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
+  const { scopeQuery, allowedPlants } = usePlantScope();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [items, setItems] = useState<ReqRow[]>([]);
@@ -87,11 +90,11 @@ export function StoreRequisitions() {
         .returns<{ id: string; name: string }[]>();
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
-      const { data, error } = await supabase
-        .from('store_requisitions')
-        .select('*, plants(name)')
-        .order('created_at', { ascending: false })
-        .returns<ReqRow[]>();
+      const { data, error } = await withEmbedFallback(
+        scopeQuery(supabase.from('store_requisitions').select('*, plants(name)'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<ReqRow[]>(),
+        () => scopeQuery(supabase.from('store_requisitions').select('*'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<ReqRow[]>(),
+        'StoreRequisitions.list',
+      );
       if (error) throw error;
       setItems(data || []);
 
@@ -130,9 +133,12 @@ export function StoreRequisitions() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : FALLBACK_PLANTS;
+  // Restrict the plant picker to the user's allowed plants (all if global).
+  const plantNames = allowedPlants.length > 0
+    ? allowedPlants.map(p => p.name)
+    : (dbPlants.length > 0 ? dbPlants.map(p => p.name) : FALLBACK_PLANTS);
 
   // ── Store register derived ────────────────────────────────────────────────
   const stores = [...new Set(register.map(r => r.store))].sort();
@@ -169,6 +175,7 @@ export function StoreRequisitions() {
         actor_name: form.plant,
         actor_role: 'warehouse_manager',
         read_by: [],
+        plant_id: plant?.id || null, // deliver only to this plant's unit head + admin
       }).then(() => {}, () => {});
       await notifyMentions(form.notes, {
         entityType: 'store_requisition', entityId: (data as ReqRow).id,

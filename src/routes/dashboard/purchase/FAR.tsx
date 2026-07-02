@@ -9,6 +9,8 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import * as XLSX from 'xlsx';
+import { usePlantScope } from '../../../contexts/PlantScopeContext';
+import { withEmbedFallback } from '../../../lib/scopedList';
 import type { Database } from '../../../lib/database.types';
 
 // ── FAR bulk-import (CSV / Excel → verify → register) ─────────────────────────
@@ -137,6 +139,7 @@ const ACCOUNT_HEADS = ['Plant & Machinery', 'Electrical Equipment', 'Vehicles', 
 export function FAR() {
   const { t } = useTranslation();
   const toast = useToast();
+  const { scopeQuery } = usePlantScope();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -170,11 +173,11 @@ export function FAR() {
         .returns<{ id: string; name: string }[]>();
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
-      const { data, error } = await supabase
-        .from('fixed_assets')
-        .select('*, plants(name)')
-        .order('created_at', { ascending: false })
-        .returns<AssetRow[]>();
+      const { data, error } = await withEmbedFallback(
+        scopeQuery(supabase.from('fixed_assets').select('*, plants(name)')).order('created_at', { ascending: false }).returns<AssetRow[]>(),
+        () => scopeQuery(supabase.from('fixed_assets').select('*')).order('created_at', { ascending: false }).returns<AssetRow[]>(),
+        'FAR.assets',
+      );
       if (error) throw error;
       setAssets(data || []);
       setLoadError(false);
@@ -217,7 +220,7 @@ export function FAR() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
 

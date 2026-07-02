@@ -111,7 +111,7 @@ const PURCHASE_TAB_PATHS = [
 
 export function DashboardLayout() {
   const { user, signOut, session, loading: authLoading } = useAuth();
-  const { isViewingAs, activeProfile, switchProfile, authResolved } = useRoleContext();
+  const { isViewingAs, activeProfile, switchProfile, authResolved, can } = useRoleContext();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const location = useLocation();
   const navigate = useNavigate();
@@ -185,9 +185,14 @@ export function DashboardLayout() {
     profileCanAccess(activeProfile, p)
   );
 
+  // User Management is reachable by anyone with a user/role-management capability
+  // (e.g. a delegated unit head), not only via an explicit route grant.
+  const isUserMgmt = path === '/dashboard/users';
   const canAccessRoute =
     !activeProfile.standaloneOnly &&
-    (isPurchaseRoot ? hasSomePurchaseAccess : profileCanAccess(activeProfile, path));
+    (isPurchaseRoot ? hasSomePurchaseAccess
+      : isUserMgmt ? (can('manage_users') || can('manage_roles') || profileCanAccess(activeProfile, path))
+      : profileCanAccess(activeProfile, path));
 
   // Post-login landing: a locked user who hits the Overview ('/dashboard') they
   // can't see is sent straight to their own home section, instead of bouncing

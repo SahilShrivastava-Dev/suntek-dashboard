@@ -184,7 +184,7 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
-  const { activeProfile } = useRoleContext();
+  const { activeProfile, can } = useRoleContext();
   const { criticalCount } = useAnomalies();
   const { openPalette } = useSearchPalette();
 
@@ -286,7 +286,8 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   const showIntelligence = INTELLIGENCE_TABS.length > 0;
 
   // Admin section — user management + blacklist
-  const showAdmin = activeProfile.id === 'admin';
+  // User Management shows for anyone who can manage users or roles (delegated too).
+  const showAdmin = can('manage_users') || can('manage_roles');
   const showBlacklist = activeProfile.id === 'admin' || activeProfile.id === 'unit_head';
 
   const isActive = (path: string) => {

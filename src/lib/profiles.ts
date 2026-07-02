@@ -47,6 +47,28 @@ export interface MockProfile {
   /** True = no dashboard at all, uses a standalone app */
   standaloneOnly: boolean;
   accessNote?: string;
+  /** Granted "special allowances" (privileged capabilities), e.g. ['manage_users'].
+   * Admin (allowedDashboardRoutes includes '*') implicitly has every capability. */
+  capabilities: string[];
+}
+
+/**
+ * The privileged capabilities ("special allowances") an admin can grant to a
+ * role. They are OFF by default and unlocking them in the Role editor requires a
+ * password step-up. Extend this list to add more powers later.
+ */
+export const CAPABILITIES: { key: string; label: string; description: string }[] = [
+  { key: 'manage_users', label: 'Manage users', description: 'Create, edit, deactivate users and assign their roles' },
+  { key: 'manage_roles', label: 'Manage roles & permissions', description: 'Create/edit roles, levels and dashboard access' },
+];
+
+/**
+ * True if the profile holds the privileged capability. Capabilities are separate
+ * from route access — a role can have ALL routes ('*') yet NOT manage users/roles
+ * (e.g. Management). The admin role is seeded with every capability explicitly.
+ */
+export function profileHasCapability(profile: MockProfile, cap: string): boolean {
+  return (profile.capabilities || []).includes(cap);
 }
 
 /**
@@ -63,6 +85,7 @@ export interface RoleRow {
   standalone_only: boolean;
   is_admin: boolean;
   is_system: boolean;
+  capabilities: string[]; // granted special allowances
   avatar_from: string | null;
   avatar_to: string | null;
   sort_order: number | null;
@@ -121,6 +144,7 @@ export function roleToProfile(role: RoleRow, overrides?: Partial<MockProfile>): 
     homeRoute: role.home_route,
     allowedDashboardRoutes: role.allowed_routes ?? [],
     standaloneOnly: role.standalone_only,
+    capabilities: role.capabilities ?? [],
   };
   const merged = { ...base, ...overrides };
   // Always recompute initials from the resolved name (override may set name).
@@ -145,6 +169,7 @@ export const ADMIN_FALLBACK: MockProfile = {
   homeRoute: '/dashboard',
   allowedDashboardRoutes: ['*'],
   standaloneOnly: false,
+  capabilities: ['manage_users', 'manage_roles'],
 };
 
 /**

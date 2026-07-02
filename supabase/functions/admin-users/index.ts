@@ -8,7 +8,10 @@
  *
  * Security model:
  *  - The caller's JWT is read from the Authorization header and resolved to a
- *    user. That user must have profiles.role = 'admin'. Anyone else is rejected.
+ *    user. That user must hold the `manage_users` capability (Admin implicitly
+ *    does). Anyone else is rejected.
+ *  - A delegate (manage_users but not admin) can only assign roles at/below their
+ *    own tier that grant no capability they lack (see canAssignRole).
  *  - Only then do we use the service_role client to mutate auth.users / profiles.
  *
  * POST body (JSON):
@@ -58,24 +61,20 @@ serve(async (req: Request) => {
   if (!jwt) return json({ error: 'Missing Authorization bearer token' }, 401);
 
   // Resolve the JWT to a user using a request-scoped anon client.
-  const caller = createClient(SUPABASE_URL, ANON_KEY, {
+  const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${jwt}` } },
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const { data: callerUser, error: callerErr } = await caller.auth.getUser();
+  const { data: callerUser, error: callerErr } = await callerClient.auth.getUser();
   if (callerErr || !callerUser?.user) {
     return json({ error: 'Invalid or expired session' }, 401);
   }
 
-  // The caller must be an admin (checked with the service_role client so RLS
-  // can't be used to spoof the role).
-  const { data: callerProfile } = await admin
-    .from('profiles')
-    .select('role')
-    .eq('id', callerUser.user.id)
-    .maybeSingle();
-  if (callerProfile?.role !== 'admin') {
-    return json({ error: 'Forbidden — admin role required' }, 403);
+  // The caller must hold the `manage_users` capability (Admin implicitly does).
+  // Resolved with the service_role client so RLS can't be used to spoof it.
+  const caller = await resolveCaller(admin, callerUser.user.id);
+  if (!caller.caps.has('manage_users')) {
+    return json({ error: 'Forbidden — you do not have permission to manage users' }, 403);
   }
 
   // ── 2. Parse + dispatch ──────────────────────────────────────────────────
@@ -90,9 +89,9 @@ serve(async (req: Request) => {
   try {
     switch (action) {
       case 'create':
-        return await handleCreate(admin, body);
+        return await handleCreate(admin, body, caller);
       case 'update':
-        return await handleUpdate(admin, body);
+        return await handleUpdate(admin, body, caller);
       case 'disable':
         return await handleBan(admin, body, true);
       case 'enable':
@@ -107,6 +106,64 @@ serve(async (req: Request) => {
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
+
+/** The authorization profile of the caller: their capabilities + seniority. */
+type Caller = { isAdmin: boolean; caps: Set<string>; maxRank: number };
+
+/**
+ * Resolve the caller's capabilities across ALL their roles (multi-role via
+ * user_roles + primary user_accounts.role_id + bootstrap owner via profiles) and
+ * their most-senior tier rank. Admin implicitly holds every capability.
+ */
+async function resolveCaller(admin: Admin, uid: string): Promise<Caller> {
+  const { data: prof } = await admin.from('profiles').select('role').eq('id', uid).maybeSingle();
+  let isAdmin = prof?.role === 'admin';
+
+  const { data: acct } = await admin
+    .from('user_accounts').select('id, role_id').eq('auth_user_id', uid).maybeSingle();
+
+  const roleIds = new Set<string>();
+  if (acct?.role_id) roleIds.add(acct.role_id);
+  if (acct?.id) {
+    const { data: urs } = await admin.from('user_roles').select('role_id').eq('user_account_id', acct.id);
+    for (const r of urs ?? []) roleIds.add(r.role_id);
+  }
+
+  const caps = new Set<string>();
+  let maxRank = 0;
+  if (roleIds.size) {
+    const { data: roleRows } = await admin
+      .from('roles').select('id, is_admin, capabilities, level').in('id', [...roleIds]);
+    const levels: string[] = [];
+    for (const r of roleRows ?? []) {
+      if (r.is_admin) isAdmin = true;
+      for (const c of r.capabilities ?? []) caps.add(c);
+      if (r.level) levels.push(r.level);
+    }
+    if (levels.length) {
+      const { data: tierRows } = await admin.from('tiers').select('rank').in('id', levels);
+      maxRank = Math.max(0, ...(tierRows ?? []).map((t: { rank: number }) => t.rank));
+    }
+  }
+  if (isAdmin) { caps.add('manage_users'); caps.add('manage_roles'); maxRank = Number.MAX_SAFE_INTEGER; }
+  return { isAdmin, caps, maxRank };
+}
+
+/**
+ * Delegation guard: can the caller assign `roleId` to a user? Admin can assign
+ * anything. A delegate can only assign a role that is (a) not the admin role,
+ * (b) at or below their own tier, and (c) grants no capability the caller lacks
+ * — so a delegate can never escalate someone above themselves.
+ */
+async function canAssignRole(admin: Admin, caller: Caller, roleId: string): Promise<boolean> {
+  if (caller.isAdmin) return true;
+  const { data: r } = await admin
+    .from('roles').select('is_admin, capabilities, level').eq('id', roleId).maybeSingle();
+  if (!r || r.is_admin) return false;
+  for (const c of r.capabilities ?? []) if (!caller.caps.has(c)) return false;
+  const { data: t } = await admin.from('tiers').select('rank').eq('id', r.level).maybeSingle();
+  return (t?.rank ?? 0) <= caller.maxRank;
+}
 
 function requireStr(v: unknown, field: string): string {
   const s = typeof v === 'string' ? v.trim() : '';
@@ -131,9 +188,12 @@ function isDuplicateEmail(err: { message?: string; code?: string } | null): bool
  * derived from the directory row id. Either way the resolved auth email is stored
  * on user_accounts.login_email — that's what the login flow signs in with.
  */
-async function handleCreate(admin: Admin, body: Record<string, unknown>) {
+async function handleCreate(admin: Admin, body: Record<string, unknown>, caller: Caller) {
   const password = requireStr(body.password, 'password');
   const role_id = requireStr(body.role_id, 'role_id');
+  if (!(await canAssignRole(admin, caller, role_id))) {
+    return json({ error: 'Forbidden — you cannot assign that role (it is above your level or grants powers you don’t have).' }, 403);
+  }
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const plant_id = (body.plant_id as string) || null;
   const user_account_id = requireStr(body.user_account_id, 'user_account_id');
@@ -191,9 +251,12 @@ async function handleCreate(admin: Admin, body: Record<string, unknown>) {
 }
 
 /** Update an existing login: email / password / role / plant. */
-async function handleUpdate(admin: Admin, body: Record<string, unknown>) {
+async function handleUpdate(admin: Admin, body: Record<string, unknown>, caller: Caller) {
   const authId = requireStr(body.auth_user_id, 'auth_user_id');
   const user_account_id = typeof body.user_account_id === 'string' ? body.user_account_id : '';
+  if (typeof body.role_id === 'string' && body.role_id && !(await canAssignRole(admin, caller, body.role_id))) {
+    return json({ error: 'Forbidden — you cannot assign that role (it is above your level or grants powers you don’t have).' }, 403);
+  }
 
   // Password change (kept independent of email so it always applies).
   if (typeof body.password === 'string' && body.password) {

@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase';
 import { insertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../components/ui/states';
+import { usePlantScope } from '../../contexts/PlantScopeContext';
+import { withEmbedFallback } from '../../lib/scopedList';
 import type { Database } from '../../lib/database.types';
 
 type StockRow = Database['public']['Tables']['stock_levels']['Row'] & { plants?: { name: string | null } | null };
@@ -20,6 +22,7 @@ interface BulkRow {
 export function CPMStock() {
   const { t } = useTranslation();
   const toast = useToast();
+  const { scopeQuery } = usePlantScope();
   const [storeSearch, setStoreSearch] = useState('');
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([
@@ -38,7 +41,11 @@ export function CPMStock() {
     try {
       const [plantsRes, stockRes, tanksRes, drumsRes] = await Promise.all([
         supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
-        supabase.from('stock_levels').select('*, plants(name)').order('updated_at', { ascending: false }).returns<StockRow[]>(),
+        withEmbedFallback(
+          scopeQuery(supabase.from('stock_levels').select('*, plants(name)')).order('updated_at', { ascending: false }).returns<StockRow[]>(),
+          () => scopeQuery(supabase.from('stock_levels').select('*')).order('updated_at', { ascending: false }).returns<StockRow[]>(),
+          'CPMStock.stock',
+        ),
         supabase.from('tanks').select('*').order('sort_order', { ascending: true }).returns<TankRow[]>(),
         supabase.from('cpm_drum_stock').select('*').returns<DrumRow[]>(),
       ]);
@@ -59,7 +66,7 @@ export function CPMStock() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredItems = stockItems.filter(i =>
     !storeSearch || (i.product || '').toLowerCase().includes(storeSearch.toLowerCase())
@@ -105,8 +112,11 @@ export function CPMStock() {
     }));
     const { error } = await insertRows('stock_levels', inserts);
     if (error) { toast.error(t('cpmStock.saveFailed', { message: error.message })); return; }
-    const { data } = await supabase.from('stock_levels').select('*, plants(name)')
-      .order('updated_at', { ascending: false }).returns<StockRow[]>();
+    const { data } = await withEmbedFallback(
+      scopeQuery(supabase.from('stock_levels').select('*, plants(name)')).order('updated_at', { ascending: false }).returns<StockRow[]>(),
+      () => scopeQuery(supabase.from('stock_levels').select('*')).order('updated_at', { ascending: false }).returns<StockRow[]>(),
+      'CPMStock.stock.reload',
+    );
     setStockItems(data || []);
     setBulkSaved(true);
     setTimeout(() => {

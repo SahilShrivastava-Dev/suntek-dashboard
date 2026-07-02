@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { RoleProvider } from './contexts/RoleContext';
+import { PlantScopeProvider } from './contexts/PlantScopeContext';
 import { NotificationsProvider } from './contexts/NotificationsContext';
 import { BlacklistProvider } from './contexts/BlacklistContext';
 import { AnomalyProvider } from './contexts/AnomalyContext';
@@ -63,6 +64,7 @@ function App() {
     // RoleProvider wraps BrowserRouter so the role context is available
     // everywhere in the app, including inside router-dependent hooks.
     <RoleProvider>
+      <PlantScopeProvider>
       <NotificationsProvider>
       <BlacklistProvider>
       <AnomalyProvider>
@@ -130,6 +132,7 @@ function App() {
       </AnomalyProvider>
       </BlacklistProvider>
       </NotificationsProvider>
+      </PlantScopeProvider>
     </RoleProvider>
   );
 }

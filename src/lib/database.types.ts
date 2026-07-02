@@ -49,13 +49,14 @@ export interface Database {
         Row: {
           id: string;            // text PK, slug ('admin', 'unit_head', …)
           label: string;
-          level: string;         // 'L1' | 'L2' | 'L3' | 'L4'
+          level: string;         // tier id ('L1'…'L5'); see tiers table (29_tiers_and_capabilities.sql)
           description: string | null;
           home_route: string;
           allowed_routes: string[]; // exact route strings; ['*'] = all
           standalone_only: boolean;
           is_admin: boolean;
           is_system: boolean;    // can't be deleted
+          capabilities: string[]; // granted special allowances, e.g. ['manage_users']
           avatar_from: string | null;
           avatar_to: string | null;
           sort_order: number | null;
@@ -63,6 +64,19 @@ export interface Database {
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['roles']['Row'], 'created_at'>>;
         Update: Partial<Database['public']['Tables']['roles']['Insert']>;
+      };
+
+      // Admin-managed hierarchy levels. rank (gapped) defines seniority.
+      tiers: {
+        Row: {
+          id: string;            // 'L1'…'L5' (and future admin-made levels)
+          label: string;
+          rank: number;          // higher = more senior
+          description: string | null;
+          created_at?: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['tiers']['Row'], 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['tiers']['Insert']>;
       };
 
       plants: {
@@ -76,6 +90,49 @@ export interface Database {
         };
         Insert: Omit<Database['public']['Tables']['plants']['Row'], 'id' | 'created_at'>;
         Update: Partial<Database['public']['Tables']['plants']['Insert']>;
+      };
+
+      // Sub-divisions of a plant (e.g. Chlorides / Plasticiser). See 27_plant_unit_scoping.sql.
+      units: {
+        Row: {
+          id: string;
+          plant_id: string;
+          name: string;
+          code: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['units']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['units']['Insert']>;
+      };
+
+      // Which plants a user belongs to (many-to-many). See 27_plant_unit_scoping.sql.
+      user_plants: {
+        Row: {
+          user_account_id: string;
+          plant_id: string;
+        };
+        Insert: Database['public']['Tables']['user_plants']['Row'];
+        Update: Partial<Database['public']['Tables']['user_plants']['Row']>;
+      };
+
+      // Optional narrowing of a user to specific unit(s) within a plant.
+      user_units: {
+        Row: {
+          user_account_id: string;
+          unit_id: string;
+        };
+        Insert: Database['public']['Tables']['user_units']['Row'];
+        Update: Partial<Database['public']['Tables']['user_units']['Row']>;
+      };
+
+      // Multi-role: which roles a user holds (union of access). See 31_user_roles.sql.
+      user_roles: {
+        Row: {
+          user_account_id: string;
+          role_id: string;
+        };
+        Insert: Database['public']['Tables']['user_roles']['Row'];
+        Update: Partial<Database['public']['Tables']['user_roles']['Row']>;
       };
 
       // Directory of real users for the profile switcher + User Management. See migration 0006.
@@ -98,6 +155,7 @@ export interface Database {
           login_enabled: boolean | null; // true when this row has an active login
           login_email: string | null;    // exact email registered in auth.users (may be synthetic)
           mobile_norm: string | null;    // generated: normalized last-10-digit phone, used as login key
+          is_global: boolean | null;     // true = sees every plant (Owner/Admin, all-India accountant)
           preferred_language: string | null;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['user_accounts']['Row'], 'id' | 'created_at'>>;
@@ -373,6 +431,8 @@ export interface Database {
           read_by: string[];
           cleared_by: string[];
           scope: string; // 'personal' | 'broadcast' — see 24_notification_scope.sql
+          plant_id: string | null; // NULL = broadcast; set = "role X at this plant" (27_plant_unit_scoping.sql)
+          unit_id: string | null;
           created_at: string;
         };
         // read_by / cleared_by / scope have DB defaults, so they're optional on insert.
@@ -423,6 +483,7 @@ export interface Database {
           preferred_density: number | null;
           outstanding: number;
           is_active: boolean;
+          plant_id: string | null; // scoping key (27_plant_unit_scoping.sql)
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['customers']['Row'], 'id' | 'created_at'>>;
@@ -440,6 +501,7 @@ export interface Database {
           status: 'open' | 'fulfilled' | 'partial';
           created_at: string;
           location: string | null;
+          plant_id: string | null; // scoping key (27_plant_unit_scoping.sql)
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['sales_contracts']['Row'], 'id' | 'created_at'>>;
         Update: Partial<Database['public']['Tables']['sales_contracts']['Insert']>;
@@ -468,6 +530,7 @@ export interface Database {
           id: string;
           item: string;
           plant_id: string | null;
+          unit_id: string | null; // FK to units — scoping key (27_plant_unit_scoping.sql)
           qty: number;
           urgency: 'low' | 'medium' | 'high' | 'plant_stopper';
           status: 'pending' | 'approved' | 'dispatched' | 'received' | 'rejected';
@@ -559,7 +622,8 @@ export interface Database {
           title: string;
           equipment: string;
           plant_id: string | null;
-          unit: string | null; // 'chlorides' | 'plasticiser' | null — Jharkhand procurement unit
+          unit: string | null; // 'chlorides' | 'plasticiser' | null — legacy text (kept in sync with unit_id)
+          unit_id: string | null; // FK to units — the scoping key (27_plant_unit_scoping.sql)
           schedule_id: string | null;
           description: string | null;
           due_date: string | null;
@@ -642,6 +706,7 @@ export interface Database {
           reference: string | null;
           amount: number;
           balance: number;
+          plant_id: string | null; // scoping key (27_plant_unit_scoping.sql)
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['marine_insurance']['Row'], 'id' | 'created_at'>>;
@@ -707,6 +772,7 @@ export interface Database {
           company: string | null;
           paraffin_type: string | null;
           port: string | null;
+          plant_id: string | null; // scoping key (27_plant_unit_scoping.sql)
           lifting_cycle: string | null;
           price: number | null;
           book_qty_mt: number | null;

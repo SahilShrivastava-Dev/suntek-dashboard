@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { roleToProfile, ADMIN_FALLBACK } from '../lib/profiles';
+import { roleToProfile, ADMIN_FALLBACK, profileHasCapability } from '../lib/profiles';
 import type { MockProfile, RoleRow } from '../lib/profiles';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
@@ -32,6 +32,7 @@ const LOCKED_FALLBACK: MockProfile = {
   homeRoute: '/dashboard',
   allowedDashboardRoutes: [],
   standaloneOnly: false,
+  capabilities: [],
 };
 
 interface RoleContextValue {
@@ -75,6 +76,9 @@ interface RoleContextValue {
   isViewingAs: boolean;
   /** True only when the current user may switch/preview roles (admin or dev bypass). */
   canSwitch: boolean;
+  /** Does the active profile hold a privileged capability (admin/'*' = all)?
+   * e.g. can('manage_users'), can('manage_roles'). */
+  can: (capability: string) => boolean;
 }
 
 const RoleContext = createContext<RoleContextValue | null>(null);
@@ -108,6 +112,9 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   // The DB profile data resolved for the logged-in user (role id + name), before
   // it's mapped through the role catalog. null = no session / still resolving.
   const [sessionProfile, setSessionProfile] = useState<SessionProfile | null>(null);
+  // Every role id the logged-in user holds (multi-role via user_roles). Their
+  // effective access is the UNION of these roles; empty = single-role fallback.
+  const [sessionRoleIds, setSessionRoleIds] = useState<string[]>([]);
   // True once the session resolution attempt has completed (with or without a user).
   const [sessionResolved, setSessionResolved] = useState(false);
   // Admin-only "preview as" selection. null = view as self.
@@ -154,7 +161,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       if (!cancelled) setSessionUserId(userId);
       if (!userId) {
         langAppliedForRef.current = null; // signed out → re-apply on next login
-        if (!cancelled) { setSessionProfile(null); setSessionResolved(true); }
+        if (!cancelled) { setSessionProfile(null); setSessionRoleIds([]); setSessionResolved(true); }
         return;
       }
       const { data, error } = await supabase
@@ -182,6 +189,25 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       }
 
       setSessionProfile({ role: data?.role ?? null, name: data?.name ?? null });
+
+      // Load the user's full role set (multi-role). Additive: on any failure we
+      // keep the empty set and fall back to the single primary role — never
+      // reducing access.
+      try {
+        const { data: acct } = await supabase
+          .from('user_accounts').select('id').eq('auth_user_id', userId).limit(1)
+          .returns<{ id: string }[]>();
+        const accountId = acct?.[0]?.id;
+        if (accountId) {
+          const { data: urs } = await supabase
+            .from('user_roles').select('role_id').eq('user_account_id', accountId)
+            .returns<{ role_id: string }[]>();
+          if (!cancelled) setSessionRoleIds((urs ?? []).map((r) => r.role_id));
+        } else if (!cancelled) {
+          setSessionRoleIds([]);
+        }
+      } catch { if (!cancelled) setSessionRoleIds([]); }
+
       setSessionResolved(true);
     }
 
@@ -244,10 +270,26 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const allProfiles = directory;
 
   // The logged-in user's own identity, derived from their DB profile + the catalog.
+  // Multi-role: display (label/level/avatar) comes from the PRIMARY role
+  // (profiles.role); access is the UNION of every role's routes + capabilities.
   const authProfile = useMemo<MockProfile | null>(() => {
     if (!sessionUserId || !sessionProfile) return null;
     const role = sessionProfile.role ? roleMap.get(sessionProfile.role) : undefined;
-    if (role) return roleToProfile(role, { name: sessionProfile.name ?? '' });
+    if (role) {
+      const base = roleToProfile(role, { name: sessionProfile.name ?? '' });
+      const extraRoles = sessionRoleIds
+        .map((id) => roleMap.get(id))
+        .filter((r): r is RoleRow => !!r);
+      const all = [role, ...extraRoles.filter((r) => r.id !== role.id)];
+      if (all.length > 1) {
+        const routes = all.some((r) => r.allowed_routes?.includes('*'))
+          ? ['*']
+          : [...new Set(all.flatMap((r) => r.allowed_routes ?? []))];
+        const capabilities = [...new Set(all.flatMap((r) => r.capabilities ?? []))];
+        return { ...base, allowedDashboardRoutes: routes, capabilities };
+      }
+      return base;
+    }
     // Role not found in the catalog.
     if (rolesStatus === 'failed' && sessionProfile.role === 'admin') {
       // Catalog failed to load entirely → don't lock the owner out.
@@ -255,7 +297,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     }
     if (rolesStatus !== 'ready') return null; // still loading — hold for the catalog
     return { ...LOCKED_FALLBACK, name: sessionProfile.name || LOCKED_FALLBACK.name };
-  }, [sessionUserId, sessionProfile, roleMap, rolesStatus]);
+  }, [sessionUserId, sessionProfile, roleMap, rolesStatus, sessionRoleIds]);
 
   // False until BOTH the session resolution and the role catalog load have
   // settled — so the UI shows a loader instead of flashing the locked fallback.
@@ -344,6 +386,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         refreshRoles,
         switchProfile,
         canSwitch,
+        can: (capability: string) => profileHasCapability(activeProfile, capability),
         isViewingAs: activeProfile.id !== selfProfile.id,
       }}
     >

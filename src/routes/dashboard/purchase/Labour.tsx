@@ -4,12 +4,15 @@ import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelTextarea, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { useMentionNotifier } from '../../../lib/mentions';
+import { usePlantScope } from '../../../contexts/PlantScopeContext';
+import { withEmbedFallback } from '../../../lib/scopedList';
 import type { Database } from '../../../lib/database.types';
 
 type LabourRow = Database['public']['Tables']['labour_costs']['Row'] & { plants?: { name: string | null } | null };
 
 export function Labour() {
   const { t } = useTranslation();
+  const { scopeQuery } = usePlantScope();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [costs, setCosts] = useState<LabourRow[]>([]);
@@ -20,11 +23,11 @@ export function Labour() {
 
   async function load() {
     try {
-      const { data, error } = await supabase
-        .from('labour_costs')
-        .select('*, plants(name)')
-        .order('date', { ascending: false })
-        .returns<LabourRow[]>();
+      const { data, error } = await withEmbedFallback(
+        scopeQuery(supabase.from('labour_costs').select('*, plants(name)')).order('date', { ascending: false }).returns<LabourRow[]>(),
+        () => scopeQuery(supabase.from('labour_costs').select('*')).order('date', { ascending: false }).returns<LabourRow[]>(),
+        'Labour.costs',
+      );
       if (error) throw error;
       setCosts(data || []);
       setLoadError(false);
@@ -36,7 +39,7 @@ export function Labour() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 

@@ -11,6 +11,7 @@ import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { OcrUploadCard } from '../../../components/OcrUploadCard';
+import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import type { Database } from '../../../lib/database.types';
 
 // Purchase sheet OCR upload is available to management/finance roles only.
@@ -62,13 +63,12 @@ export function PurchaseOrders() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const { activeProfile } = useRoleContext();
+  const { scopeQuery } = usePlantScope();
   const [form, setForm] = useState({ material: '', type: 'PO', supplier: '', destination: 'SHD', qty: '', unit: 'nos', value: '', notes: '' });
 
   async function load() {
     try {
-      const { data, error } = await supabase
-        .from('oil_contracts')
-        .select('*')
+      const { data, error } = await scopeQuery(supabase.from('oil_contracts').select('*'))
         .order('created_at', { ascending: false })
         .returns<OrderRow[]>();
       if (error) throw error;
@@ -108,7 +108,7 @@ export function PurchaseOrders() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 

@@ -15,6 +15,7 @@ function mk(allowed: string[], overrides: Partial<MockProfile> = {}): MockProfil
     homeRoute: '/dashboard',
     allowedDashboardRoutes: allowed,
     standaloneOnly: false,
+    capabilities: [],
     ...overrides,
   };
 }
@@ -74,6 +75,7 @@ describe('roleToProfile', () => {
     standalone_only: false,
     is_admin: false,
     is_system: false,
+    capabilities: [],
     avatar_from: 'from-blue-400',
     avatar_to: 'to-blue-600',
     sort_order: 2,

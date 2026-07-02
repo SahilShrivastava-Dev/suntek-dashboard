@@ -49,13 +49,14 @@ export interface Database {
         Row: {
           id: string;            // text PK, slug ('admin', 'unit_head', …)
           label: string;
-          level: string;         // 'L1' | 'L2' | 'L3' | 'L4'
+          level: string;         // tier id ('L1'…'L5'); see tiers table (29_tiers_and_capabilities.sql)
           description: string | null;
           home_route: string;
           allowed_routes: string[]; // exact route strings; ['*'] = all
           standalone_only: boolean;
           is_admin: boolean;
           is_system: boolean;    // can't be deleted
+          capabilities: string[]; // granted special allowances, e.g. ['manage_users']
           avatar_from: string | null;
           avatar_to: string | null;
           sort_order: number | null;
@@ -63,6 +64,19 @@ export interface Database {
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['roles']['Row'], 'created_at'>>;
         Update: Partial<Database['public']['Tables']['roles']['Insert']>;
+      };
+
+      // Admin-managed hierarchy levels. rank (gapped) defines seniority.
+      tiers: {
+        Row: {
+          id: string;            // 'L1'…'L5' (and future admin-made levels)
+          label: string;
+          rank: number;          // higher = more senior
+          description: string | null;
+          created_at?: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['tiers']['Row'], 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['tiers']['Insert']>;
       };
 
       plants: {
@@ -109,6 +123,16 @@ export interface Database {
         };
         Insert: Database['public']['Tables']['user_units']['Row'];
         Update: Partial<Database['public']['Tables']['user_units']['Row']>;
+      };
+
+      // Multi-role: which roles a user holds (union of access). See 31_user_roles.sql.
+      user_roles: {
+        Row: {
+          user_account_id: string;
+          role_id: string;
+        };
+        Insert: Database['public']['Tables']['user_roles']['Row'];
+        Update: Partial<Database['public']['Tables']['user_roles']['Row']>;
       };
 
       // Directory of real users for the profile switcher + User Management. See migration 0006.

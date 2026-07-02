@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { insertRows, upsertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
+import { usePlantScope } from '../../contexts/PlantScopeContext';
 import type { Database } from '../../lib/database.types';
 import { BatchSheetUpload } from '../../components/BatchSheetUpload';
 import { useOcrJobs } from '../../contexts/OcrJobsContext';
@@ -35,6 +36,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
   const { t } = useTranslation();
   const toast = useToast();
   const ocr = useOcrJobs();
+  const { plantIds } = usePlantScope(); // the logged-in operator's plant(s)
   const [batchId, setBatchId] = useState('');
   const [batches, setBatches] = useState<BatchRow[]>([]);
   const [temp, setTemp]           = useState('');
@@ -356,7 +358,8 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
         batch_no: newBatchNo,
         recipe: newRecipe,
         target_qty: parseFloat(newTargetQty) || 1400,
-        status: 'active'
+        status: 'active',
+        plant_id: plantIds[0] ?? null, // attribute the batch to the operator's plant (for scoping)
       }).select().single();
 
       if (error) {

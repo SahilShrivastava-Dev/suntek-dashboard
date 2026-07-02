@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { RoleProvider } from './contexts/RoleContext';
+import { RequireLogin } from './components/RequireLogin';
 import { PlantScopeProvider } from './contexts/PlantScopeContext';
 import { NotificationsProvider } from './contexts/NotificationsContext';
 import { BlacklistProvider } from './contexts/BlacklistContext';
@@ -115,12 +116,13 @@ function App() {
             <Route path="owner"             element={<OwnerLayer />} />
           </Route>
 
-          {/* L1 Operator apps — standalone, no sidebar */}
-          <Route path="/night-manager/check-in" element={<CheckIn />} />
-          <Route path="/warehouse"              element={<Warehouse />} />
-          <Route path="/warehouse/stock-entry"  element={<Warehouse />} />
-          <Route path="/warehouse/requisition"  element={<Warehouse />} />
-          <Route path="/operator/batch-logger"  element={<BatchLogger />} />
+          {/* L1 Operator apps — standalone, no sidebar. Phase 2b: require a login
+              so writes are attributed + plant-scoped. */}
+          <Route path="/night-manager/check-in" element={<RequireLogin><CheckIn /></RequireLogin>} />
+          <Route path="/warehouse"              element={<RequireLogin><Warehouse /></RequireLogin>} />
+          <Route path="/warehouse/stock-entry"  element={<RequireLogin><Warehouse /></RequireLogin>} />
+          <Route path="/warehouse/requisition"  element={<RequireLogin><Warehouse /></RequireLogin>} />
+          <Route path="/operator/batch-logger"  element={<RequireLogin><BatchLogger /></RequireLogin>} />
 
           {/* Default redirect */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />

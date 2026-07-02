@@ -60,14 +60,19 @@ export interface MockProfile {
 export const CAPABILITIES: { key: string; label: string; description: string }[] = [
   { key: 'manage_users', label: 'Manage users', description: 'Create, edit, deactivate users and assign their roles' },
   { key: 'manage_roles', label: 'Manage roles & permissions', description: 'Create/edit roles, levels and dashboard access' },
+  { key: 'allocate_night_duty', label: 'Allocate night duty', description: 'Schedule technicians beneath them onto night-duty shifts' },
 ];
 
 /**
- * True if the profile holds the privileged capability. Capabilities are separate
- * from route access — a role can have ALL routes ('*') yet NOT manage users/roles
- * (e.g. Management). The admin role is seeded with every capability explicitly.
+ * True if the profile holds the privileged capability.
+ *
+ * The `'*'` route wildcard is held ONLY by the Owner/Admin role (every other role,
+ * incl. Management, uses an explicit route list), so it's the admin signal → admin
+ * implicitly holds EVERY capability, including new ones. All other roles get only
+ * the capabilities explicitly granted to them.
  */
 export function profileHasCapability(profile: MockProfile, cap: string): boolean {
+  if (profile.allowedDashboardRoutes.includes('*')) return true;
   return (profile.capabilities || []).includes(cap);
 }
 

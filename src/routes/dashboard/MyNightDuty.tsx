@@ -1,0 +1,202 @@
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { supabase } from '../../lib/supabase';
+import { insertRows, updateRows } from '../../lib/db';
+import { useToast } from '../../components/ui/toast';
+import { useRoleContext } from '../../contexts/RoleContext';
+import { uploadCheckinPhoto } from '../../lib/cloudinary';
+import { validateGeofence } from '../../lib/algorithms/geofencing';
+
+/**
+ * The technician's own night-duty view + check-in. Shows the duties assigned to
+ * the logged-in user; on their duty night they capture a GPS + photo check-in,
+ * which links to the duty and notifies the unit head who scheduled them (with a
+ * 📷 to view the proof).
+ */
+
+type Duty = {
+  id: string; duty_date: string; status: string; plant_id: string | null;
+  assigned_by: string | null; checked_in_at: string | null; shift_log_id: string | null;
+};
+type Plant = { id: string; name: string; lat: number; lng: number; geofence_radius_m: number };
+
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
+  const toast = useToast();
+  const { activeProfile } = useRoleContext();
+  const [myAccountId, setMyAccountId] = useState<string | null>(null);
+  const [duties, setDuties] = useState<Duty[]>([]);
+  const [plants, setPlants] = useState<Record<string, Plant>>({});
+  const [loading, setLoading] = useState(true);
+  const [photo, setPhoto] = useState<Record<string, Blob>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [monthCursor, setMonthCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    let acctId: string | null = null;
+    if (user?.id) {
+      const { data: me } = await supabase.from('user_accounts').select('id').eq('auth_user_id', user.id).limit(1).returns<{ id: string }[]>();
+      acctId = me?.[0]?.id ?? null;
+    }
+    setMyAccountId(acctId);
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+    const [{ data: dutyRows }, { data: plantRows }] = await Promise.all([
+      acctId
+        ? supabase.from('night_duty').select('id, duty_date, status, plant_id, assigned_by, checked_in_at, shift_log_id').eq('technician_id', acctId).gte('duty_date', iso(yesterday)).order('duty_date').returns<Duty[]>()
+        : Promise.resolve({ data: [] as Duty[] }),
+      supabase.from('plants').select('id, name, lat, lng, geofence_radius_m').returns<Plant[]>(),
+    ]);
+    setDuties(dutyRows ?? []);
+    setPlants(Object.fromEntries((plantRows ?? []).map(p => [p.id, p])));
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function checkIn(duty: Duty) {
+    if (busy) return;
+    const blob = photo[duty.id];
+    if (!blob) { toast.error('Take a photo first'); return; }
+    setBusy(duty.id);
+    try {
+      const plant = duty.plant_id ? plants[duty.plant_id] : undefined;
+      // 1) GPS
+      const pos = await new Promise<GeolocationPosition>((res, rej) =>
+        navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 15000 }));
+      const { latitude, longitude } = pos.coords;
+      const geo = plant ? validateGeofence(latitude, longitude, plant.lat, plant.lng, plant.geofence_radius_m) : null;
+      // 2) Upload photo
+      const up = await uploadCheckinPhoto(blob, {
+        plantName: plant?.name ?? 'Plant', lat: latitude, lng: longitude,
+        isOnSite: geo?.isOnSite ?? true, creator: activeProfile.name,
+      });
+      // 3) shift_logs record, linked to the duty
+      const { data: logRow, error: logErr } = await insertRows('shift_logs', {
+        photo_url: up.secure_url, lat: latitude, lng: longitude,
+        is_on_site: geo?.isOnSite ?? true, distance_m: geo?.distanceM ?? null,
+        plant_id: duty.plant_id, night_duty_id: duty.id,
+      }).select('id').single();
+      if (logErr) { toast.error(`Check-in failed: ${logErr.message}`); return; }
+      // 4) mark the duty checked in
+      const now = new Date().toISOString();
+      await updateRows('night_duty', { status: 'checked_in', checked_in_at: now, shift_log_id: logRow?.id ?? null }).eq('id', duty.id);
+      // 5) notify the unit head who scheduled + admin, with the photo as proof
+      const time = new Date(now).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      const targets = ['admin'];
+      if (duty.assigned_by) targets.push(`db_${duty.assigned_by}`);
+      insertRows('notifications', {
+        target_roles: targets,
+        title: `Night duty: ${activeProfile.name} checked in`,
+        body: `${geo?.isOnSite === false ? '⚠️ Out of zone · ' : ''}Reported ${time}`,
+        type: geo?.isOnSite === false ? 'urgent' : 'info',
+        route: '/dashboard/night-manager',
+        actor_name: activeProfile.name,
+        actor_role: 'technician_shd',
+        plant_id: duty.plant_id,
+        photo_url: up.secure_url,
+      }).then(() => {}, () => {});
+      toast.success('Checked in — your unit head has been notified.');
+      setPhoto(p => { const n = { ...p }; delete n[duty.id]; return n; });
+      await load();
+    } catch (err) {
+      toast.error(`Check-in failed: ${err instanceof Error ? err.message : 'GPS/photo error'}`);
+    } finally { setBusy(null); }
+  }
+
+  const today = iso(new Date());
+  const visible = useMemo(() => duties.filter(d => d.duty_date >= today || d.status === 'checked_in'), [duties, today]);
+  const bookedByDate = useMemo(() => Object.fromEntries(duties.map(d => [d.duty_date, d])), [duties]);
+  const monthGrid = useMemo(() => {
+    const y = monthCursor.getFullYear(), m = monthCursor.getMonth();
+    const startPad = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const cells: (string | null)[] = [];
+    for (let i = 0; i < startPad; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(iso(new Date(y, m, d)));
+    return cells;
+  }, [monthCursor]);
+
+  // In the allocator board this renders compactly only if they have duties; on
+  // the technician's own tab (showEmpty) it always renders (with their calendar).
+  if (loading) return null;
+  if (!showEmpty && visible.length === 0) return null;
+
+  return (
+    <div className="card p-5 mb-5">
+      <div className="text-base font-bold mb-1">🌙 My night duty</div>
+      <div className="text-xs text-slate-500 mb-3">Your booked night shifts. You can only check in <strong>on the night itself</strong> — take a photo to check in.</div>
+
+      {/* Calendar of my booked nights */}
+      <div style={{ maxWidth: 460, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <button onClick={() => setMonthCursor(c => new Date(c.getFullYear(), c.getMonth() - 1, 1))} style={{ width: 26, height: 26, borderRadius: 8, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer' }}>‹</button>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>{monthCursor.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</div>
+          <button onClick={() => setMonthCursor(c => new Date(c.getFullYear(), c.getMonth() + 1, 1))} style={{ width: 26, height: 26, borderRadius: 8, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer' }}>›</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3 }}>
+          {WEEKDAYS.map(w => <div key={w} style={{ textAlign: 'center', fontSize: 9.5, color: '#94A3B8', fontWeight: 700 }}>{w}</div>)}
+          {monthGrid.map((d, i) => {
+            if (!d) return <div key={i} />;
+            const duty = bookedByDate[d];
+            const isToday = d === today;
+            const done = duty && (duty.status === 'checked_in' || duty.status === 'completed');
+            return (
+              <div key={i} style={{
+                height: 34, borderRadius: 7, fontSize: 11.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: isToday ? '2px solid #2563EB' : '1px solid ' + (duty ? '#818CF8' : '#F1F5F9'),
+                background: done ? '#DCFCE7' : (duty ? '#EEF2FF' : '#fff'),
+                color: done ? '#16A34A' : (duty ? '#4338CA' : '#CBD5E1'),
+              }} title={duty ? `Night duty · ${duty.status}` : ''}>
+                {Number(d.slice(-2))}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 6, display: 'flex', gap: 12 }}>
+          <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#EEF2FF', border: '1px solid #818CF8', marginRight: 4, verticalAlign: 'middle' }} />Booked</span>
+          <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#DCFCE7', marginRight: 4, verticalAlign: 'middle' }} />Checked in</span>
+        </div>
+      </div>
+
+      {visible.length === 0 && <div style={{ fontSize: 12.5, color: '#94A3B8' }}>No upcoming night duty assigned.</div>}
+      <div className="flex flex-col gap-2">
+        {visible.map(d => {
+          const plant = d.plant_id ? plants[d.plant_id] : undefined;
+          const isToday = d.duty_date === today;
+          const done = d.status === 'checked_in' || d.status === 'completed';
+          const dateLabel = new Date(d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
+          return (
+            <div key={d.id} style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{dateLabel}{isToday && <span style={{ marginLeft: 6, fontSize: 10.5, color: '#2563EB', fontWeight: 700 }}>· TONIGHT</span>}</div>
+                <div style={{ fontSize: 11, color: '#94A3B8' }}>{plant?.name || 'Plant'}</div>
+              </div>
+              {done ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A', fontSize: 11 }}>✓ Checked in {d.checked_in_at ? new Date(d.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                </div>
+              ) : isToday ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer', padding: '6px 10px', border: '1px solid #BFDBFE', borderRadius: 8, background: photo[d.id] ? '#EFF6FF' : '#fff' }}>
+                    {photo[d.id] ? '✓ Photo ready' : '📷 Take photo'}
+                    <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) setPhoto(p => ({ ...p, [d.id]: f })); }} />
+                  </label>
+                  <button onClick={() => checkIn(d)} disabled={busy === d.id || !photo[d.id]} className="btn-accent pill"
+                    style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: busy === d.id || !photo[d.id] ? 'not-allowed' : 'pointer', opacity: busy === d.id || !photo[d.id] ? 0.5 : 1 }}>
+                    {busy === d.id ? 'Checking in…' : 'Check in'}
+                  </button>
+                </div>
+              ) : (
+                <span className="badge" style={{ background: '#EFF6FF', color: '#2563EB', fontSize: 11 }}>Scheduled</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

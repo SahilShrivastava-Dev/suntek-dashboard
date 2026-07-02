@@ -55,6 +55,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
   const { activeProfile } = useRoleContext();
   const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady } = useNotifications();
   const [open, setOpen] = useState(false);
+  const [photoView, setPhotoView] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const btnRef   = useRef<HTMLButtonElement>(null);
 
@@ -268,6 +269,15 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
                         )}
                         <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>{formatAge(n.created_at)}</div>
                       </div>
+                      {n.photo_url && (
+                        <button
+                          title="View photo"
+                          onClick={(e) => { e.stopPropagation(); setPhotoView(n.photo_url!); }}
+                          style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer', fontSize: 15, marginTop: 2 }}
+                        >
+                          📷
+                        </button>
+                      )}
                       {!isRead && (
                         <div style={{ width: 7, height: 7, borderRadius: '50%', background: DOT[nType], flexShrink: 0, marginTop: 6 }} />
                       )}
@@ -295,6 +305,16 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
           <ProfileSwitcher />
         </div>
       </div>
+
+      {/* Photo lightbox — check-in proof from a notification's 📷 */}
+      {photoView && (
+        <div
+          onClick={() => setPhotoView(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 24 }}
+        >
+          <img src={photoView} alt="Check-in proof" style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 12, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }} />
+        </div>
+      )}
     </div>
   );
 }

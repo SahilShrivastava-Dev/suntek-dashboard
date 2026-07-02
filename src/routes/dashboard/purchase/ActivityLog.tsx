@@ -9,6 +9,8 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { useDirectory, extractMentionIds, truncate } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { useRoleContext } from '../../../contexts/RoleContext';
+import { usePlantScope } from '../../../contexts/PlantScopeContext';
+import { withEmbedFallback } from '../../../lib/scopedList';
 import { useNotifications } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
 
@@ -125,6 +127,7 @@ export function ActivityLog() {
   const toast = useToast();
   const people = useDirectory();
   const { activeProfile } = useRoleContext();
+  const { scopeQuery } = usePlantScope();
   const { addNotification } = useNotifications();
   const screenBlacklist = useBlacklistGuard();
   const [open, setOpen] = useState(false);
@@ -146,8 +149,16 @@ export function ActivityLog() {
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
       const [logsRes, ticketsRes] = await Promise.all([
-        supabase.from('activity_logs').select('*, plants(name)').order('date', { ascending: false }).returns<ActivityRow[]>(),
-        supabase.from('maintenance_tickets').select('*, plants(name)').order('created_at', { ascending: false }).returns<TicketRow[]>(),
+        withEmbedFallback(
+          scopeQuery(supabase.from('activity_logs').select('*, plants(name)')).order('date', { ascending: false }).returns<ActivityRow[]>(),
+          () => scopeQuery(supabase.from('activity_logs').select('*')).order('date', { ascending: false }).returns<ActivityRow[]>(),
+          'ActivityLog.logs',
+        ),
+        withEmbedFallback(
+          scopeQuery(supabase.from('maintenance_tickets').select('*, plants(name)'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<TicketRow[]>(),
+          () => scopeQuery(supabase.from('maintenance_tickets').select('*'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<TicketRow[]>(),
+          'ActivityLog.tickets',
+        ),
       ]);
       if (logsRes.error) throw logsRes.error;
       setLogs(logsRes.data || []);
@@ -170,7 +181,7 @@ export function ActivityLog() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Merge manual entries + derived maintenance events into one sorted timeline.
   const rows = useMemo<UnifiedRow[]>(() => {

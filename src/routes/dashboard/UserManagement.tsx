@@ -108,6 +108,10 @@ const BLANK_FORM = {
   access_note: '', is_active: true,
   login_enabled: false, password: '',
   preferred_language: 'en',
+  // Data scope (27_plant_unit_scoping.sql): which plants/units this user may see.
+  is_global: false,
+  plant_ids: [] as string[],
+  unit_ids: [] as string[],
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -123,6 +127,7 @@ export function UserManagement() {
   const roleOptions: RoleOption[] = roles.map(r => ({ id: r.id, label: r.label, level: r.level }));
   const [users, setUsers] = useState<DisplayUser[]>([]);
   const [plants, setPlants] = useState<{ id: string; name: string }[]>([]);
+  const [units, setUnits] = useState<{ id: string; plant_id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [showPanel, setShowPanel] = useState(false);
@@ -259,19 +264,30 @@ export function UserManagement() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: usersData }, { data: plantsData }] = await Promise.all([
+    const [usersRes, { data: plantsData }, { data: unitsData }] = await Promise.all([
       supabase.from('user_accounts').select('*, plants(name)').order('created_at', { ascending: false }).returns<DisplayUser[]>(),
       supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+      supabase.from('units').select('id, plant_id, name').order('name').returns<{ id: string; plant_id: string; name: string }[]>(),
     ]);
-    // The user list is purely the DB directory (user_accounts + plants join).
+    // The plants(name) EMBED can fail (e.g. a stale PostgREST relationship after a
+    // migration) and silently blank the whole list. Never let the join take down
+    // the directory: on error, log it and reload without the join (plant name
+    // still shows via the denormalized plant_name column).
+    let usersData = usersRes.data;
+    if (usersRes.error) {
+      console.error('[UserManagement] user_accounts join (plants) failed — falling back to plain select. Error:', usersRes.error);
+      const retry = await supabase.from('user_accounts').select('*').order('created_at', { ascending: false }).returns<DisplayUser[]>();
+      if (retry.error) console.error('[UserManagement] user_accounts plain select ALSO failed:', retry.error);
+      usersData = retry.data;
+    }
     setUsers(usersData || []);
     if (plantsData?.length) setPlants(plantsData);
+    setUnits(unitsData || []);
     setLoading(false);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const plantNames = plants.map(p => p.name);
   const total = users.length;
   const activeCount = users.filter(u => u.is_active).length;
   const roleBreakdown = roleOptions.map(r => ({
@@ -299,7 +315,7 @@ export function UserManagement() {
     setShowPanel(true);
   }
 
-  function openEdit(u: any) {
+  async function openEdit(u: any) {
     if (u._isSystem) return;
     setEditingUser(u);
     setForm({
@@ -315,9 +331,22 @@ export function UserManagement() {
       login_enabled: !!u.auth_user_id || !!u.login_enabled,
       password: '',
       preferred_language: u.preferred_language || 'en',
+      is_global: !!u.is_global,
+      plant_ids: [],
+      unit_ids: [],
     });
     setSaved(false);
     setShowPanel(true);
+    // Load this user's plant/unit memberships for the scope pickers.
+    const [{ data: ups }, { data: uus }] = await Promise.all([
+      supabase.from('user_plants').select('plant_id').eq('user_account_id', u.id).returns<{ plant_id: string }[]>(),
+      supabase.from('user_units').select('unit_id').eq('user_account_id', u.id).returns<{ unit_id: string }[]>(),
+    ]);
+    setForm(f => ({
+      ...f,
+      plant_ids: (ups || []).map(r => r.plant_id),
+      unit_ids: (uus || []).map(r => r.unit_id),
+    }));
   }
 
   async function handleSave() {
@@ -343,7 +372,11 @@ export function UserManagement() {
       if (!session) { toast.error(t('userMgmt.errNoSessionForLogin')); return; }
     }
 
-    const plant = plants.find(p => p.name === form.plant);
+    // Primary plant (for the legacy plant_id/plant_name display columns) = the
+    // first selected plant. The full set lives in user_plants (synced below).
+    const primaryPlantId = form.is_global ? null : (form.plant_ids[0] || null);
+    const primaryPlant = plants.find(p => p.id === primaryPlantId);
+    const plant = plants.find(p => p.id === primaryPlantId); // for edge-fn login link
     const email = form.email.trim() || null;
     const payload = {
       name: form.name.trim(),
@@ -352,11 +385,12 @@ export function UserManagement() {
       whatsapp: form.whatsapp.trim() || null,
       role_id: form.role_id,
       role_label: roleOptions.find(r => r.id === form.role_id)?.label || form.role_id,
-      plant_id: plant?.id || null,
-      plant_name: form.plant || null,
+      plant_id: primaryPlantId,
+      plant_name: primaryPlant?.name || null,
       designation: form.designation.trim() || null,
       access_note: form.access_note.trim() || null,
       is_active: form.is_active,
+      is_global: form.is_global,
       preferred_language: form.preferred_language || 'en',
     };
 
@@ -408,6 +442,29 @@ export function UserManagement() {
           }
           toast.error(t('userMgmt.errLoginCreateFailed', { msg: error }));
           return;
+        }
+      }
+    }
+
+    // 3) Sync plant/unit scope memberships (source of truth for data isolation).
+    //    Replace-all: clear existing, then insert the current selection. A global
+    //    user needs no memberships (they see everything).
+    if (accountId) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase.from('user_plants') as any).delete().eq('user_account_id', accountId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase.from('user_units') as any).delete().eq('user_account_id', accountId);
+      if (!form.is_global) {
+        if (form.plant_ids.length) {
+          await insertRows('user_plants', form.plant_ids.map(pid => ({ user_account_id: accountId, plant_id: pid })));
+        }
+        // Keep only units that belong to a selected plant.
+        const validUnitIds = form.unit_ids.filter(uid => {
+          const u = units.find(x => x.id === uid);
+          return u && form.plant_ids.includes(u.plant_id);
+        });
+        if (validUnitIds.length) {
+          await insertRows('user_units', validUnitIds.map(uid => ({ user_account_id: accountId, unit_id: uid })));
         }
       }
     }
@@ -691,18 +748,84 @@ export function UserManagement() {
           </div>
         )}
 
-        {/* Plant + Designation */}
-        <PanelRow>
-          <PanelField label={t('userMgmt.plantLabel')}>
-            <PanelSelect value={form.plant} onChange={e => setForm(f => ({ ...f, plant: e.target.value }))}>
-              <option value="">{t('userMgmt.selectPlant')}</option>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
-            </PanelSelect>
-          </PanelField>
-          <PanelField label={t('userMgmt.designationLabel')}>
-            <PanelInput value={form.designation} onChange={e => setForm(f => ({ ...f, designation: e.target.value }))} placeholder={t('userMgmt.designationPlaceholder')} />
-          </PanelField>
-        </PanelRow>
+        {/* Designation */}
+        <PanelField label={t('userMgmt.designationLabel')}>
+          <PanelInput value={form.designation} onChange={e => setForm(f => ({ ...f, designation: e.target.value }))} placeholder={t('userMgmt.designationPlaceholder')} />
+        </PanelField>
+
+        {/* ── Data scope: which plants / units this user may see ─────────────── */}
+        <div style={{ marginBottom: 16, background: '#F8FAFC', borderRadius: 12, border: '1px solid #E2E8F0', padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{t('userMgmt.dataScope')}</div>
+              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>{t('userMgmt.dataScopeHelper')}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setForm(f => ({ ...f, is_global: !f.is_global }))}
+              title={t('userMgmt.allPlantsToggle')}
+              style={{ width: 44, height: 24, borderRadius: 12, background: form.is_global ? '#2563EB' : '#CBD5E1', border: 'none', cursor: 'pointer', position: 'relative', flexShrink: 0 }}
+            >
+              <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, transition: 'left 0.2s', left: form.is_global ? 22 : 4 }} />
+            </button>
+          </div>
+
+          {form.is_global ? (
+            <div style={{ fontSize: 11, color: '#2563EB', marginTop: 8, fontWeight: 600 }}>{t('userMgmt.allPlantsOn')}</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '12px 0 6px' }}>{t('userMgmt.plantsLabel')}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                {plants.map(p => {
+                  const on = form.plant_ids.includes(p.id);
+                  return (
+                    <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#334155', cursor: 'pointer', padding: '6px 8px', borderRadius: 8, background: on ? '#EFF6FF' : '#fff', border: '1px solid #E2E8F0' }}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => setForm(f => {
+                          const plant_ids = on ? f.plant_ids.filter(x => x !== p.id) : [...f.plant_ids, p.id];
+                          // Drop any selected units whose plant is no longer selected.
+                          const unit_ids = f.unit_ids.filter(uid => { const u = units.find(x => x.id === uid); return u && plant_ids.includes(u.plant_id); });
+                          return { ...f, plant_ids, unit_ids };
+                        })}
+                      />
+                      <span>{p.name}</span>
+                    </label>
+                  );
+                })}
+                {plants.length === 0 && <div style={{ fontSize: 11, color: '#94A3B8' }}>{t('userMgmt.noPlants')}</div>}
+              </div>
+
+              {form.plant_ids.some(pid => units.some(u => u.plant_id === pid)) && (
+                <>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '12px 0 4px' }}>{t('userMgmt.unitsLabel')}</div>
+                  <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>{t('userMgmt.unitsHelper')}</div>
+                  {form.plant_ids.map(pid => {
+                    const pUnits = units.filter(u => u.plant_id === pid);
+                    if (!pUnits.length) return null;
+                    return (
+                      <div key={pid} style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 11, color: '#475569', fontWeight: 600, marginBottom: 4 }}>{plants.find(p => p.id === pid)?.name}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {pUnits.map(u => {
+                            const on = form.unit_ids.includes(u.id);
+                            return (
+                              <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#334155', cursor: 'pointer', padding: '5px 8px', borderRadius: 8, background: on ? '#EFF6FF' : '#fff', border: '1px solid #E2E8F0' }}>
+                                <input type="checkbox" checked={on} onChange={() => setForm(f => ({ ...f, unit_ids: on ? f.unit_ids.filter(x => x !== u.id) : [...f.unit_ids, u.id] }))} />
+                                <span>{u.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </>
+          )}
+        </div>
 
         {/* Preferred language */}
         <PanelField label={t('userMgmt.preferredLanguage')}>

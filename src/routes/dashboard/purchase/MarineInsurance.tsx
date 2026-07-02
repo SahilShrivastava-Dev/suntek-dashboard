@@ -8,6 +8,7 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRo
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import type { Database } from '../../../lib/database.types';
 
 type Panel = 'topup' | 'ledger' | null;
@@ -18,6 +19,7 @@ export function MarineInsurance() {
   const toast = useToast();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
+  const { scopeQuery } = usePlantScope();
   const [panel, setPanel] = useState<Panel>(null);
   const [saved, setSaved] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState<'all' | 'top-up' | 'deduct'>('all');
@@ -29,9 +31,7 @@ export function MarineInsurance() {
 
   async function load() {
     try {
-      const { data, error } = await supabase
-        .from('marine_insurance')
-        .select('*')
+      const { data, error } = await scopeQuery(supabase.from('marine_insurance').select('*'))
         .order('date', { ascending: false })
         .returns<LedgerRow[]>();
       if (error) throw error;
@@ -45,7 +45,7 @@ export function MarineInsurance() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentBalance = ledger.length > 0 ? ledger[0].balance : 0;
 

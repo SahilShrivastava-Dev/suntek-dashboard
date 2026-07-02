@@ -5,6 +5,8 @@ import { supabase } from '../../../lib/supabase';
 import { insertRows, updateRows } from '../../../lib/db';
 import { resizeImageToDataUrl, extractSupplierBill } from '../../../lib/nvidiaOcr';
 import { useRoleContext } from '../../../contexts/RoleContext';
+import { usePlantScope } from '../../../contexts/PlantScopeContext';
+import { withEmbedFallback } from '../../../lib/scopedList';
 import type { RoleRow } from '../../../lib/profiles';
 import { useBlacklist } from '../../../contexts/BlacklistContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
@@ -272,6 +274,7 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
 
 export function Maintenance() {
   const { activeProfile, allProfiles, roles } = useRoleContext();
+  const { scopeQuery, units: scopeUnits, allowedPlants } = usePlantScope();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const toast = useToast();
   const { t } = useTranslation();
@@ -398,8 +401,16 @@ export function Maintenance() {
     let schedulesData: ScheduleRow[] | null = null;
     try {
       const [tRes, sRes, pRes] = await Promise.all([
-        supabase.from('maintenance_tickets').select('*, plants(name)').order('created_at', { ascending: false }).returns<TicketRow[]>(),
-        supabase.from('maintenance_schedules').select('*, plants(name)').order('next_due_at', { ascending: true }).returns<ScheduleRow[]>(),
+        withEmbedFallback(
+          scopeQuery(supabase.from('maintenance_tickets').select('*, plants(name)'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<TicketRow[]>(),
+          () => scopeQuery(supabase.from('maintenance_tickets').select('*'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<TicketRow[]>(),
+          'Maintenance.tickets',
+        ),
+        withEmbedFallback(
+          scopeQuery(supabase.from('maintenance_schedules').select('*, plants(name)')).order('next_due_at', { ascending: true }).returns<ScheduleRow[]>(),
+          () => scopeQuery(supabase.from('maintenance_schedules').select('*')).order('next_due_at', { ascending: true }).returns<ScheduleRow[]>(),
+          'Maintenance.schedules',
+        ),
         supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
       ]);
       if (tRes.error) throw tRes.error;
@@ -437,11 +448,12 @@ export function Maintenance() {
             body: `${s.equipment} · ${FREQ_LABEL[s.frequency] || s.frequency}`,
             type: 'warning', route: '/dashboard/purchase/maint',
             actor_name: 'System', actor_role: 'system', read_by: [],
+            plant_id: s.plant_id || null, unit_id: null,
           });
         }
       }
     }
-  }, []);
+  }, [scopeQuery]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -471,7 +483,12 @@ export function Maintenance() {
     loadStoreReqs(selectedTicket.id);
   }, [selectedTicket?.id, loadStoreReqs]);
 
-  const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : ['SHD', 'Rehla', 'Ganjam', 'HQ'];
+  // Restrict the plant picker to the user's allowed plants (all if global) so a
+  // scoped user can't raise a ticket for another plant. Falls back to the full
+  // list until scope resolves.
+  const plantNames = allowedPlants.length > 0
+    ? allowedPlants.map(p => p.name)
+    : (dbPlants.length > 0 ? dbPlants.map(p => p.name) : ['SHD', 'Rehla', 'Ganjam', 'HQ']);
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
@@ -497,12 +514,18 @@ export function Maintenance() {
     setRaising(true);
     try {
     const plant = dbPlants.find(p => p.name === raiseForm.plant);
+    // Resolve the unit text ('chlorides'/'plasticiser') to its unit_id within
+    // this plant — the scoping key used for routing + isolation.
+    const unitRow = raiseForm.unit
+      ? scopeUnits.find(u => u.plant_id === plant?.id && (u.code === raiseForm.unit || u.name.toLowerCase() === raiseForm.unit.toLowerCase()))
+      : undefined;
     const { data: newTicket, error } = await insertRows('maintenance_tickets', {
       type: 'emergency', status: 'open',
       title: `${raiseForm.equipment} — ${raiseForm.assessment === 'repairable' ? 'Repairable' : 'Needs part'}`,
       equipment: raiseForm.equipment,
       plant_id: plant?.id || null,
       unit: raiseForm.unit || null,
+      unit_id: unitRow?.id || null,
       description: raiseForm.description || null,
       raised_by: activeProfile.name, raised_role: role,
       // A technician raising their own job is implicitly assigned to themselves.
@@ -530,6 +553,9 @@ export function Maintenance() {
       body: `${activeProfile.name} · ${raiseForm.assessment === 'repairable' ? 'Repairable in-house' : 'Needs store part'}`,
       type: 'urgent', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
+      // Scope the ticket to its plant/unit so only that plant's unit head +
+      // store manager are notified (never another plant's).
+      plant_id: plant?.id || null, unit_id: unitRow?.id || null,
     });
 
     // Anyone @-tagged in the description becomes a watcher AND gets a realtime
@@ -792,6 +818,7 @@ export function Maintenance() {
         body: `${completingSchedule.equipment} · By ${activeProfile.name}`,
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
+        plant_id: completingSchedule.plant_id ?? null, unit_id: null,
       });
       setCompletingSchedule(null); setCompletionBlob(null); setUploadPct(0);
       await loadData();
@@ -830,6 +857,7 @@ export function Maintenance() {
       body: `${selectedTicket.equipment} · ${names} · Check availability`,
       type: 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
+      plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
     });
     await notifyMentions(items.map(i => i.specification).filter(Boolean).join(' '), {
       entityType: 'maintenance_ticket', entityId: selectedTicket.id,
@@ -847,14 +875,16 @@ export function Maintenance() {
     if (!selectedTicket) return;
     const cur = (selectedTicket.unit as Unit | null) || 'chlorides';
     const other: Unit = cur === 'chlorides' ? 'plasticiser' : 'chlorides';
-    await updateRows('maintenance_tickets', { unit: other }).eq('id', selectedTicket.id);
-    setSelectedTicket((t) => t ? { ...t, unit: other } : t);
+    const otherUnitId = scopeUnits.find(u => u.plant_id === selectedTicket.plant_id && (u.code === other || u.name.toLowerCase() === other))?.id || null;
+    await updateRows('maintenance_tickets', { unit: other, unit_id: otherUnitId }).eq('id', selectedTicket.id);
+    setSelectedTicket((t) => t ? { ...t, unit: other, unit_id: otherUnitId } : t);
     notify({
       target_roles: [UNIT_STORE_MANAGER[other], 'admin'],
       title: `Rerouted to ${UNIT_LABELS[other]} store`,
       body: `${activeProfile.name} rerouted "${selectedTicket.equipment}" to the ${UNIT_LABELS[other]} store manager.`,
       type: 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
+      plant_id: selectedTicket.plant_id, unit_id: otherUnitId,
     });
     await loadData();
   }
@@ -884,6 +914,7 @@ export function Maintenance() {
         body: `Fixed in-house by ${activeProfile.name}`,
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
+        plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
       });
       await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Fixed in-house by ${activeProfile.name}.`);
       setSelectedTicket(null); setCompletionBlob(null); setUploadPct(0);
@@ -928,6 +959,7 @@ export function Maintenance() {
         : `${selectedTicket.equipment} — external procurement needed. Awaiting unit head approval.`,
       type: available ? 'info' : 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
+      plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
     });
     setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' });
     setActingReqId(null);
@@ -940,11 +972,11 @@ export function Maintenance() {
     await updateRows('maintenance_store_requests', { unit_head_approval: approved ? 'approved' : 'rejected' })
       .eq('id', req.id);
     if (approved && partAvailable) {
-      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
+      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else if (approved && !partAvailable) {
-      notify({ target_roles: ['admin', 'unit_head'], title: `Procurement approved: ${req.part_name}`, body: `${selectedTicket.equipment} — procure from market. Enter BUSY ref when done.`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
+      notify({ target_roles: ['admin', 'unit_head'], title: `Procurement approved: ${req.part_name}`, body: `${selectedTicket.equipment} — procure from market. Enter BUSY ref when done.`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else {
-      notify({ target_roles: ['technician_shd', 'admin'], title: `Item rejected: ${req.part_name}`, body: `Unit head rejected this item.`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
+      notify({ target_roles: ['technician_shd', 'admin'], title: `Item rejected: ${req.part_name}`, body: `Unit head rejected this item.`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     }
     await notifyTicketWatchers(selectedTicket, approved ? `Approved: ${selectedTicket.equipment}` : `Item rejected: ${selectedTicket.equipment}`, `${activeProfile.name} ${approved ? 'approved' : 'rejected'} "${req.part_name}".`);
     setActingReqId(null);
@@ -956,7 +988,7 @@ export function Maintenance() {
     const supplier = supplierName.trim();
     await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null })
       .eq('id', req.id);
-    notify({ target_roles: ['purchase_manager', 'admin'], title: `Procured — Purchase Manager to bill: ${req.part_name}`, body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to upload the bill.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
+    notify({ target_roles: ['purchase_manager', 'admin'], title: `Procured — Purchase Manager to bill: ${req.part_name}`, body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to upload the bill.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
     if (supplier) {
       const hits = await screenBlacklist([{ value: supplier, label: 'Supplier' }], { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment });
       if (hits.length) { const h = hits[0]; toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`); }
@@ -1005,13 +1037,13 @@ export function Maintenance() {
       for (const sr of procured) {
         await updateRows('maintenance_store_requests', { bill_verified: true, handover_invoice_url: r.secure_url }).eq('id', sr.id);
       }
-      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'], title: `Bill uploaded — ${procured.length} item(s) en route`, body: `${activeProfile.name} billed ₹${declaredTotal.toLocaleString('en-IN')} for ${declaredItems} item(s).`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
+      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'], title: `Bill uploaded — ${procured.length} item(s) en route`, body: `${activeProfile.name} billed ₹${declaredTotal.toLocaleString('en-IN')} for ${declaredItems} item(s).`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
 
       if (mismatch) {
         const ocrItemsTxt = ocrItems ?? '?';
         const ocrTotalTxt = ocrTotal != null ? `₹${ocrTotal.toLocaleString('en-IN')}` : '₹?';
         toast.error(`⚠ Bill mismatch — you entered ${declaredItems} items / ₹${declaredTotal.toLocaleString('en-IN')}, OCR read ${ocrItemsTxt} items / ${ocrTotalTxt}. Submitted, but admin has been notified to verify.`);
-        notify({ target_roles: ['admin', 'unit_head'], title: `⚠ Bill mismatch flagged: ${selectedTicket.equipment}`, body: `${activeProfile.name} declared ${declaredItems} items / ₹${declaredTotal.toLocaleString('en-IN')}; OCR read ${ocrItemsTxt} items / ${ocrTotalTxt}. Please verify the bill.`, type: 'urgent', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [] });
+        notify({ target_roles: ['admin', 'unit_head'], title: `⚠ Bill mismatch flagged: ${selectedTicket.equipment}`, body: `${activeProfile.name} declared ${declaredItems} items / ₹${declaredTotal.toLocaleString('en-IN')}; OCR read ${ocrItemsTxt} items / ${ocrTotalTxt}. Please verify the bill.`, type: 'urgent', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
       }
       await notifyTicketWatchers(selectedTicket, `Bill uploaded: ${selectedTicket.equipment}`, `${activeProfile.name} uploaded the supplier bill — items en route to store.`);
       setDispatchBlob(null); setUploadPct(0); setPmForm({ itemsCount: '', billTotal: '' });
@@ -1056,6 +1088,7 @@ export function Maintenance() {
         body: `${activeProfile.name} confirmed handover of "${req.part_name}".`,
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
+        plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null,
       });
       await notifyMentions(handoverNotes, {
         entityType: 'maintenance_ticket', entityId: selectedTicket.id,
@@ -1087,6 +1120,7 @@ export function Maintenance() {
         body: `Defective part → ${defectiveDecision} · By ${activeProfile.name}`,
         type: 'info', route: '/dashboard/purchase/maint',
         actor_name: activeProfile.name, actor_role: role, read_by: [],
+        plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
       });
       await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Defective part → ${defectiveDecision} · closed by ${activeProfile.name}.`);
       setSelectedTicket(null); setDefectiveBlob(null); setDefectiveDecision(''); setUploadPct(0);

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { supabase } from '../lib/supabase';
 import { insertRows, updateRows } from '../lib/db';
 import { useRoleContext } from './RoleContext';
+import { usePlantScope } from './PlantScopeContext';
 
 export interface AppNotification {
   id: string;
@@ -23,6 +24,13 @@ export interface AppNotification {
    * defaults to 'broadcast' at the DB.
    */
   scope?: 'personal' | 'broadcast';
+  /**
+   * The plant/unit this notification concerns. NULL = broadcast (delivered by
+   * role only). When set, delivery is additionally gated by the recipient's data
+   * scope — a "unit head at plant X" tag only reaches in-scope / global users.
+   */
+  plant_id?: string | null;
+  unit_id?: string | null;
 }
 
 interface NotificationsContextValue {
@@ -70,6 +78,7 @@ function addCleared(roleId: string, ids: string[]) {
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
   const { activeProfile, activeIdentityIds, activePersonId, activeAccountFloor } = useRoleContext();
+  const { inScope, isGlobal } = usePlantScope();
   // Per-person bookkeeping key (read / cleared / unread). The PERSONAL id, so
   // two people who share a role keep independent read & cleared state.
   const selfKey = activePersonId || activeProfile?.id || 'admin';
@@ -90,11 +99,14 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   //  • 'broadcast' / legacy → matched by any role/identity id.
   const isForMe = useCallback((n: AppNotification): boolean => {
     if (!n.target_roles) return false;
+    // Plant/unit gate: a plant-tagged notification only reaches users whose data
+    // scope includes that plant (global users always qualify; NULL = broadcast).
+    if (n.plant_id && !isGlobal && !inScope(n.plant_id, n.unit_id)) return false;
     if (n.scope === 'personal') return n.target_roles.includes(personId);
     const idSet = new Set(identityIds);
     return n.target_roles.some((id) => idSet.has(id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identityKey, personId]);
+  }, [identityKey, personId, isGlobal, inScope]);
 
   // Load notifications addressed to this person (personal tags + role broadcasts),
   // newer than their account floor.
@@ -199,11 +211,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     if (!tableReady) return false;
     let ok = false;
     await insertRows('notifications', { ...n, read_by: [] }).then(() => { ok = true; }, () => { ok = false; });
-    // Fallback for a DB that hasn't run 24_notification_scope.sql yet: retry
-    // without `scope` so the notification still sends (degrades to broadcast).
-    if (!ok && n.scope) {
-      const { scope, ...rest } = n;
-      void scope;
+    // Fallback for a DB that hasn't run 24_notification_scope.sql / 27_plant_unit_
+    // scoping.sql yet: retry without scope + plant/unit columns so the
+    // notification still sends (degrades to a plain role broadcast).
+    if (!ok && (n.scope || n.plant_id || n.unit_id)) {
+      const { scope, plant_id, unit_id, ...rest } = n;
+      void scope; void plant_id; void unit_id;
       await insertRows('notifications', { ...rest, read_by: [] }).then(() => { ok = true; }, () => {});
     }
     return ok;

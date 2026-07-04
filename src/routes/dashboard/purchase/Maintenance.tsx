@@ -17,6 +17,7 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { useTranslation } from 'react-i18next';
 import { useDirectory, useMentionNotifier, notifyWatchers, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
+import { similarity } from '../../../lib/blacklist/similarity';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import type { AppNotification } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
@@ -27,6 +28,56 @@ import {
 } from './maintenance/shared';
 
 type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
+
+// ── Store-inventory type-ahead ───────────────────────────────────────────────
+type StoreStockItem = { id: string; item_name: string; on_hand: number; unit: string | null };
+
+/** Rank the plant's stock items against what the technician is typing. */
+function suggestParts(query: string, stock: StoreStockItem[]): StoreStockItem[] {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return [];
+  return stock
+    .map(s => ({ s, score: s.item_name.toLowerCase().includes(q) ? 1 : similarity(q, s.item_name) }))
+    .filter(x => x.score > 0.34)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map(x => x.s);
+}
+
+/** Part-name input backed by the plant's stock register (type-ahead + free text). */
+function PartNameField({ value, stock, onChange, onPick }: {
+  value: string;
+  stock: StoreStockItem[];
+  onChange: (v: string) => void;
+  onPick: (item: StoreStockItem | null) => void;
+}) {
+  const [focus, setFocus] = React.useState(false);
+  const suggestions = React.useMemo(() => suggestParts(value, stock), [value, stock]);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        value={value}
+        onChange={e => { onChange(e.target.value); onPick(null); }}
+        onFocus={() => setFocus(true)}
+        onBlur={() => window.setTimeout(() => setFocus(false), 150)}
+        placeholder={stock.length ? 'Type to search store — e.g. Acid Pump seal' : 'e.g. Mechanical seal, O-ring kit'}
+        style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
+      />
+      {focus && suggestions.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10, marginTop: 4, boxShadow: '0 10px 30px rgba(0,0,0,0.15)', maxHeight: 240, overflowY: 'auto' }}>
+          {suggestions.map(s => (
+            <button key={s.id} type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(s.item_name); onPick(s); setFocus(false); }}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
+              <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.item_name}</span>
+              <span style={{ color: s.on_hand > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.on_hand > 0 ? `${s.on_hand} in stock` : 'out of stock'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Full date+time for report cells (locale, IST).
 function fmtDT(d: string | null | undefined): string {
@@ -344,18 +395,24 @@ export function Maintenance() {
   const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
   const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
   // Multi-item store request: a list of parts entered together (+ Add item).
-  type StoreItem = { partName: string; quantity: string; specification: string };
-  const BLANK_ITEM: StoreItem = { partName: '', quantity: '', specification: '' };
+  type StoreItem = { partName: string; quantity: string; specification: string; storeItemId: string | null };
+  const BLANK_ITEM: StoreItem = { partName: '', quantity: '', specification: '', storeItemId: null };
   const [storeItems, setStoreItems] = useState<StoreItem[]>([{ ...BLANK_ITEM }]);
   const [showStoreForm, setShowStoreForm] = useState(false);
+  // The ticket-plant's stock register — powers the part-name type-ahead.
+  const [storeStock, setStoreStock] = useState<StoreStockItem[]>([]);
 
-  // Store manager availability form
-  const [storeDecisionForm, setStoreDecisionForm] = useState({
+  // Store manager availability form. registerQty = what the stock file says (for
+  // the default + override check); qtyJustification is required if they differ.
+  const BLANK_STORE_DECISION = {
     available: null as boolean | null,
     qtyInStore: '',
     shelfLocation: '',
     partCondition: 'new',
-  });
+    registerQty: null as number | null,
+    qtyJustification: '',
+  };
+  const [storeDecisionForm, setStoreDecisionForm] = useState(BLANK_STORE_DECISION);
 
   // Handover form (store manager uploads invoice + product photo)
   const [handoverInvoiceBlob, setHandoverInvoiceBlob] = useState<Blob | null>(null);
@@ -370,6 +427,7 @@ export function Maintenance() {
   const [busyRef, setBusyRef] = useState('');
   const [unitPrice, setUnitPrice] = useState(''); // procurement unit price (₹) → feeds FAR cost
   const [supplierName, setSupplierName] = useState(''); // external vendor → recorded as a Purchase Order
+  const [purchaseQty, setPurchaseQty] = useState(''); // how many were actually bought (bulk ≥ shortfall)
   const [defectiveDecision, setDefectiveDecision] = useState<'repair' | 'scrap' | ''>('');
 
   // Upload
@@ -482,6 +540,16 @@ export function Maintenance() {
     if (!selectedTicket) { setStoreReqs([]); return; }
     loadStoreReqs(selectedTicket.id);
   }, [selectedTicket?.id, loadStoreReqs]);
+
+  // Load the ticket-plant's stock register → powers the part-name type-ahead.
+  useEffect(() => {
+    const pid = selectedTicket?.plant_id;
+    if (!pid) { setStoreStock([]); return; }
+    let alive = true;
+    supabase.from('store_items').select('id, item_name, on_hand, unit').eq('plant_id', pid).order('item_name')
+      .returns<StoreStockItem[]>().then(({ data }) => { if (alive) setStoreStock(data || []); });
+    return () => { alive = false; };
+  }, [selectedTicket?.plant_id]);
 
   // Restrict the plant picker to the user's allowed plants (all if global) so a
   // scoped user can't raise a ticket for another plant. Falls back to the full
@@ -840,6 +908,7 @@ export function Maintenance() {
       quantity: parseFloat(it.quantity) || null,
       specification: it.specification || null,
       plant_id: plant?.id || selectedTicket.plant_id || null,
+      store_item_id: it.storeItemId || null,
     }));
     await insertRows('maintenance_store_requests', rows);
     await updateTicketStatus(selectedTicket.id, 'pending_store');
@@ -941,29 +1010,88 @@ export function Maintenance() {
   }
 
   async function submitStoreDecision(req: StoreReqRow) {
-    if (!selectedTicket || storeDecisionForm.available === null) return;
+    if (!selectedTicket || storeDecisionForm.available === null || actionBusyRef.current) return;
     const available = storeDecisionForm.available;
+    const regQty = storeDecisionForm.registerQty;
+    const enteredQty = available ? (parseFloat(storeDecisionForm.qtyInStore) || 0) : null;
+    // The register is the default; overriding its quantity needs a justification.
+    const overrode = available && regQty != null && enteredQty != null && enteredQty !== regQty;
+    if (overrode && !storeDecisionForm.qtyJustification.trim()) {
+      toast.error('Your count differs from the register — please add a justification.');
+      return;
+    }
+    actionBusyRef.current = true;   // guard against a double-submit creating two shortfall rows
+    try {
+    // ── Partial fulfilment: if the store can't cover the full request, issue what
+    // it has and route the shortfall (requested − available) to procurement. This
+    // is what keeps stock from ever going negative. The two rows share a
+    // split_group so the UI shows them as two parallel tracks of one part. ───────
+    const requestedQty = Number(req.quantity) || 0;
+    const availQty = enteredQty ?? 0;
+    const fulfilledQty = available ? (requestedQty > 0 ? Math.min(availQty, requestedQty) : availQty) : 0;
+    const shortfall = available && requestedQty > availQty ? requestedQty - availQty : 0;
+    const splitGroup = shortfall > 0 ? req.id : null;
+
     await updateRows('maintenance_store_requests', {
         store_decision: available ? 'available' : 'unavailable',
         purchase_required: !available,
-        qty_in_store: available ? (parseFloat(storeDecisionForm.qtyInStore) || null) : null,
+        // when split, this row now represents only the part issued from store
+        quantity: available ? fulfilledQty : requestedQty,
+        qty_in_store: available ? availQty : null,
         shelf_location: available ? (storeDecisionForm.shelfLocation || null) : null,
         part_condition: available ? storeDecisionForm.partCondition : null,
+        ...(splitGroup ? { split_group: splitGroup } : {}),
       })
       .eq('id', req.id);
+
+    // Create the ONE procurement row for the shortfall → external procurement path.
+    if (shortfall > 0) {
+      await insertRows('maintenance_store_requests', {
+        ticket_id: selectedTicket.id, part_name: req.part_name, quantity: shortfall,
+        specification: `${req.specification ? req.specification + ' · ' : ''}Shortfall — ${shortfall} of ${requestedQty} not in store`,
+        plant_id: selectedTicket.plant_id, store_item_id: req.store_item_id ?? null,
+        store_decision: 'unavailable', purchase_required: true, split_group: splitGroup,
+      });
+      notify({
+        target_roles: ['admin', 'unit_head'],
+        title: `Partial stock — procure ${shortfall}× ${req.part_name}`,
+        body: `${fulfilledQty} issued from store, ${shortfall} short → procurement. Awaiting unit head approval.`,
+        type: 'warning', route: '/dashboard/purchase/maint',
+        actor_name: activeProfile.name, actor_role: role, read_by: [],
+        plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
+      });
+    }
+    // Record a register-override so admins can reconcile file vs physical count.
+    if (overrode) {
+      if (req.store_item_id) {
+        await insertRows('store_stock_events', {
+          item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'manual_edit',
+          qty_delta: (enteredQty as number) - (regQty as number), on_hand_after: null,
+          ref: `store-check · ticket ${selectedTicket.id.slice(0, 8)}`,
+          justification: `Register ${regQty} → counted ${enteredQty}. ${storeDecisionForm.qtyJustification.trim()}`,
+          actor_name: activeProfile.name,
+        });
+      }
+      await insertRows('activity_logs', {
+        equipment: `Stock check: ${req.part_name}`, type: 'stock_check_override',
+        date: new Date().toISOString().slice(0, 10), done_by: activeProfile.name, plant_id: selectedTicket.plant_id,
+        note: `Register said ${regQty}, store counted ${enteredQty}. ${storeDecisionForm.qtyJustification.trim()}`,
+      });
+    }
     notify({
       target_roles: ['admin', 'unit_head'],
       title: available ? `Part available: ${req.part_name}` : `Part not in store: ${req.part_name}`,
       body: available
-        ? `Qty: ${storeDecisionForm.qtyInStore || '?'} · Shelf: ${storeDecisionForm.shelfLocation || '—'} · Condition: ${storeDecisionForm.partCondition} · Awaiting unit head approval`
+        ? `Issuing ${fulfilledQty} from store${shortfall > 0 ? ` (${shortfall} short → procurement)` : ''}${overrode ? ` · register ${regQty}: ${storeDecisionForm.qtyJustification.trim()}` : ''} · Shelf: ${storeDecisionForm.shelfLocation || '—'} · Awaiting unit head approval`
         : `${selectedTicket.equipment} — external procurement needed. Awaiting unit head approval.`,
       type: available ? 'info' : 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
       plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
     });
-    setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' });
+    setStoreDecisionForm({ ...BLANK_STORE_DECISION });
     setActingReqId(null);
     await refreshAfterItemChange();
+    } finally { actionBusyRef.current = false; }
   }
 
   async function unitHeadApprove(req: StoreReqRow, approved: boolean) {
@@ -986,14 +1114,17 @@ export function Maintenance() {
   async function markPurchased(req: StoreReqRow) {
     if (!selectedTicket || !busyRef.trim()) return;
     const supplier = supplierName.trim();
-    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null })
+    const need = Number(req.quantity) || 0;
+    // Bulk buy: default to the shortfall, but they can buy more (excess → stock on handover).
+    const bought = Math.max(need, parseFloat(purchaseQty) || need);
+    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null, purchased_qty: bought })
       .eq('id', req.id);
     notify({ target_roles: ['purchase_manager', 'admin'], title: `Procured — Purchase Manager to bill: ${req.part_name}`, body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to upload the bill.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
     if (supplier) {
       const hits = await screenBlacklist([{ value: supplier, label: 'Supplier' }], { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment });
       if (hits.length) { const h = hits[0]; toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`); }
     }
-    setBusyRef(''); setSupplierName(''); setActingReqId(null);
+    setBusyRef(''); setSupplierName(''); setPurchaseQty(''); setActingReqId(null);
     await refreshAfterItemChange();
   }
 
@@ -1026,11 +1157,13 @@ export function Maintenance() {
         photoType: 'bill', creator: activeProfile.name, onProgress: setUploadPct,
       });
 
+      const billedAt = new Date().toISOString();
       await updateRows('maintenance_tickets', {
         pm_items_count: declaredItems, pm_bill_total: declaredTotal, pm_bill_url: r.secure_url,
+        pm_billed_by: activeProfile.name, pm_billed_at: billedAt,
         pm_ocr_total: ocrTotal, pm_ocr_items: ocrItems, pm_ocr_status: ocrStatus, pm_ocr_raw: ocrRaw, pm_mismatch: mismatch,
       }).eq('id', selectedTicket.id);
-      setSelectedTicket((t) => t ? { ...t, pm_items_count: declaredItems, pm_bill_total: declaredTotal, pm_bill_url: r.secure_url, pm_ocr_total: ocrTotal, pm_ocr_items: ocrItems, pm_ocr_status: ocrStatus, pm_mismatch: mismatch } : t);
+      setSelectedTicket((t) => t ? { ...t, pm_items_count: declaredItems, pm_bill_total: declaredTotal, pm_bill_url: r.secure_url, pm_billed_by: activeProfile.name, pm_billed_at: billedAt, pm_ocr_total: ocrTotal, pm_ocr_items: ocrItems, pm_ocr_status: ocrStatus, pm_mismatch: mismatch } : t);
 
       // Mark all procured-but-unbilled items as billed → they move to handover.
       const procured = storeReqs.filter(sr => itemStage(sr) === 'purchase_manager');
@@ -1089,6 +1222,49 @@ export function Maintenance() {
           bill_verified: true,
         })
         .eq('id', req.id);
+
+      // Decrement the store register: an own-store part linked to a stock item
+      // leaves the store on handover → issued_qty ↑, on_hand ↓, with an audit event.
+      if (req.store_item_id) {
+        const qty = Number(req.quantity) || 0;
+        if (fromOwnStore && qty > 0) {
+          // In-store track: issue from the register. Hard guard → on_hand can't go negative.
+          const { data: si } = await (supabase.from('store_items') as any).select('*').eq('id', req.store_item_id).single();
+          if (si) {
+            const issueQty = Math.min(qty, Math.max(0, Number(si.on_hand)));
+            const newOnHand = Number(si.on_hand) - issueQty;
+            await (supabase.from('store_items') as any)
+              .update({ issued_qty: Number(si.issued_qty) + issueQty, on_hand: newOnHand, updated_at: new Date().toISOString() }).eq('id', req.store_item_id);
+            await insertRows('store_stock_events', {
+              item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'issue',
+              qty_delta: -issueQty, on_hand_after: newOnHand, ref: `ticket ${selectedTicket.id.slice(0, 8)}`,
+              justification: `Handed over to technician · ${req.part_name}${issueQty < qty ? ` (only ${issueQty} of ${qty} were on hand)` : ''}`,
+              actor_name: activeProfile.name,
+            });
+          }
+        } else if (!fromOwnStore) {
+          // Procurement track: `qty` units were bought for the ticket (handed to the
+          // technician — recorded in ticket_procured_qty for visibility, does NOT change
+          // on_hand). Any BULK excess over the ticket need goes into the store (on_hand ↑).
+          const bought = Number(req.purchased_qty) || qty;
+          const excess = Math.max(0, bought - qty);
+          const { data: si } = await (supabase.from('store_items') as any).select('*').eq('id', req.store_item_id).single();
+          if (si) {
+            const newOnHand = Number(si.on_hand) + excess;
+            await (supabase.from('store_items') as any).update({
+              ticket_procured_qty: Number(si.ticket_procured_qty || 0) + qty,
+              procured_qty: Number(si.procured_qty) + excess,
+              on_hand: newOnHand, updated_at: new Date().toISOString(),
+            }).eq('id', req.store_item_id);
+            await insertRows('store_stock_events', {
+              item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'procure',
+              qty_delta: bought, on_hand_after: newOnHand, ref: req.busy_transaction_ref || `ticket ${selectedTicket.id.slice(0, 8)}`,
+              justification: `Procured ${bought} · ${qty} handed to technician${excess > 0 ? `, ${excess} added to stock` : ''} · ${req.part_name}`,
+              actor_name: activeProfile.name,
+            });
+          }
+        }
+      }
       notify({
         target_roles: ['technician_shd', 'admin', 'unit_head'],
         title: `Part handed over: ${req.part_name}`,
@@ -1302,12 +1478,17 @@ export function Maintenance() {
       case 'pending_unit_head':
         if (sr) body = <>{line('Unit head decision', sr.unit_head_approval)}{line('Part availability', sr.store_decision)}</>;
         break;
-      case 'pending_purchase':
-        if (sr) body = <>{line('BUSY transaction ref', sr.busy_transaction_ref)}{line('Supplier', sr.supplier_name)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement by unit head (price entered by Purchase Manager).</div></>;
+      case 'pending_purchase': {
+        const pr = storeReqs.find(r => r.store_decision === 'unavailable' || r.purchase_required) ?? sr;
+        if (pr) body = <>{line('Qty procured', pr.quantity)}{line('BUSY transaction ref', pr.busy_transaction_ref)}{line('Supplier', pr.supplier_name)}{line('Unit head', pr.unit_head_approval === 'approved' ? 'Approved procurement' : pr.unit_head_approval)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement for the quantity not in store.</div></>;
         break;
-      case 'pending_purchase_manager':
-        if (sr) body = <>{line('Supplier', sr.supplier_name)}{line('Unit price', sr.unit_price != null ? `₹ ${Number(sr.unit_price).toLocaleString('en-IN')}` : null)}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}{line('Bill uploaded', sr.bill_verified ? 'Yes' : '—')}{photo(sr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
+      }
+      case 'pending_purchase_manager': {
+        const pr = storeReqs.find(r => r.store_decision === 'unavailable' || r.purchase_required) ?? sr;
+        const amount = t.pm_bill_total ?? pr?.total_price ?? null;
+        if (pr) body = <>{line('Qty procured', pr.quantity)}{line('Purchase amount', amount != null ? `₹ ${Number(amount).toLocaleString('en-IN')}` : null)}{line('Items on bill', t.pm_items_count)}{line('Supplier', pr.supplier_name)}{line('BUSY ref', pr.busy_transaction_ref)}{line('Purchase Manager', t.pm_billed_by)}{line('Billed on', t.pm_billed_at ? formatDate(t.pm_billed_at) : null)}{line('Bill verified', pr.bill_verified ? 'Yes' : '—')}{photo(t.pm_bill_url || pr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
         break;
+      }
       case 'pending_handover':
         if (sr) body = <>{line('Receipt confirmed', sr.handover_confirmed_at ? formatDate(sr.handover_confirmed_at) : '—')}{line('Notes', sr.handover_notes)}{photo(sr.handover_invoice_url, 'Bill / invoice')}{photo(sr.handover_photo_url, 'Part received photo')}</>;
         break;
@@ -1374,7 +1555,15 @@ export function Maintenance() {
                   )}
                 </div>
                 <PanelField label="Part name *">
-                  <PanelInput value={it.partName} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, partName: e.target.value } : x))} placeholder="e.g. Mechanical seal, O-ring kit" />
+                  <PartNameField
+                    value={it.partName}
+                    stock={storeStock}
+                    onChange={v => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, partName: v } : x))}
+                    onPick={picked => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, storeItemId: picked?.id ?? null } : x))}
+                  />
+                  {it.storeItemId
+                    ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to store stock — availability will be checked automatically.</div>
+                    : (storeStock.length > 0 && it.partName.trim().length > 1 && <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>Not in store list — will be treated as a new part to procure.</div>)}
                 </PanelField>
                 <PanelRow>
                   <PanelField label="Quantity">
@@ -1447,7 +1636,8 @@ export function Maintenance() {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {storeReqs.map((req) => {
+        {(() => {
+          const renderReq = (req: StoreReqRow, grouped = false) => {
           const s = itemStage(req);
           const acting = actingReqId === req.id;
           const badge = STAGE_BADGE[s];
@@ -1456,21 +1646,54 @@ export function Maintenance() {
           const canConfirmHandover = fromOwnStore
             ? (!!handoverNotes.trim() || !!handoverPhotoBlob)
             : (!!handoverInvoiceBlob || !!handoverPhotoBlob);
+          // Map the request to the plant's stock so the store manager confirms
+          // rather than re-counts: exact link if the tech picked it, else fuzzy.
+          const linkedStock = req.store_item_id ? storeStock.find(x => x.id === req.store_item_id) ?? null : null;
+          const storeSuggestions = (s === 'store' && acting)
+            ? (linkedStock ? [linkedStock] : suggestParts(req.part_name, storeStock).slice(0, 3))
+            : [];
           return (
-            <div key={req.id} style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 14 }}>
+            <div key={req.id} style={{ border: `1px solid ${grouped ? '#F1F5F9' : '#E2E8F0'}`, borderRadius: grouped ? 10 : 14, padding: grouped ? 11 : 14, background: grouped ? '#FCFCFD' : undefined }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{req.part_name}</div>
-                  <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
-                    {req.quantity ? `Qty ${req.quantity}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
-                  </div>
+                  {grouped ? (
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#475569' }}>
+                      {req.store_decision === 'available' ? '① From store' : req.store_decision === 'unavailable' ? '② Procurement' : 'Store check'} · Qty {req.quantity ?? '—'}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{req.part_name}</div>
+                      <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
+                        {req.quantity ? `Qty ${req.quantity}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
+                      </div>
+                    </>
+                  )}
                 </div>
                 <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color, whiteSpace: 'nowrap' }}>{badge.label}</span>
               </div>
 
               {/* STORE CHECK */}
-              {s === 'store' && (storeManagerCanAct ? (acting ? (
+              {s === 'store' && (storeManagerCanAct ? (acting ? (() => {
+                const regQty = storeDecisionForm.registerQty;
+                const enteredQty = storeDecisionForm.qtyInStore.trim() === '' ? null : Number(storeDecisionForm.qtyInStore);
+                const qtyDiffers = regQty != null && enteredQty != null && enteredQty !== regQty;
+                const needJustify = qtyDiffers && !storeDecisionForm.qtyJustification.trim();
+                const reqQty = Number(req.quantity) || 0;
+                const willSplit = enteredQty != null && reqQty > 0 && enteredQty < reqQty;
+                return (
                 <div style={{ marginTop: 12 }}>
+                  {storeSuggestions.length > 0 && (
+                    <div style={{ border: '1px solid #BBF7D0', background: '#F0FDF4', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#16A34A', marginBottom: 6 }}>{linkedStock ? 'Linked to your store stock' : 'Closest match in your store — is it one of these?'}</div>
+                      {storeSuggestions.map(mi => (
+                        <div key={mi.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                          <span style={{ fontSize: 12.5, color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mi.item_name} · <strong style={{ color: mi.on_hand > 0 ? '#16A34A' : '#DC2626' }}>{mi.on_hand} in stock</strong></span>
+                          <button onClick={() => setStoreDecisionForm(f => ({ ...f, available: mi.on_hand > 0, qtyInStore: String(mi.on_hand), registerQty: Number(mi.on_hand) }))} style={{ border: '1px solid #16A34A', background: '#fff', color: '#16A34A', borderRadius: 8, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>Use {mi.on_hand}</button>
+                        </div>
+                      ))}
+                      <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 5 }}>Quantity comes from the uploaded stock file — you just confirm it, or correct it with a reason.</div>
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 8 }}>Is this part in store?</div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                     {([true, false] as const).map(v => (
@@ -1478,18 +1701,32 @@ export function Maintenance() {
                     ))}
                   </div>
                   {storeDecisionForm.available === true && (
-                    <PanelRow>
-                      <PanelField label="Qty available"><PanelInput type="number" value={storeDecisionForm.qtyInStore} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyInStore: e.target.value }))} placeholder="e.g. 3" /></PanelField>
-                      <PanelField label="Shelf / bin"><PanelInput value={storeDecisionForm.shelfLocation} onChange={e => setStoreDecisionForm(f => ({ ...f, shelfLocation: e.target.value }))} placeholder="Rack B-12" /></PanelField>
-                    </PanelRow>
+                    <>
+                      <PanelRow>
+                        <PanelField label={regQty != null ? `Qty available · register says ${regQty}` : 'Qty available'}><PanelInput type="number" value={storeDecisionForm.qtyInStore} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyInStore: e.target.value }))} placeholder="e.g. 3" /></PanelField>
+                        <PanelField label="Shelf / bin"><PanelInput value={storeDecisionForm.shelfLocation} onChange={e => setStoreDecisionForm(f => ({ ...f, shelfLocation: e.target.value }))} placeholder="Rack B-12" /></PanelField>
+                      </PanelRow>
+                      {willSplit && (
+                        <div style={{ fontSize: 11.5, color: '#7C3AED', background: '#FAF5FF', border: '1px solid #E9D5FF', borderRadius: 8, padding: '7px 10px', marginTop: 6 }}>
+                          ⤿ Only {enteredQty} of {reqQty} in store → <strong>{enteredQty} issued now</strong>, <strong>{reqQty - (enteredQty ?? 0)} sent to procurement</strong> automatically.
+                        </div>
+                      )}
+                      {qtyDiffers && (
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontSize: 11, color: '#B45309', marginBottom: 4 }}>⚠ Register says <strong>{regQty}</strong>, you entered <strong>{enteredQty}</strong> — a justification is required.</div>
+                          <PanelTextarea value={storeDecisionForm.qtyJustification} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyJustification: e.target.value }))} placeholder="Why does your count differ from the register? e.g. 2 damaged units removed; file not yet updated." />
+                        </div>
+                      )}
+                    </>
                   )}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => { setActingReqId(null); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }} style={cancelBtn}>Cancel</button>
-                    <button onClick={() => submitStoreDecision(req)} disabled={storeDecisionForm.available === null} style={{ ...primaryBtn('#F47651'), flex: 2, opacity: storeDecisionForm.available === null ? 0.4 : 1 }}>Submit to unit head</button>
+                    <button onClick={() => { setActingReqId(null); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }} style={cancelBtn}>Cancel</button>
+                    <button onClick={() => submitStoreDecision(req)} disabled={storeDecisionForm.available === null || needJustify} style={{ ...primaryBtn('#F47651'), flex: 2, opacity: (storeDecisionForm.available === null || needJustify) ? 0.4 : 1 }}>Submit to unit head</button>
                   </div>
                 </div>
-              ) : (
-                <button onClick={() => { setActingReqId(req.id); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }} style={{ ...primaryBtn('#F47651'), width: '100%', marginTop: 10 }}>Check availability</button>
+                );
+              })() : (
+                <button onClick={() => { const linked = req.store_item_id ? storeStock.find(x => x.id === req.store_item_id) : null; setActingReqId(req.id); setStoreDecisionForm({ ...BLANK_STORE_DECISION, available: linked ? Number(linked.on_hand) > 0 : null, qtyInStore: linked ? String(linked.on_hand) : '', registerQty: linked ? Number(linked.on_hand) : null }); }} style={{ ...primaryBtn('#F47651'), width: '100%', marginTop: 10 }}>Check availability</button>
               )) : <div style={awaitTxt}>Awaiting store manager…</div>)}
 
               {/* UNIT HEAD */}
@@ -1509,14 +1746,22 @@ export function Maintenance() {
               {s === 'purchase' && ((isUnitHead || isAdmin) ? (acting ? (
                 <div style={{ marginTop: 10 }}>
                   <PanelField label="BUSY transaction reference *"><PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" /></PanelField>
-                  <PanelField label="Supplier / vendor"><PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals" /></PanelField>
+                  <PanelRow>
+                    <PanelField label={`Qty purchased · need ${req.quantity ?? 0}`}><PanelInput type="number" value={purchaseQty} onChange={e => setPurchaseQty(e.target.value)} placeholder={`${req.quantity ?? ''}`} /></PanelField>
+                    <PanelField label="Supplier / vendor"><PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals" /></PanelField>
+                  </PanelRow>
+                  {req.store_item_id && (parseFloat(purchaseQty) || 0) > (Number(req.quantity) || 0) && (
+                    <div style={{ fontSize: 11.5, color: '#7C3AED', background: '#FAF5FF', border: '1px solid #E9D5FF', borderRadius: 8, padding: '6px 10px', marginBottom: 8 }}>
+                      Bought in bulk → {req.quantity} to the technician, <strong>{(parseFloat(purchaseQty) || 0) - (Number(req.quantity) || 0)} added to store stock</strong> on handover.
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => { setActingReqId(null); setBusyRef(''); setSupplierName(''); }} style={cancelBtn}>Cancel</button>
+                    <button onClick={() => { setActingReqId(null); setBusyRef(''); setSupplierName(''); setPurchaseQty(''); }} style={cancelBtn}>Cancel</button>
                     <button onClick={() => markPurchased(req)} disabled={!busyRef.trim()} style={{ ...primaryBtn('#7C3AED'), flex: 2, opacity: !busyRef.trim() ? 0.5 : 1 }}>Mark purchased</button>
                   </div>
                 </div>
               ) : (
-                <button onClick={() => { setActingReqId(req.id); setBusyRef(''); setSupplierName(''); }} style={{ ...primaryBtn('#7C3AED'), width: '100%', marginTop: 10 }}>Procure — enter BUSY ref</button>
+                <button onClick={() => { setActingReqId(req.id); setBusyRef(''); setSupplierName(''); setPurchaseQty(String(req.quantity ?? '')); }} style={{ ...primaryBtn('#7C3AED'), width: '100%', marginTop: 10 }}>Procure — enter BUSY ref</button>
               )) : <div style={awaitTxt}>Unit head procuring…</div>)}
 
               {s === 'purchase_manager' && <div style={awaitTxt}>Procured ({req.busy_transaction_ref || 'ref pending'}) · awaiting purchase bill below…</div>}
@@ -1548,7 +1793,45 @@ export function Maintenance() {
               {s === 'rejected' && <div style={{ fontSize: 12, color: '#DC2626', marginTop: 8 }}>Rejected by unit head.</div>}
             </div>
           );
-        })}
+          };
+          // Group the two parallel tracks (same split_group) under one part header.
+          const groups: StoreReqRow[][] = [];
+          const groupIdx = new Map<string, number>();
+          for (const r of storeReqs) {
+            const k = r.split_group || r.id;
+            if (groupIdx.has(k)) groups[groupIdx.get(k)!].push(r);
+            else { groupIdx.set(k, groups.length); groups.push([r]); }
+          }
+          return groups.map(group => {
+            if (group.length === 1) return renderReq(group[0]);
+            const sorted = [...group].sort((a, b) => (a.store_decision === 'available' ? 0 : 1) - (b.store_decision === 'available' ? 0 : 1));
+            const g = sorted[0];
+            const allDone = sorted.every(r => itemStage(r) === 'done');
+            const issuedQty = sorted.filter(r => r.store_decision === 'available').reduce((n, r) => n + (Number(r.quantity) || 0), 0);
+            const procuredQty = sorted.filter(r => r.store_decision === 'unavailable' || r.purchase_required).reduce((n, r) => n + (Number(r.quantity) || 0), 0);
+            const requestedQty = issuedQty + procuredQty;
+            const deliveredQty = sorted.filter(r => itemStage(r) === 'done').reduce((n, r) => n + (Number(r.quantity) || 0), 0);
+            return (
+              <div key={g.split_group || g.id} style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{g.part_name}</div>
+                    <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>Two parallel tracks — each is delivered to the technician as it completes.</div>
+                  </div>
+                  {allDone && <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#DCFCE7', color: '#16A34A', whiteSpace: 'nowrap' }}>DONE</span>}
+                </div>
+                {/* Fulfilment summary — how the requested qty is being delivered */}
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11.5, color: '#64748B', marginTop: 8, background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: '7px 10px' }}>
+                  <span>Requested <strong style={{ color: '#334155' }}>{requestedQty}</strong></span>
+                  <span>· From store <strong style={{ color: '#16A34A' }}>{issuedQty}</strong></span>
+                  <span>· Procured <strong style={{ color: '#7C3AED' }}>{procuredQty}</strong></span>
+                  <span>· Delivered <strong style={{ color: deliveredQty >= requestedQty ? '#16A34A' : '#D97706' }}>{deliveredQty}/{requestedQty}</strong></span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>{sorted.map(r => renderReq(r, true))}</div>
+              </div>
+            );
+          });
+        })()}
 
         {(isUnitHead || isAdmin) && storeReqs.some(r => itemStage(r) === 'store') && ticketUnit && (
           <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>⇄ Reroute to {UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser']} store</button>
@@ -1598,9 +1881,11 @@ export function Maintenance() {
     );
   }
 
-  // skipped stages for stage strip (pending_purchase skipped if part was in store)
-  // Part-in-store path skips both the external purchase and the purchase-manager dispatch.
-  const skippedStages = selectedTicket && selectedStoreReq?.store_decision === 'available'
+  // Skip the purchase / purchase-manager stages ONLY when NO part on this ticket
+  // went through procurement. A partial split (some in-store, some procured) means
+  // procurement DID happen → don't mark it skipped.
+  const anyProcured = storeReqs.some(sr => sr.store_decision === 'unavailable' || sr.purchase_required);
+  const skippedStages = selectedTicket && !anyProcured
     ? ['pending_purchase', 'pending_purchase_manager']
     : [];
 
@@ -1950,7 +2235,7 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
       >

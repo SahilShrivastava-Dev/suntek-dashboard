@@ -77,6 +77,8 @@ interface MaintEntry {
   plant: string;
   part: string;
   cost: number;
+  procuredQty: number;
+  billUrl: string | null;
   status: string;
   created_at: string;
   closed_at: string | null;
@@ -193,21 +195,29 @@ export function FAR() {
           .select('*').in('ticket_id', ids).returns<MaintStoreReqRow[]>();
         srs = srData || [];
       }
-      const srBy = new Map<string, MaintStoreReqRow>();
-      srs.forEach((s) => { if (s.ticket_id && !srBy.has(s.ticket_id)) srBy.set(s.ticket_id, s); });
+      const srByTicket = new Map<string, MaintStoreReqRow[]>();
+      srs.forEach((s) => { if (!s.ticket_id) return; const arr = srByTicket.get(s.ticket_id); if (arr) arr.push(s); else srByTicket.set(s.ticket_id, [s]); });
       const entries: MaintEntry[] = (tickets || []).map((tk) => {
-        const sr = srBy.get(tk.id);
+        const rows = srByTicket.get(tk.id) ?? [];
+        const primary = rows[0];
+        const procuredRows = rows.filter(r => r.store_decision === 'unavailable' || r.purchase_required);
+        const procuredQty = procuredRows.reduce((n, r) => n + (Number(r.quantity) || 0), 0);
+        // Cost = the Purchase Manager's aggregate bill for this ticket, else any per-row prices.
+        const rowCost = rows.reduce((n, r) => n + (Number(r.total_price) || 0), 0);
+        const cost = Number(tk.pm_bill_total) || rowCost || 0;
         const when = tk.closed_at || tk.created_at;
         return {
           id: tk.id,
           equipment: tk.equipment,
           plant: tk.plants?.name || '—',
-          part: sr?.part_name || 'In-house repair',
-          cost: sr?.total_price != null ? Number(sr.total_price) : 0,
+          part: primary?.part_name || 'In-house repair',
+          cost,
+          procuredQty,
+          billUrl: tk.pm_bill_url ?? null,
           status: tk.status,
           created_at: tk.created_at,
           closed_at: tk.closed_at,
-          busyRef: sr?.busy_transaction_ref ?? null,
+          busyRef: procuredRows[0]?.busy_transaction_ref ?? primary?.busy_transaction_ref ?? null,
           fy: fyOf(when),
         };
       });
@@ -721,11 +731,15 @@ export function FAR() {
               <Row k={t('far.rowFinancialYear')} v={drillEntry.fy} />
               <Row k={t('far.rowRaisedAt')} v={fmtDT(drillEntry.created_at)} />
               <Row k={t('far.rowClosedAt')} v={drillEntry.closed_at ? fmtDT(drillEntry.closed_at) : t('far.openDash')} />
+              {drillEntry.procuredQty > 0 && <Row k="Qty procured" v={String(drillEntry.procuredQty)} />}
               {drillEntry.busyRef && <Row k={t('far.rowBusyRef')} v={drillEntry.busyRef} />}
               <div style={{ marginTop: 14, padding: '14px 16px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#15803D' }}>{t('far.cost')}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#15803D' }}>{drillEntry.procuredQty > 0 ? 'Procurement cost' : t('far.cost')}</span>
                 <span style={{ fontSize: 18, fontWeight: 800, color: '#15803D' }}>{drillEntry.cost ? inr(drillEntry.cost) : t('far.inHouseNoPart')}</span>
               </div>
+              {drillEntry.billUrl && (
+                <a href={drillEntry.billUrl} target="_blank" rel="noreferrer" style={{ display: 'block', textAlign: 'center', marginTop: 10, fontSize: 12, color: '#2563EB' }}>View supplier bill ↗</a>
+              )}
               <a href="/dashboard/purchase/maint" style={{ display: 'block', textAlign: 'center', marginTop: 14, fontSize: 12, color: '#2563EB' }}>{t('far.openInMaintenance')} →</a>
             </div>
           );

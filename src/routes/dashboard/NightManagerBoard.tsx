@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { upsertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
+import { useRoleContext } from '../../contexts/RoleContext';
+import { NightDutyScheduler } from './NightDutyScheduler';
+import { MyNightDuty } from './MyNightDuty';
 import type { Database } from '../../lib/database.types';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -126,6 +129,7 @@ const createCustomIcon = (initials: string, status: string) => {
 export function NightManagerBoard() {
   const { t } = useTranslation();
   const toast = useToast();
+  const { can } = useRoleContext();
   const [liveDuty, setLiveDuty] = useState<CheckInLog[]>([]);
   const [deviceMappings, setDeviceMappings] = useState<DeviceMappingRow[]>([]);
   const [selectedCheckIn, setSelectedCheckIn] = useState<CheckInLog | null>(null);
@@ -280,8 +284,20 @@ export function NightManagerBoard() {
     }
   };
 
+  // Technicians (and anyone who can't allocate) see ONLY their own night-duty
+  // calendar + check-in — not the org-wide board/map/KPIs.
+  if (!can('allocate_night_duty')) {
+    return <MyNightDuty showEmpty />;
+  }
+
   return (
     <>
+      {/* Night-duty scheduler — for allocators. */}
+      <NightDutyScheduler />
+
+      {/* The allocator's own night duty (if they're also assigned any). */}
+      <MyNightDuty />
+
       {/* KPIs */}
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-3 card p-5">

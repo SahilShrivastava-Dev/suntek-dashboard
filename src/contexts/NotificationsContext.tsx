@@ -31,6 +31,8 @@ export interface AppNotification {
    */
   plant_id?: string | null;
   unit_id?: string | null;
+  /** Optional proof image (e.g. a night-duty check-in photo) — shown via a 📷. */
+  photo_url?: string | null;
 }
 
 interface NotificationsContextValue {

@@ -433,6 +433,7 @@ export interface Database {
           scope: string; // 'personal' | 'broadcast' — see 24_notification_scope.sql
           plant_id: string | null; // NULL = broadcast; set = "role X at this plant" (27_plant_unit_scoping.sql)
           unit_id: string | null;
+          photo_url: string | null; // optional proof image (e.g. night-duty check-in)
           created_at: string;
         };
         // read_by / cleared_by / scope have DB defaults, so they're optional on insert.
@@ -456,10 +457,31 @@ export interface Database {
           is_on_site: boolean;
           distance_m: number | null;
           ip_address: string | null;
+          night_duty_id: string | null; // links a check-in to its night_duty (33_night_duty.sql)
           submitted_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['shift_logs']['Row'], 'id' | 'submitted_at'>>;
         Update: Partial<Database['public']['Tables']['shift_logs']['Insert']>;
+      };
+
+      // Night duty as a scheduled, rotational assignment. See 33_night_duty.sql.
+      night_duty: {
+        Row: {
+          id: string;
+          technician_id: string;
+          assigned_by: string | null;
+          plant_id: string | null;
+          unit_id: string | null;
+          duty_date: string;
+          status: 'scheduled' | 'checked_in' | 'completed' | 'missed';
+          checked_in_at: string | null;
+          shift_log_id: string | null;
+          recurrence_group: string | null;
+          notes: string | null;
+          created_at?: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['night_duty']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['night_duty']['Insert']>;
       };
 
       device_mappings: {

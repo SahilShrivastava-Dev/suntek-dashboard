@@ -1052,10 +1052,17 @@ export function Maintenance() {
     finally { setUploading(false); }
   }
 
-  // Store manager: upload invoice + product photo, confirm physical handover to technician
+  // Store manager: confirm physical handover to technician.
+  // Procured items carry a supplier bill (invoice photo); items issued from the
+  // store's own stock have no bill — the manager writes a short description instead.
   async function confirmHandover(req: StoreReqRow) {
     if (!selectedTicket) return;
-    if (!handoverInvoiceBlob && !handoverPhotoBlob) { toast.error('Please upload at least the invoice or product photo before confirming handover.'); return; }
+    const fromOwnStore = req.store_decision === 'available';
+    if (fromOwnStore) {
+      if (!handoverNotes.trim() && !handoverPhotoBlob) { toast.error("Please add a short description (why you're providing this part) or a part photo before confirming handover."); return; }
+    } else if (!handoverInvoiceBlob && !handoverPhotoBlob) {
+      toast.error('Please upload at least the invoice or part photo before confirming handover.'); return;
+    }
     setUploading(true);
     try {
       let invoiceUrl: string | null = null;
@@ -1444,6 +1451,11 @@ export function Maintenance() {
           const s = itemStage(req);
           const acting = actingReqId === req.id;
           const badge = STAGE_BADGE[s];
+          // Available-from-store items skip procurement → no bill; procured items carry one.
+          const fromOwnStore = req.store_decision === 'available';
+          const canConfirmHandover = fromOwnStore
+            ? (!!handoverNotes.trim() || !!handoverPhotoBlob)
+            : (!!handoverInvoiceBlob || !!handoverPhotoBlob);
           return (
             <div key={req.id} style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
@@ -1512,16 +1524,24 @@ export function Maintenance() {
               {/* HANDOVER */}
               {s === 'handover' && (storeManagerCanAct ? (acting ? (
                 <div style={{ marginTop: 10 }}>
-                  <PhotoUploader onBlobReady={setHandoverInvoiceBlob} label="Invoice / bill" hint="Photo of the invoice or purchase bill" />
+                  {fromOwnStore ? (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 4 }}>Reason / description</div>
+                      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>Issued from own store — no bill. Note why you're providing this part (condition, source shelf, any caveat).</div>
+                      <textarea value={handoverNotes} onChange={e => setHandoverNotes(e.target.value)} placeholder="e.g. Issued from Rack B-12 — spare seal in good condition, replaces the worn one." rows={3} style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none' }} />
+                    </div>
+                  ) : (
+                    <PhotoUploader onBlobReady={setHandoverInvoiceBlob} label="Invoice / bill" hint="Photo of the invoice or purchase bill" />
+                  )}
                   <PhotoUploader onBlobReady={setHandoverPhotoBlob} label="Part photo" hint="Photo of the part being handed over" />
                   {uploading && <UploadBar pct={uploadPct} color="#9333EA" />}
                   <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button onClick={() => { setActingReqId(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); }} style={cancelBtn}>Cancel</button>
-                    <button onClick={() => confirmHandover(req)} disabled={(!handoverInvoiceBlob && !handoverPhotoBlob) || uploading} style={{ ...primaryBtn('#9333EA'), flex: 2, opacity: ((!handoverInvoiceBlob && !handoverPhotoBlob) || uploading) ? 0.5 : 1 }}>{uploading ? `Uploading… ${uploadPct}%` : 'Confirm handover'}</button>
+                    <button onClick={() => { setActingReqId(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); }} style={cancelBtn}>Cancel</button>
+                    <button onClick={() => confirmHandover(req)} disabled={!canConfirmHandover || uploading} style={{ ...primaryBtn('#9333EA'), flex: 2, opacity: (!canConfirmHandover || uploading) ? 0.5 : 1 }}>{uploading ? `Uploading… ${uploadPct}%` : 'Confirm handover'}</button>
                   </div>
                 </div>
               ) : (
-                <button onClick={() => { setActingReqId(req.id); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); }} style={{ ...primaryBtn('#9333EA'), width: '100%', marginTop: 10 }}>Hand over to technician</button>
+                <button onClick={() => { setActingReqId(req.id); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); }} style={{ ...primaryBtn('#9333EA'), width: '100%', marginTop: 10 }}>Hand over to technician</button>
               )) : <div style={awaitTxt}>Store manager to hand over…</div>)}
 
               {s === 'done' && <div style={{ fontSize: 12, color: '#16A34A', marginTop: 8, fontWeight: 600 }}>✓ Handed over{req.handover_confirmed_at ? ` · ${formatDate(req.handover_confirmed_at)}` : ''}</div>}

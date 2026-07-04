@@ -11,26 +11,35 @@ import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import * as XLSX from 'xlsx';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
+import { groupAssetsByType, normMark } from '../../../lib/far/assets';
 import type { Database } from '../../../lib/database.types';
 
 // ── FAR bulk-import (CSV / Excel → verify → register) ─────────────────────────
 interface FarImportRow {
-  mark: string; model: string; capacity: string; origin: string;
+  name: string; mark: string; make: string; serial: string; quantity: string;
+  model: string; capacity: string; origin: string;
   year: string; value: string; invoice: string; purchaseDate: string; account: string;
 }
+const BLANK_FAR_ROW = (): FarImportRow => ({ name: '', mark: '', make: '', serial: '', quantity: '', model: '', capacity: '', origin: '', year: '', value: '', invoice: '', purchaseDate: '', account: '' });
+// Order matters — more specific keys first so "Name Of Equipments" ≠ "Identification Mark".
 const FAR_HEADER_MAP: { field: keyof FarImportRow; keys: string[] }[] = [
-  { field: 'mark',         keys: ['identification', 'mark', 'asset name', 'asset', 'particular', 'description', 'item', 'name'] },
-  { field: 'model',        keys: ['model', 'make'] },
-  { field: 'capacity',     keys: ['capacity', 'spec'] },
+  { field: 'name',         keys: ['name of equip', 'equipment name', 'name of', 'equipment', 'asset name', 'particular', 'description', 'item'] },
+  { field: 'mark',         keys: ['identification mark', 'identification', 'id mark', 'mark', 'tag no', 'tag'] },
+  { field: 'make',         keys: ['make', 'manufacturer', 'brand'] },
+  { field: 'serial',       keys: ['serial'] },
+  { field: 'quantity',     keys: ['quantity', 'qty'] },
+  { field: 'model',        keys: ['model'] },
+  { field: 'capacity',     keys: ['capacity', 'line size', 'size', 'spec'] },
   { field: 'origin',       keys: ['origin', 'country'] },
   { field: 'year',         keys: ['year'] },
   { field: 'value',        keys: ['taxable value', 'value', 'amount', 'cost', 'wdv', 'gross'] },
   { field: 'invoice',      keys: ['invoice'] },
-  { field: 'purchaseDate', keys: ['date of purchase', 'purchase date', 'dop', 'date'] },
+  { field: 'purchaseDate', keys: ['date of purchase', 'purchase date', 'dop'] },
   { field: 'account',      keys: ['account head', 'account', 'category', 'head', 'block'] },
 ];
 function mapHeader(h: string): keyof FarImportRow | null {
-  const k = h.toLowerCase().trim();
+  const k = (h || '').toLowerCase().trim();
+  if (!k) return null;
   for (const m of FAR_HEADER_MAP) if (m.keys.some(x => k.includes(x))) return m.field;
   return null;
 }
@@ -48,15 +57,22 @@ async function parseFarFile(file: File): Promise<FarImportRow[]> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
-  return raw.map((r) => {
-    const out: FarImportRow = { mark: '', model: '', capacity: '', origin: '', year: '', value: '', invoice: '', purchaseDate: '', account: '' };
-    for (const [h, v] of Object.entries(r)) {
-      const f = mapHeader(h);
-      if (f && out[f] === '') out[f] = v == null ? '' : String(v).trim();
-    }
-    return out;
-  }).filter((r) => r.mark || r.model || r.value);
+  // The client sheet has junk title rows above the real header, so detect the
+  // header row (the one with an equipment-name / identification column) rather
+  // than assuming row 1.
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '', blankrows: false });
+  const hi = rows.findIndex(r => Array.isArray(r) && r.some(c => typeof c === 'string' && /name of equip|identification|equipment name|asset name|particular/i.test(c)));
+  if (hi < 0) return [];
+  const cols = (rows[hi] as unknown[]).map(c => mapHeader(c == null ? '' : String(c)));
+  const out: FarImportRow[] = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i] as unknown[];
+    if (!Array.isArray(r)) continue;
+    const row = BLANK_FAR_ROW();
+    cols.forEach((f, ci) => { if (f && row[f] === '') { const v = r[ci]; row[f] = v == null ? '' : String(v).trim(); } });
+    if (row.name || row.mark || row.value) out.push(row);
+  }
+  return out;
 }
 const IMPORT_CSV_COLUMNS: CsvColumn[] = [
   { header: 'Identification mark', key: 'mark' }, { header: 'Model', key: 'model' },
@@ -141,11 +157,17 @@ const ACCOUNT_HEADS = ['Plant & Machinery', 'Electrical Equipment', 'Vehicles', 
 export function FAR() {
   const { t } = useTranslation();
   const toast = useToast();
-  const { scopeQuery } = usePlantScope();
+  const { scopeQuery, allowedPlants } = usePlantScope();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [assets, setAssets] = useState<AssetRow[]>([]);
+  const [expandedType, setExpandedType] = useState<string | null>(null);
+  const [equipSearch, setEquipSearch] = useState('');
+  const [equipPlantFilter, setEquipPlantFilter] = useState<string[]>([]); // empty = all plants (combined)
+  const [equipOpenTable, setEquipOpenTable] = useState(false);            // the big list is hidden until asked
+  const [equipSort, setEquipSort] = useState<{ key: 'type' | 'count'; dir: 'asc' | 'desc' }>({ key: 'type', dir: 'asc' });
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
+  const [importPlantIds, setImportPlantIds] = useState<string[]>([]); // factories this FAR belongs to (multi-select)
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   // Maintenance/repair cost register (annual, for insurance)
@@ -234,6 +256,38 @@ export function FAR() {
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
 
+  // Plants present in the FAR → the combine/individual filter chips.
+  const plantsInFar = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const a of assets) if (a.plant_id) seen.set(a.plant_id, a.plants?.name || a.plant_id);
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [assets]);
+
+  // Equipment List — a derived, grouped view of the FAR (the PM master).
+  const equipGroups = useMemo(() => {
+    const q = equipSearch.trim().toLowerCase();
+    let filtered = assets;
+    if (equipPlantFilter.length) filtered = filtered.filter(a => a.plant_id && equipPlantFilter.includes(a.plant_id));
+    if (q) filtered = filtered.filter(a => (a.name || '').toLowerCase().includes(q) || normMark(a.identification_mark).includes(normMark(q)));
+    return groupAssetsByType(filtered);
+  }, [assets, equipSearch, equipPlantFilter]);
+  const sortedGroups = useMemo(() => {
+    const dir = equipSort.dir === 'asc' ? 1 : -1;
+    return [...equipGroups].sort((a, b) => equipSort.key === 'count' ? (a.count - b.count) * dir : a.type.localeCompare(b.type) * dir);
+  }, [equipGroups, equipSort]);
+  function toggleEquipSort(key: 'type' | 'count') {
+    setEquipSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'count' ? 'desc' : 'asc' });
+  }
+  const eqArrow = (key: 'type' | 'count') => equipSort.key === key ? (equipSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  // Representative (most common non-empty) value for a group column.
+  const repVal = (vals: (string | number | null)[]) => {
+    const counts = new Map<string, number>();
+    for (const v of vals) { const s = v == null ? '' : String(v).trim(); if (s) counts.set(s, (counts.get(s) || 0) + 1); }
+    if (!counts.size) return { text: '—', mixed: false };
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    return { text: sorted[0][0], mixed: counts.size > 1 };
+  };
+
   // ── Maintenance cost register, grouped by financial year ──────────────────
   const fyList = useMemo(
     () => [...new Set(maintEntries.map(e => e.fy))].filter(fy => fy !== 'Unknown').sort().reverse(),
@@ -282,7 +336,7 @@ export function FAR() {
   // ── Bulk import: file → cloud copy → AI parse → verify → register ─────────
   function resetImport() {
     setImportStage('idle'); setParsedRows([]); setImportError(null);
-    setImportedCount(0); setCloudUrl(null); setImportFileName('');
+    setImportedCount(0); setCloudUrl(null); setImportFileName(''); setImportPlantIds([]);
   }
   async function handleImportFile(file: File) {
     setImportError(null); setImportFileName(file.name); setParsedRows([]);
@@ -304,6 +358,9 @@ export function FAR() {
       const rows = await parseFarFile(file);
       if (!rows.length) throw new Error(t('far.errNoRows'));
       setParsedRows(rows);
+      // Pre-select the factory only when there's exactly one option; else force a choice.
+      const opts = allowedPlants.length ? allowedPlants : dbPlants;
+      setImportPlantIds(opts.length === 1 ? [opts[0].id] : []);
       setImportStage('review');
     } catch (e) {
       setImportError(e instanceof Error ? e.message : String(e));
@@ -311,13 +368,17 @@ export function FAR() {
     }
   }
   async function confirmImport() {
+    if (!importPlantIds.length) { setImportError('Select at least one factory this FAR belongs to.'); setImportStage('error'); return; }
     setImportStage('importing');
     try {
-      const plantId = dbPlants[0]?.id || null;
-      const payload = parsedRows.map((r) => ({
+      // A shared FAR can cover several factories → register the assets for each.
+      const payload = importPlantIds.flatMap((plantId) => parsedRows.map((r) => ({
         plant_id: plantId,
-        name: r.mark || r.model,
-        identification_mark: r.mark || r.model,
+        name: r.name || r.mark || r.model || 'Unnamed asset',
+        identification_mark: r.mark || null,
+        make: r.make || null,
+        serial_no: r.serial || null,
+        quantity: r.quantity ? (parseFloat(String(r.quantity).replace(/[^0-9.]/g, '')) || null) : null,
         model: r.model || null,
         capacity: r.capacity || null,
         origin: r.origin || null,
@@ -326,7 +387,7 @@ export function FAR() {
         invoice_no: r.invoice || null,
         purchase_date: normDate(r.purchaseDate),
         account_head: r.account || null,
-      }));
+      })));
       const { error } = await insertRows('fixed_assets', payload);
       if (error) throw error;
       setImportedCount(payload.length);
@@ -503,7 +564,7 @@ export function FAR() {
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
             <div className="text-base font-bold">{t('far.fixedAssetRegister')}</div>
-            <div className="text-xs text-slate-500">{t('far.farCardSubtitle')}</div>
+            <div className="text-xs text-slate-500">Equipment master for Preventive Maintenance — grouped by type · {equipGroups.length} types · {assets.length} assets</div>
           </div>
           <div className="flex items-center gap-2">
             <button className="chip" onClick={() => { setImportOpen(o => !o); if (importStage === 'done') resetImport(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -551,22 +612,40 @@ export function FAR() {
                   </div>
                   <button onClick={downloadImportCsv} className="chip">⬇ {t('far.downloadExtractedCsv')}</button>
                 </div>
+                {/* Which factory/factories does this FAR belong to? (multi-select — a shared FAR can cover several) */}
+                <div style={{ border: '1px solid #FDE68A', background: '#FFFDF5', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', textTransform: 'uppercase', marginBottom: 6 }}>Factory / factories this FAR belongs to *</div>
+                  <div className="flex gap-2 flex-wrap">
+                    {(allowedPlants.length ? allowedPlants : dbPlants).map(p => {
+                      const on = importPlantIds.includes(p.id);
+                      return (
+                        <button key={p.id} onClick={() => setImportPlantIds(ids => on ? ids.filter(x => x !== p.id) : [...ids, p.id])}
+                          className={`chip${on ? ' active' : ''}`}>{on ? '✓ ' : ''}{p.name}</button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#A16207', marginTop: 6 }}>
+                    {importPlantIds.length > 1
+                      ? `These ${parsedRows.length} assets will be registered for each of the ${importPlantIds.length} selected factories.`
+                      : 'Select one, or multiple if this single FAR is shared across factories.'}
+                  </div>
+                </div>
                 <div className="overflow-x-auto scroll-x" style={{ maxHeight: 280 }}>
                   <table className="dt">
-                    <thead><tr><th>{t('far.thIdMark')}</th><th>{t('far.thModel')}</th><th>{t('far.thYear')}</th><th>{t('far.thTaxableValue')}</th><th>{t('far.thInvoice')}</th><th>{t('far.thPurchaseDate')}</th><th>{t('far.thAccountHead')}</th></tr></thead>
+                    <thead><tr><th>Equipment</th><th>{t('far.thIdMark')}</th><th>Make</th><th>Serial</th><th>Qty</th><th>{t('far.thModel')}</th><th>{t('far.thYear')}</th><th>{t('far.thTaxableValue')}</th><th>{t('far.thInvoice')}</th><th>{t('far.thPurchaseDate')}</th><th>{t('far.thAccountHead')}</th></tr></thead>
                     <tbody>
                       {parsedRows.map((r, i) => {
                         const upd = (k: keyof FarImportRow, v: string) => setParsedRows(prev => prev.map((x, j) => j === i ? { ...x, [k]: v } : x));
-                        const cell = (k: keyof FarImportRow) => <td><input value={r[k]} onChange={e => upd(k, e.target.value)} style={{ width: '100%', minWidth: 90, padding: '4px 6px', border: '1px solid #FDE68A', borderRadius: 6, fontSize: 12, background: '#fff' }} /></td>;
-                        return <tr key={i}>{cell('mark')}{cell('model')}{cell('year')}{cell('value')}{cell('invoice')}{cell('purchaseDate')}{cell('account')}</tr>;
+                        const cell = (k: keyof FarImportRow, min = 90) => <td><input value={r[k]} onChange={e => upd(k, e.target.value)} style={{ width: '100%', minWidth: min, padding: '4px 6px', border: '1px solid #FDE68A', borderRadius: 6, fontSize: 12, background: '#fff' }} /></td>;
+                        return <tr key={i}>{cell('name', 140)}{cell('mark', 70)}{cell('make')}{cell('serial')}{cell('quantity', 50)}{cell('model')}{cell('year', 60)}{cell('value')}{cell('invoice')}{cell('purchaseDate')}{cell('account')}</tr>;
                       })}
                     </tbody>
                   </table>
                 </div>
                 <div className="flex gap-2 mt-3">
                   <button onClick={() => resetImport()} className="chip">{t('far.cancel')}</button>
-                  <button onClick={confirmImport} className="btn-accent pill px-4 py-2 font-semibold text-sm" style={{ background: '#16A34A' }}>
-                    ✓ {t('far.registerNAssets', { count: parsedRows.length })}
+                  <button onClick={confirmImport} disabled={!importPlantIds.length} className="btn-accent pill px-4 py-2 font-semibold text-sm" style={{ background: importPlantIds.length ? '#16A34A' : '#94A3B8', opacity: importPlantIds.length ? 1 : 0.6 }}>
+                    ✓ Register {parsedRows.length * Math.max(1, importPlantIds.length)} asset{parsedRows.length * Math.max(1, importPlantIds.length) === 1 ? '' : 's'}
                   </button>
                 </div>
               </>
@@ -582,53 +661,100 @@ export function FAR() {
           </div>
         )}
         {loadError ? (
-          <ErrorState
-            title={t('far.errLoadTitle')}
-            message={t('far.errLoadMessage')}
-            onRetry={() => { setLoading(true); setLoadError(false); load(); }}
-          />
+          <ErrorState title={t('far.errLoadTitle')} message={t('far.errLoadMessage')} onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
         ) : loading ? (
           <SkeletonRows rows={6} />
         ) : (
-        <div className="overflow-x-auto scroll-x">
-          <table className="dt">
-            <thead>
-              <tr>
-                <th>{t('far.thSlNo')}</th>
-                <th>{t('far.thIdMark')}</th>
-                <th>{t('far.thModel')}</th>
-                <th className="num">{t('far.thCapacity')}</th>
-                <th>{t('far.thOrigin')}</th>
-                <th className="num">{t('far.thYear')}</th>
-                <th className="num">{t('far.thTaxableValue')}</th>
-                <th>{t('far.thInvoiceNo')}</th>
-                <th>{t('far.thDateOfPurchase')}</th>
-                <th>{t('far.thAccountHead')}</th>
-                <th>{t('far.thPic')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assets.map((f, i) => (
-                <tr key={f.id} style={{ cursor: 'pointer' }}>
-                  <td className="num">{i + 1}</td>
-                  <td className="font-semibold text-slate-700">{f.identification_mark || f.name}</td>
-                  <td>{f.model || '—'}</td>
-                  <td className="num">{f.capacity || '—'}</td>
-                  <td>{f.origin || '—'}</td>
-                  <td className="num">{f.year || '—'}</td>
-                  <td className="num font-semibold">{f.value ? `₹ ${Number(f.value).toLocaleString('en-IN')}` : '—'}</td>
-                  <td className="text-slate-500">{f.invoice_no || '—'}</td>
-                  <td className="text-slate-500">{f.purchase_date || '—'}</td>
-                  <td className="text-slate-500">{f.account_head || '—'}</td>
-                  <td><PicBadge has={!!f.photo_url} /></td>
-                </tr>
-              ))}
-              {assets.length === 0 && (
-                <tr><td colSpan={11} className="text-center text-slate-400 py-6 text-sm">{t('far.noAssetsYet')}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+          <>
+            {/* Summary strip + expand toggle — the big list stays collapsed */}
+            <div className="flex items-center justify-between flex-wrap gap-2" style={{ background: '#FFFDF5', border: '1px solid #FDE68A', borderRadius: 12, padding: '10px 14px' }}>
+              <div style={{ fontSize: 13, color: '#92400E' }}>
+                <strong>{assets.length}</strong> asset{assets.length === 1 ? '' : 's'} · <strong>{equipGroups.length}</strong> equipment type{equipGroups.length === 1 ? '' : 's'}
+                {plantsInFar.length > 1 && <span> · {plantsInFar.length} plants</span>}
+              </div>
+              <button onClick={() => setEquipOpenTable(o => !o)} className="text-sm font-semibold" style={{ color: '#D97706', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+                {equipOpenTable ? 'Hide register ▴' : 'Show register ▾'}
+              </button>
+            </div>
+
+            {equipOpenTable && (
+              <div style={{ marginTop: 14 }}>
+                {plantsInFar.length > 1 && (
+                  <div className="flex gap-2 mb-3 flex-wrap">
+                    <button onClick={() => setEquipPlantFilter([])} className={`chip${equipPlantFilter.length === 0 ? ' active' : ''}`}>All plants</button>
+                    {plantsInFar.map(p => (
+                      <button key={p.id} onClick={() => setEquipPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])} className={`chip${equipPlantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
+                    ))}
+                    {equipPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>combined</span>}
+                  </div>
+                )}
+                <input value={equipSearch} onChange={e => setEquipSearch(e.target.value)} placeholder="Search equipment type or mark…" style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 8, padding: '7px 10px', fontSize: 13, marginBottom: 10, outline: 'none', background: '#fff' }} />
+                <div className="overflow-x-auto scroll-x" style={{ maxHeight: 460 }}>
+                  <table className="dt">
+                    <thead>
+                      <tr>
+                        <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleEquipSort('type')}>Equipment Type{eqArrow('type')}</th>
+                        <th className="num" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleEquipSort('count')}>Count{eqArrow('count')}</th>
+                        <th>Make</th><th>Model</th><th>Capacity</th><th>Year</th><th>Identification Marks</th><th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedGroups.length === 0 && <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{assets.length === 0 ? t('far.noAssetsYet') : 'No equipment matches.'}</td></tr>}
+                      {sortedGroups.map(g => {
+                        const open = expandedType === g.type;
+                        const make = repVal(g.assets.map(a => a.make));
+                        const model = repVal(g.assets.map(a => a.model));
+                        const cap = repVal(g.assets.map(a => a.capacity));
+                        const years = g.assets.map(a => a.year).filter((y): y is number => y != null);
+                        const yr = years.length ? (Math.min(...years) === Math.max(...years) ? String(Math.min(...years)) : `${Math.min(...years)}–${Math.max(...years)}`) : '—';
+                        const marks = g.assets.map(a => a.identification_mark).filter(Boolean);
+                        return (
+                          <React.Fragment key={g.type}>
+                            <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedType(open ? null : g.type)}>
+                              <td className="font-semibold text-slate-700">{open ? '▾ ' : '▸ '}{g.type}</td>
+                              <td className="num font-bold">{g.count}</td>
+                              <td className="text-slate-500 text-xs">{make.text}{make.mixed ? ' …' : ''}</td>
+                              <td className="text-slate-500 text-xs">{model.text}{model.mixed ? ' …' : ''}</td>
+                              <td className="text-slate-500 text-xs">{cap.text}{cap.mixed ? ' …' : ''}</td>
+                              <td className="text-slate-500 text-xs">{yr}</td>
+                              <td className="text-slate-500 text-xs">{marks.slice(0, 3).join(', ')}{marks.length > 3 ? ` +${marks.length - 3} more` : ''}</td>
+                              <td><span className="text-xs text-slate-400">{open ? '▴' : '▾'}</span></td>
+                            </tr>
+                            {open && (
+                              <tr>
+                                <td colSpan={8} style={{ background: '#FFFDF5', padding: 0 }}>
+                                  <div className="overflow-x-auto scroll-x">
+                                    <table className="dt" style={{ margin: 0 }}>
+                                      <thead><tr><th>Mark</th><th>Make</th><th>Serial</th><th>Model</th><th className="num">Capacity</th><th className="num">Year</th><th className="num">Value</th>{plantsInFar.length > 1 && <th>Plant</th>}<th>Pic</th></tr></thead>
+                                      <tbody>
+                                        {g.assets.map(a => (
+                                          <tr key={a.id}>
+                                            <td className="font-semibold text-slate-700">{a.identification_mark || '—'}</td>
+                                            <td className="text-slate-500 text-xs">{a.make || '—'}</td>
+                                            <td className="text-slate-500 text-xs">{a.serial_no || '—'}</td>
+                                            <td className="text-slate-500 text-xs">{a.model || '—'}</td>
+                                            <td className="num text-xs">{a.capacity || '—'}</td>
+                                            <td className="num text-xs">{a.year || '—'}</td>
+                                            <td className="num text-xs font-semibold">{a.value ? `₹ ${Number(a.value).toLocaleString('en-IN')}` : '—'}</td>
+                                            {plantsInFar.length > 1 && <td className="text-slate-500 text-xs">{a.plants?.name || '—'}</td>}
+                                            <td><PicBadge has={!!a.photo_url} /></td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

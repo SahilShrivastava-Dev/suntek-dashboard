@@ -277,6 +277,21 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['store_items']['Insert']>;
       };
 
+      pm_schedule_uploads: {
+        Row: {
+          id: string;
+          plant_id: string | null;
+          file_name: string | null;
+          file_url: string | null;
+          uploaded_by_name: string | null;
+          sheet_count: number;
+          schedule_count: number;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['pm_schedule_uploads']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['pm_schedule_uploads']['Insert']>;
+      };
+
       store_stock_events: {
         Row: {
           id: string;
@@ -650,6 +665,9 @@ export interface Database {
           plant_id: string | null;
           name: string;
           identification_mark: string | null;
+          make: string | null;
+          serial_no: string | null;
+          quantity: number | null;
           model: string | null;
           capacity: string | null;
           origin: string | null;
@@ -692,12 +710,20 @@ export interface Database {
           title: string;
           equipment: string;
           plant_id: string | null;
-          frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'biannual' | 'triannual' | 'annual';
+          frequency: 'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'bimonthly' | 'quarterly' | 'biannual' | 'triannual' | 'annual';
           description: string | null;
           assigned_to: string | null;
           is_active: boolean;
           next_due_at: string | null;
           last_completed_at: string | null;
+          far_asset_id: string | null;
+          equipment_mark: string | null;
+          start_date: string | null;
+          until_date: string | null;
+          checklist: { component: string; activity: string }[] | null;
+          requires_approval: boolean | null;
+          unmatched_justification: string | null;
+          source: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_schedules']['Row'], 'id' | 'created_at'>>;
@@ -739,6 +765,8 @@ export interface Database {
           pm_bill_url: string | null;               // supplier bill photo (aggregate)
           pm_billed_by: string | null;              // Purchase Manager who billed
           pm_billed_at: string | null;              // when the bill was uploaded
+          checklist: { component: string; activity: string; done?: boolean }[] | null; // PM checkpoints
+          requires_approval: boolean | null;        // periodic: needs unit-head verify
           pm_ocr_total: number | null;              // OCR-read total
           pm_ocr_items: number | null;              // OCR-read line-item count
           pm_ocr_status: string | null;             // 'match' | 'mismatch' | 'unread' | null

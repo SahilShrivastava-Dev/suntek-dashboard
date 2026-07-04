@@ -2,12 +2,15 @@ import React, { useState, useRef } from 'react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const FREQ_OPTIONS = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'triannual', 'annual'];
+export const FREQ_OPTIONS = ['daily', 'weekly', 'fortnightly', 'monthly', 'bimonthly', 'quarterly', 'biannual', 'triannual', 'annual'];
 export const FREQ_LABEL: Record<string, string> = {
-  daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly',
-  quarterly: 'Quarterly (3-mo)', biannual: 'Bi-annual (6-mo)', triannual: '9-monthly',
+  daily: 'Daily', weekly: 'Weekly (7d)', fortnightly: 'Fortnightly (15d)', monthly: 'Monthly',
+  bimonthly: 'Bi-monthly (2-mo)', quarterly: 'Quarterly (3-mo)', biannual: 'Bi-annual (6-mo)', triannual: '9-monthly',
   annual: 'Yearly (12-mo)',
 };
+/** Days added per frequency (months use setMonth for calendar correctness). */
+export const FREQ_DAYS: Record<string, number> = { daily: 1, weekly: 7, fortnightly: 15 };
+export const FREQ_MONTHS: Record<string, number> = { monthly: 1, bimonthly: 2, quarterly: 3, biannual: 6, triannual: 9, annual: 12 };
 
 export const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> = {
   open:                     { label: 'Open',              bg: '#DBEAFE', color: '#2563EB' },
@@ -47,7 +50,10 @@ export function formatDate(d: string | null | undefined) {
 
 export function daysFromNow(d: string | null | undefined): number | null {
   if (!d) return null;
-  return Math.floor((new Date(d).getTime() - Date.now()) / 86400000);
+  // Compare by calendar date, so a task due *today* (any time) reads as 0, not −1.
+  const due = new Date(d); due.setHours(0, 0, 0, 0);
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  return Math.round((due.getTime() - now.getTime()) / 86400000);
 }
 
 export function dueDateLabel(days: number | null): { text: string; color: string } {
@@ -58,18 +64,13 @@ export function dueDateLabel(days: number | null): { text: string; color: string
   return { text: `In ${days}d`, color: '#16A34A' };
 }
 
-export function calculateNextDue(frequency: string): string {
-  const d = new Date();
-  switch (frequency) {
-    case 'daily':     d.setDate(d.getDate() + 1); break;
-    case 'weekly':    d.setDate(d.getDate() + 7); break;
-    case 'monthly':   d.setMonth(d.getMonth() + 1); break;
-    case 'quarterly': d.setMonth(d.getMonth() + 3); break;
-    case 'biannual':  d.setMonth(d.getMonth() + 6); break;
-    case 'triannual': d.setMonth(d.getMonth() + 9); break;
-    case 'annual':    d.setFullYear(d.getFullYear() + 1); break;
-    default:          d.setDate(d.getDate() + 7);
-  }
+/** Next occurrence = `from` (or now) + the frequency interval. Pass the current
+ *  due date as `from` for calendar-anchored recurrence. */
+export function calculateNextDue(frequency: string, from?: string | Date | null): string {
+  const d = from ? new Date(from) : new Date();
+  if (FREQ_DAYS[frequency] != null) d.setDate(d.getDate() + FREQ_DAYS[frequency]);
+  else if (FREQ_MONTHS[frequency] != null) d.setMonth(d.getMonth() + FREQ_MONTHS[frequency]);
+  else d.setDate(d.getDate() + 7);
   return d.toISOString();
 }
 

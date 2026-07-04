@@ -18,6 +18,8 @@ import { useTranslation } from 'react-i18next';
 import { useDirectory, useMentionNotifier, notifyWatchers, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { similarity } from '../../../lib/blacklist/similarity';
+import { PMScheduleImport } from './PMScheduleImport';
+import { suggestAssets } from '../../../lib/far/assets';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import type { AppNotification } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
@@ -42,6 +44,42 @@ function suggestParts(query: string, stock: StoreStockItem[]): StoreStockItem[] 
     .sort((a, b) => b.score - a.score)
     .slice(0, 8)
     .map(x => x.s);
+}
+
+type FarAssetLite = { id: string; name: string; identification_mark: string | null; plant_id: string | null };
+
+/** Equipment field backed by the FAR — pick a registered asset (links it) or type
+ *  free text (allowed, flagged as not-in-FAR). */
+function FarEquipField({ value, assets, onChange, onPick }: {
+  value: string;
+  assets: FarAssetLite[];
+  onChange: (v: string) => void;
+  onPick: (asset: FarAssetLite | null) => void;
+}) {
+  const [focus, setFocus] = React.useState(false);
+  const suggestions = React.useMemo(() => suggestAssets(value, assets), [value, assets]);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input value={value}
+        onChange={e => { onChange(e.target.value); onPick(null); }}
+        onFocus={() => setFocus(true)}
+        onBlur={() => window.setTimeout(() => setFocus(false), 150)}
+        placeholder="Search the FAR — e.g. Cooling Tower CT-1, Melter M1"
+        style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+      {focus && suggestions.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10, marginTop: 4, boxShadow: '0 10px 30px rgba(0,0,0,0.15)', maxHeight: 240, overflowY: 'auto' }}>
+          {suggestions.map(s => (
+            <button key={s.asset.id} type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(`${s.asset.name}${s.asset.identification_mark ? ` (${s.asset.identification_mark})` : ''}`); onPick(s.asset); setFocus(false); }}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
+              <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.asset.name}</span>
+              <span style={{ color: '#16A34A', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.asset.identification_mark || '—'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Part-name input backed by the plant's stock register (type-ahead + free text). */
@@ -386,6 +424,8 @@ export function Maintenance() {
   const [actingReqId, setActingReqId] = useState<string | null>(null);
   const [showRaisePanel, setShowRaisePanel] = useState(false);
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
+  const [showPMImport, setShowPMImport] = useState(false);
+  const [schedPlantFilter, setSchedPlantFilter] = useState<string[]>([]); // empty = all plants
   // When set, the schedule panel is in "revise" mode editing this row; null = creating new.
   const [editingSchedule, setEditingSchedule] = useState<ScheduleRow | null>(null);
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
@@ -393,7 +433,8 @@ export function Maintenance() {
   // Form state
   const today = new Date().toISOString().split('T')[0];
   const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
-  const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
+  const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '', farAssetId: '', equipmentMark: '', until: '', unmatchedReason: '' });
+  const [farAssets, setFarAssets] = useState<{ id: string; name: string; identification_mark: string | null; plant_id: string | null }[]>([]);
   // Multi-item store request: a list of parts entered together (+ Add item).
   type StoreItem = { partName: string; quantity: string; specification: string; storeItemId: string | null };
   const BLANK_ITEM: StoreItem = { partName: '', quantity: '', specification: '', storeItemId: null };
@@ -432,6 +473,8 @@ export function Maintenance() {
 
   // Upload
   const [completionBlob, setCompletionBlob] = useState<Blob | null>(null);
+  const [completionChecklist, setCompletionChecklist] = useState<{ component: string; activity: string; done: boolean }[]>([]);
+  const [verifyingTicket, setVerifyingTicket] = useState<TicketRow | null>(null); // unit-head verification of a completed periodic ticket
   const [defectiveBlob, setDefectiveBlob] = useState<Blob | null>(null);
   const [raisePhotoBlob, setRaisePhotoBlob] = useState<Blob | null>(null); // optional defective-item photo at raise
   const [uploading, setUploading] = useState(false);
@@ -486,30 +529,44 @@ export function Maintenance() {
       setLoading(false);
     }
 
+    // Materialise due periodic tickets — batched, so importing hundreds of schedules
+    // doesn't fire hundreds of sequential inserts/notifications on load.
     if (schedulesData) {
-      for (const s of schedulesData) {
-        if (!s.is_active || !s.next_due_at) continue;
-        if (new Date(s.next_due_at) > new Date()) continue;
-        const hasOpen = (ticketsData || []).some((t) => t.schedule_id === s.id && t.status !== 'closed');
-        if (hasOpen) continue;
-        const { data: newT } = await insertRows('maintenance_tickets', {
-          type: 'periodic', status: 'open', title: s.title,
-          equipment: s.equipment, plant_id: s.plant_id || null,
-          schedule_id: s.id, description: s.description || null,
-          assigned_to: s.assigned_to || null,
-          due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
-        }).select('*, plants(name)').single();
-        if (newT) {
-          notify({
-            target_roles: ['admin', 'unit_head', 'technician_shd'],
-            title: `Periodic maintenance due: ${s.title}`,
-            body: `${s.equipment} · ${FREQ_LABEL[s.frequency] || s.frequency}`,
-            type: 'warning', route: '/dashboard/purchase/maint',
-            actor_name: 'System', actor_role: 'system', read_by: [],
-            plant_id: s.plant_id || null, unit_id: null,
+      try {
+        const nowTs = Date.now();
+        const toCreate: Record<string, unknown>[] = [];
+        const toDeactivate: string[] = [];
+        for (const s of schedulesData) {
+          if (!s.is_active || !s.next_due_at) continue;
+          if (new Date(s.next_due_at).getTime() > nowTs) continue;
+          if (s.until_date && new Date(s.next_due_at) > new Date(`${s.until_date}T23:59:59`)) { toDeactivate.push(s.id); continue; }
+          if ((ticketsData || []).some((t) => t.schedule_id === s.id && t.status !== 'closed')) continue;
+          toCreate.push({
+            type: 'periodic', status: 'open', title: s.title,
+            equipment: s.equipment, plant_id: s.plant_id || null,
+            schedule_id: s.id, description: s.description || null,
+            assigned_to: s.assigned_to || null,
+            due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
+            checklist: (s.checklist || []).map(c => ({ component: c.component, activity: c.activity, done: false })),
+            requires_approval: s.requires_approval ?? (s.frequency !== 'daily'),
           });
         }
-      }
+        if (toDeactivate.length) await (supabase.from('maintenance_schedules') as never as { update: (v: unknown) => { in: (c: string, v: string[]) => Promise<unknown> } }).update({ is_active: false }).in('id', toDeactivate);
+        if (toCreate.length) {
+          for (let i = 0; i < toCreate.length; i += 200) await insertRows('maintenance_tickets', toCreate.slice(i, i + 200) as never);
+          notify({
+            target_roles: ['admin', 'unit_head', 'technician_shd'],
+            title: `${toCreate.length} periodic maintenance task${toCreate.length === 1 ? '' : 's'} due`,
+            body: `Auto-generated from the maintenance schedule — open the Periodic tab.`,
+            type: 'warning', route: '/dashboard/purchase/maint',
+            actor_name: 'System', actor_role: 'system', read_by: [],
+            plant_id: null, unit_id: null,
+          });
+          // Reflect the new tickets without a full reload loop.
+          const { data: refreshed } = await scopeQuery(supabase.from('maintenance_tickets').select('*, plants(name)'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<TicketRow[]>();
+          if (refreshed) setTickets(refreshed);
+        }
+      } catch (e) { console.error('[Maintenance] periodic generation failed', e); }
     }
   }, [scopeQuery]);
 
@@ -551,6 +608,23 @@ export function Maintenance() {
     return () => { alive = false; };
   }, [selectedTicket?.plant_id]);
 
+  // FAR assets → the equipment dropdown when creating a schedule (validation against the register).
+  useEffect(() => {
+    let alive = true;
+    supabase.from('fixed_assets').select('id, name, identification_mark, plant_id').order('name')
+      .returns<{ id: string; name: string; identification_mark: string | null; plant_id: string | null }[]>()
+      .then(({ data }) => { if (alive) setFarAssets(data || []); });
+    return () => { alive = false; };
+  }, []);
+
+  // Seed the completion checklist from the open ticket (preserves prior ticks) or the schedule.
+  useEffect(() => {
+    if (!completingSchedule) return;
+    const lt = tickets.find(t => t.schedule_id === completingSchedule.id && t.status !== 'closed');
+    const base = (lt?.checklist as { component: string; activity: string; done?: boolean }[] | null) || completingSchedule.checklist || [];
+    setCompletionChecklist(base.map(c => ({ component: c.component, activity: c.activity, done: !!(c as { done?: boolean }).done })));
+  }, [completingSchedule]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Restrict the plant picker to the user's allowed plants (all if global) so a
   // scoped user can't raise a ticket for another plant. Falls back to the full
   // list until scope resolves.
@@ -561,6 +635,13 @@ export function Maintenance() {
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
   const periodicTickets = tickets.filter(t => t.type === 'periodic');
+  // Schedule-list plant filter (each plant has its own PM workbook).
+  const schedulePlants = (() => {
+    const m = new Map<string, string>();
+    for (const s of schedules) if (s.plant_id) m.set(s.plant_id, s.plants?.name || s.plant_id);
+    return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  const shownSchedules = schedPlantFilter.length ? schedules.filter(s => s.plant_id && schedPlantFilter.includes(s.plant_id)) : schedules;
   const emergencyTickets = tickets.filter(t => t.type === 'emergency');
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -854,11 +935,22 @@ export function Maintenance() {
     }
   }
 
+  // Advance a schedule to its next occurrence — calendar-anchored, rolls forward if
+  // behind, and self-deactivates once the "continue until" date is passed.
+  async function advanceSchedule(s: ScheduleRow) {
+    let nextDue = calculateNextDue(s.frequency, s.next_due_at || undefined);
+    let guard = 0;
+    while (new Date(nextDue) < new Date() && guard++ < 400) nextDue = calculateNextDue(s.frequency, nextDue);
+    const ended = !!s.until_date && new Date(nextDue) > new Date(`${s.until_date}T23:59:59`);
+    await updateRows('maintenance_schedules', { last_completed_at: new Date().toISOString(), next_due_at: nextDue, ...(ended ? { is_active: false } : {}) }).eq('id', s.id);
+  }
+
   async function handleCompletePeriodicTicket() {
     if (!completingSchedule || !completionBlob) return;
     setUploading(true);
     try {
-      let ticket = tickets.find(t => t.schedule_id === completingSchedule.id && t.status === 'open');
+      const requiresApproval = completingSchedule.requires_approval ?? (completingSchedule.frequency !== 'daily');
+      let ticket = tickets.find(t => t.schedule_id === completingSchedule.id && t.status !== 'closed');
       if (!ticket) {
         const { data } = await insertRows('maintenance_tickets', {
           type: 'periodic', status: 'open', title: completingSchedule.title,
@@ -867,6 +959,8 @@ export function Maintenance() {
           due_date: completingSchedule.next_due_at ? completingSchedule.next_due_at.split('T')[0] : null,
           raised_by: activeProfile.name, raised_role: role,
           assigned_to: completingSchedule.assigned_to || null,
+          checklist: completionChecklist,
+          requires_approval: requiresApproval,
         }).select('*, plants(name)').single();
         ticket = data ?? undefined;
       }
@@ -875,23 +969,53 @@ export function Maintenance() {
         ticketId: ticket.id, plantName: ticket.plants?.name || completingSchedule.plants?.name || 'Plant',
         photoType: 'completion', creator: activeProfile.name, onProgress: setUploadPct,
       });
-      await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: completingSchedule.assigned_to || activeProfile.name })
-        .eq('id', ticket.id);
-      const nextDue = calculateNextDue(completingSchedule.frequency);
-      await updateRows('maintenance_schedules', { last_completed_at: new Date().toISOString(), next_due_at: nextDue })
-        .eq('id', completingSchedule.id);
-      notify({
-        target_roles: ['admin', 'unit_head'],
-        title: `Periodic done: ${completingSchedule.title}`,
-        body: `${completingSchedule.equipment} · By ${activeProfile.name}`,
-        type: 'info', route: '/dashboard/purchase/maint',
-        actor_name: activeProfile.name, actor_role: role, read_by: [],
-        plant_id: completingSchedule.plant_id ?? null, unit_id: null,
-      });
-      setCompletingSchedule(null); setCompletionBlob(null); setUploadPct(0);
+      if (requiresApproval) {
+        // ≥ weekly → technician submits; the unit head must verify before it closes.
+        await updateRows('maintenance_tickets', { status: 'pending_unit_head', completion_photo_url: result.secure_url, checklist: completionChecklist, assigned_to: completingSchedule.assigned_to || activeProfile.name }).eq('id', ticket.id);
+        notify({
+          target_roles: ['unit_head', 'admin'],
+          title: `Verify maintenance: ${completingSchedule.title}`,
+          body: `${completingSchedule.equipment} · completed by ${activeProfile.name} · awaiting verification`,
+          type: 'warning', route: `/dashboard/purchase/maint?ticket=${ticket.id}`,
+          actor_name: activeProfile.name, actor_role: role, read_by: [],
+          plant_id: completingSchedule.plant_id ?? null, unit_id: null,
+        });
+      } else {
+        // Daily → auto-close on submit + advance immediately.
+        await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), checklist: completionChecklist, assigned_to: completingSchedule.assigned_to || activeProfile.name }).eq('id', ticket.id);
+        await advanceSchedule(completingSchedule);
+        notify({
+          target_roles: ['admin', 'unit_head'],
+          title: `Periodic done: ${completingSchedule.title}`,
+          body: `${completingSchedule.equipment} · By ${activeProfile.name}`,
+          type: 'info', route: '/dashboard/purchase/maint',
+          actor_name: activeProfile.name, actor_role: role, read_by: [],
+          plant_id: completingSchedule.plant_id ?? null, unit_id: null,
+        });
+      }
+      setCompletingSchedule(null); setCompletionBlob(null); setUploadPct(0); setCompletionChecklist([]);
       await loadData();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
+  }
+
+  // Unit-head verification of a submitted (≥weekly) periodic ticket.
+  async function verifyPeriodicTicket(ticket: TicketRow, approve: boolean) {
+    const sched = schedules.find(s => s.id === ticket.schedule_id);
+    try {
+      if (approve) {
+        await updateRows('maintenance_tickets', { status: 'closed', closed_at: new Date().toISOString() }).eq('id', ticket.id);
+        if (sched) await advanceSchedule(sched);
+        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance verified: ${ticket.title}`, body: `${ticket.equipment} · verified by ${activeProfile.name}`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
+        toast.success('Verified & closed');
+      } else {
+        await updateRows('maintenance_tickets', { status: 'open' }).eq('id', ticket.id);
+        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance sent back: ${ticket.title}`, body: `${ticket.equipment} · ${activeProfile.name} asked for rework`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
+        toast.success('Sent back for rework');
+      }
+      setVerifyingTicket(null);
+      await loadData();
+    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); }
   }
 
   async function handleRaiseStoreReq() {
@@ -1312,7 +1436,7 @@ export function Maintenance() {
     finally { setUploading(false); }
   }
 
-  const EMPTY_SCHEDULE_FORM = { title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' };
+  const EMPTY_SCHEDULE_FORM = { title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '', farAssetId: '', equipmentMark: '', until: '', unmatchedReason: '' };
 
   // Open the panel to create a brand-new schedule.
   function openAddSchedule() {
@@ -1333,6 +1457,10 @@ export function Maintenance() {
       description: s.description || '',
       firstDue: s.next_due_at ? s.next_due_at.split('T')[0] : today,
       assignedTo: s.assigned_to || '',
+      farAssetId: s.far_asset_id || '',
+      equipmentMark: s.equipment_mark || '',
+      until: s.until_date || '',
+      unmatchedReason: s.unmatched_justification || '',
     });
     setShowSchedulePanel(true);
   }
@@ -1348,6 +1476,10 @@ export function Maintenance() {
       description: s.description || '',
       firstDue: today,
       assignedTo: s.assigned_to || '',
+      farAssetId: s.far_asset_id || '',
+      equipmentMark: s.equipment_mark || '',
+      until: s.until_date || '',
+      unmatchedReason: s.unmatched_justification || '',
     });
     setShowSchedulePanel(true);
   }
@@ -1412,13 +1544,21 @@ export function Maintenance() {
     if (!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule) return;
     setSavingSchedule(true);
     try {
+    // A linked FAR asset dictates the plant — never let a mismatched selection through.
+    const linkedAsset = farAssets.find(a => a.id === scheduleForm.farAssetId);
     const plant = dbPlants.find(p => p.name === scheduleForm.plant);
     const payload = {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
-      plant_id: plant?.id || null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
+      plant_id: linkedAsset?.plant_id ?? plant?.id ?? null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
       description: scheduleForm.description || null,
       assigned_to: scheduleForm.assignedTo || null,
       next_due_at: scheduleForm.firstDue ? new Date(scheduleForm.firstDue).toISOString() : null,
+      far_asset_id: scheduleForm.farAssetId || null,
+      equipment_mark: scheduleForm.equipmentMark || null,
+      until_date: scheduleForm.until || null,
+      start_date: scheduleForm.firstDue || null,
+      requires_approval: scheduleForm.frequency !== 'daily',
+      unmatched_justification: (!scheduleForm.farAssetId && scheduleForm.unmatchedReason) ? scheduleForm.unmatchedReason : null,
     };
     const reassigned = !!editingSchedule && (editingSchedule.assigned_to || '') !== scheduleForm.assignedTo;
     if (editingSchedule) {
@@ -1993,10 +2133,12 @@ export function Maintenance() {
                   )}
                   {schedules.map(s => {
                     const linkedTicket = tickets.find(t => t.schedule_id === s.id && t.status !== 'closed');
+                    const awaitingVerify = linkedTicket?.status === 'pending_unit_head';
                     const days = daysFromNow(s.next_due_at);
                     const due = dueDateLabel(days);
                     let statusKey = 'maint.schedStatusOnTrack'; let statusBg = '#DCFCE7'; let statusColor = '#16A34A';
-                    if (linkedTicket) { statusKey = 'maint.schedStatusTicketOpen'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
+                    if (awaitingVerify) { statusKey = ''; statusBg = '#EDE9FE'; statusColor = '#7C3AED'; }
+                    else if (linkedTicket) { statusKey = 'maint.schedStatusTicketOpen'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
                     else if (days !== null && days < 0) { statusKey = 'maint.schedStatusOverdue'; statusBg = '#FEE2E2'; statusColor = '#DC2626'; }
                     else if (days !== null && days <= 3) { statusKey = 'maint.schedStatusDueSoon'; statusBg = '#FEF3C7'; statusColor = '#D97706'; }
                     return (
@@ -2007,10 +2149,14 @@ export function Maintenance() {
                         <td className="text-slate-500">{t('maint.freq_' + s.frequency, FREQ_LABEL[s.frequency] || s.frequency)}</td>
                         <td className="text-slate-500 text-xs">{s.last_completed_at ? formatDate(s.last_completed_at) : '—'}</td>
                         <td style={{ color: due.color, fontWeight: 600, fontSize: 12 }}>{due.text}</td>
-                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{t(statusKey)}</span></td>
+                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{awaitingVerify ? 'Awaiting verification' : t(statusKey)}</span></td>
                         {(isTechnician || isAdmin || isUnitHead) && (
                           <td>
-                            {(linkedTicket || (days !== null && days <= 0)) ? (
+                            {awaitingVerify ? (
+                              (isUnitHead || isAdmin)
+                                ? <button onClick={() => setVerifyingTicket(linkedTicket!)} className="pill px-3 py-1.5 font-semibold text-xs" style={{ background: '#7C3AED', color: '#fff', border: 'none', cursor: 'pointer' }}>Verify</button>
+                                : <span className="text-xs" style={{ color: '#7C3AED' }}>Awaiting verify</span>
+                            ) : (linkedTicket || (days !== null && days <= 0)) ? (
                               <button onClick={() => setCompletingSchedule(s)} className="btn-accent pill px-3 py-1.5 font-semibold text-xs">
                                 {t('maint.markComplete')}
                               </button>
@@ -2125,26 +2271,39 @@ export function Maintenance() {
               <div className="text-base font-bold">{t('maint.schedulesTitle')}</div>
               <div className="text-xs text-slate-500">{t('maint.schedulesSub')}</div>
             </div>
-            {isAdmin && (
-              <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAddSchedule}>
-                {t('maint.addSchedule')}
-              </button>
+            {(isAdmin || isUnitHead) && (
+              <div className="flex items-center gap-2">
+                <button className="chip" onClick={() => setShowPMImport(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>⬆ Import PM workbook</button>
+                <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAddSchedule}>
+                  {t('maint.addSchedule')}
+                </button>
+              </div>
             )}
           </div>
+          {/* Each plant maintains its own PM workbook — filter the register by plant. */}
+          {schedulePlants.length > 1 && (
+            <div className="flex gap-2 mb-3 flex-wrap">
+              <button onClick={() => setSchedPlantFilter([])} className={`chip${schedPlantFilter.length === 0 ? ' active' : ''}`}>All plants</button>
+              {schedulePlants.map(p => (
+                <button key={p.id} onClick={() => setSchedPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])} className={`chip${schedPlantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
+              ))}
+              {schedPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>combined</span>}
+            </div>
+          )}
           <div className="overflow-x-auto scroll-x">
             <table className="dt">
               <thead>
                 <tr>
                   <th>{t('maint.colTaskTitle')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
                   <th>{t('maint.colAssignedTo')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
-                  {isAdmin && <th>{t('maint.colActions')}</th>}
+                  {(isAdmin || isUnitHead) && <th>{t('maint.colActions')}</th>}
                 </tr>
               </thead>
               <tbody>
-                {schedules.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noSchedulesDefined')}</td></tr>
+                {shownSchedules.length === 0 && (
+                  <tr><td colSpan={(isAdmin || isUnitHead) ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noSchedulesDefined')}</td></tr>
                 )}
-                {schedules.map(s => {
+                {shownSchedules.map(s => {
                   const due = dueDateLabel(daysFromNow(s.next_due_at));
                   const paused = !s.is_active;
                   return (
@@ -2156,7 +2315,7 @@ export function Maintenance() {
                       <td>{s.assigned_to || <span className="text-slate-400">{t('maint.unassigned')}</span>}</td>
                       <td style={{ color: paused ? '#94A3B8' : due.color, fontWeight: 600 }}>{paused ? t('maint.paused') : due.text}</td>
                       <td><span className="badge" style={{ background: s.is_active ? '#DCFCE7' : '#F1F5F9', color: s.is_active ? '#16A34A' : '#94A3B8' }}>{s.is_active ? t('maint.active') : t('maint.paused')}</span></td>
-                      {isAdmin && (
+                      {(isAdmin || isUnitHead) && (
                         <td>
                           <ScheduleRowMenu
                             isActive={s.is_active}
@@ -2219,15 +2378,75 @@ export function Maintenance() {
       <SlidePanel open={!!completingSchedule} onClose={() => { setCompletingSchedule(null); setCompletionBlob(null); }} title="Mark maintenance complete" subtitle={completingSchedule?.title || 'Periodic · Maintenance'}>
         {completingSchedule && (
           <>
-            <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, padding: 14, marginBottom: 20 }}>
+            {(() => { const ra = completingSchedule.requires_approval ?? (completingSchedule.frequency !== 'daily'); const doneN = completionChecklist.filter(c => c.done).length; return (
+            <>
+            <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>{completingSchedule.equipment}</div>
               <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{FREQ_LABEL[completingSchedule.frequency]} maintenance · {completingSchedule.plants?.name || '—'}</div>
               {completingSchedule.description && <div style={{ fontSize: 12, color: '#475569', marginTop: 6 }}>{completingSchedule.description}</div>}
+              <div style={{ fontSize: 11.5, color: ra ? '#B45309' : '#16A34A', marginTop: 6, fontWeight: 600 }}>{ra ? '🔎 Needs unit-head verification after you submit.' : '✓ Daily task — closes automatically on submit.'}</div>
             </div>
+            {/* Checklist — technician ticks off each checkpoint */}
+            {completionChecklist.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Checkpoints</span><span style={{ color: doneN === completionChecklist.length ? '#16A34A' : '#94A3B8' }}>{doneN}/{completionChecklist.length} done</span>
+                </div>
+                <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, maxHeight: 220, overflowY: 'auto' }}>
+                  {completionChecklist.map((c, i) => (
+                    <label key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '8px 12px', borderBottom: i < completionChecklist.length - 1 ? '1px solid #F1F5F9' : 'none', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={c.done} onChange={e => setCompletionChecklist(prev => prev.map((x, j) => j === i ? { ...x, done: e.target.checked } : x))} style={{ marginTop: 2 }} />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: c.done ? '#94A3B8' : '#334155', textDecoration: c.done ? 'line-through' : 'none' }}>{c.component}</span>
+                        {c.activity && <span style={{ fontSize: 11.5, color: '#94A3B8' }}> · {c.activity}</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
             <PhotoUploader onBlobReady={setCompletionBlob} label="Upload completion photo *" hint="Photo of the completed maintenance work as proof" />
             {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
             <PanelDivider />
-            <PanelFooter saved={false} onCancel={() => { setCompletingSchedule(null); setCompletionBlob(null); }} onSave={handleCompletePeriodicTicket} saveLabel={uploading ? `Uploading… ${uploadPct}%` : 'Submit & close ticket'} successLabel="Ticket closed" successSub="Admin notified · next due date updated" disabled={!completionBlob || uploading} requiredHint="Upload a photo to confirm completion" />
+            <PanelFooter saved={false} onCancel={() => { setCompletingSchedule(null); setCompletionBlob(null); }} onSave={handleCompletePeriodicTicket} saveLabel={uploading ? `Uploading… ${uploadPct}%` : (ra ? 'Submit for verification' : 'Submit & close')} successLabel={ra ? 'Sent for verification' : 'Ticket closed'} successSub={ra ? 'Unit head notified to verify' : 'Next due date updated'} disabled={!completionBlob || uploading} requiredHint="Upload a photo to confirm completion" />
+            </>
+            ); })()}
+          </>
+        )}
+      </SlidePanel>
+
+      {/* ── PANEL: Verify periodic (unit head) ───────────────────────────── */}
+      <SlidePanel open={!!verifyingTicket} onClose={() => setVerifyingTicket(null)} title="Verify maintenance" subtitle={verifyingTicket?.equipment || 'Periodic · Verification'}>
+        {verifyingTicket && (
+          <>
+            <div style={{ background: '#F5F3FF', border: '1px solid #DDD6FE', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{verifyingTicket.title}</div>
+              <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{verifyingTicket.equipment} · {verifyingTicket.plants?.name || '—'} · completed by {verifyingTicket.assigned_to || '—'}</div>
+            </div>
+            {Array.isArray(verifyingTicket.checklist) && verifyingTicket.checklist.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6 }}>Checkpoints reported</div>
+                <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, maxHeight: 220, overflowY: 'auto' }}>
+                  {verifyingTicket.checklist.map((c, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 12px', borderBottom: i < verifyingTicket.checklist!.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+                      <span style={{ color: c.done ? '#16A34A' : '#CBD5E1', fontWeight: 800 }}>{c.done ? '✓' : '○'}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: '#334155' }}>{c.component}</span>
+                      {c.activity && <span style={{ fontSize: 11.5, color: '#94A3B8' }}> · {c.activity}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {verifyingTicket.completion_photo_url && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6 }}>Completion photo</div>
+                <a href={verifyingTicket.completion_photo_url} target="_blank" rel="noreferrer"><img src={verifyingTicket.completion_photo_url} alt="Completion" style={{ width: '100%', borderRadius: 10, border: '1px solid #E2E8F0' }} /></a>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => verifyPeriodicTicket(verifyingTicket, false)} style={{ flex: 1, padding: '11px', borderRadius: 12, border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#DC2626', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>↩ Send back</button>
+              <button onClick={() => verifyPeriodicTicket(verifyingTicket, true)} style={{ flex: 2, padding: '11px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>✓ Verify &amp; close</button>
+            </div>
           </>
         )}
       </SlidePanel>
@@ -2307,20 +2526,37 @@ export function Maintenance() {
         )}
       </SlidePanel>
 
+      {/* PM workbook import → FAR-validated recurring schedules */}
+      <PMScheduleImport open={showPMImport} onClose={() => setShowPMImport(false)} onImported={loadData} />
+
       {/* ── PANEL: Add / revise schedule ─────────────────────────────────── */}
       <SlidePanel open={showSchedulePanel} onClose={closeSchedulePanel} title={editingSchedule ? 'Revise maintenance schedule' : 'Add maintenance schedule'} subtitle="Schedule Setup · Maintenance">
         <PanelField label="Task title *">
           <PanelInput value={scheduleForm.title} onChange={e => setScheduleForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Boiler bearing check, Filter replacement" />
         </PanelField>
-        <PanelField label="Equipment *">
-          <PanelInput value={scheduleForm.equipment} onChange={e => setScheduleForm(f => ({ ...f, equipment: e.target.value }))} placeholder="e.g. Boiler B-01, Cooling tower pump" />
+        <PanelField label="Equipment * (from FAR)">
+          <FarEquipField
+            value={scheduleForm.equipment}
+            assets={farAssets}
+            onChange={v => setScheduleForm(f => ({ ...f, equipment: v }))}
+            onPick={a => setScheduleForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
+          />
+          {scheduleForm.equipment.trim().length > 1 && (scheduleForm.farAssetId
+            ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to FAR asset{scheduleForm.equipmentMark ? ` · ${scheduleForm.equipmentMark}` : ''}.</div>
+            : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>⚠ Not a registered FAR asset — allowed, but add a reason below (admin is notified).</div>)}
         </PanelField>
+        {scheduleForm.equipment.trim().length > 1 && !scheduleForm.farAssetId && (
+          <PanelField label="Reason (equipment not in FAR)">
+            <PanelInput value={scheduleForm.unmatchedReason} onChange={e => setScheduleForm(f => ({ ...f, unmatchedReason: e.target.value }))} placeholder="e.g. Newly installed; FAR upload pending" />
+          </PanelField>
+        )}
         <PanelRow>
-          <PanelField label="Plant">
-            <PanelSelect value={scheduleForm.plant} onChange={e => setScheduleForm(f => ({ ...f, plant: e.target.value }))}>
+          <PanelField label={scheduleForm.farAssetId ? 'Plant (set by FAR asset)' : 'Plant'}>
+            <PanelSelect value={scheduleForm.plant} disabled={!!scheduleForm.farAssetId} onChange={e => setScheduleForm(f => ({ ...f, plant: e.target.value }))}>
               <option value="">— All plants —</option>
               {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
+            {scheduleForm.farAssetId && <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>🔒 Locked to the FAR asset's plant.</div>}
           </PanelField>
           <PanelField label="Frequency">
             <PanelSelect value={scheduleForm.frequency} onChange={e => setScheduleForm(f => ({ ...f, frequency: e.target.value }))}>
@@ -2332,6 +2568,11 @@ export function Maintenance() {
           <PanelField label={editingSchedule ? 'Next due date' : 'First due date'}>
             <PanelInput type="date" value={scheduleForm.firstDue} onChange={e => setScheduleForm(f => ({ ...f, firstDue: e.target.value }))} />
           </PanelField>
+          <PanelField label="Continue until (optional)">
+            <PanelInput type="date" value={scheduleForm.until} onChange={e => setScheduleForm(f => ({ ...f, until: e.target.value }))} />
+          </PanelField>
+        </PanelRow>
+        <PanelRow>
           <PanelField label="Assign to">
             <PanelSelect value={scheduleForm.assignedTo} onChange={e => setScheduleForm(f => ({ ...f, assignedTo: e.target.value }))}>
               <option value="">— Unassigned —</option>

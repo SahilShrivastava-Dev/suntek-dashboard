@@ -108,7 +108,8 @@ function formatDate(d: string | null | undefined) {
 const BLANK_FORM = {
   name: '', mobile: '', email: '', whatsapp: '',
   // role_id = PRIMARY role (drives display + login); role_ids = full multi-role set.
-  role_id: 'night_manager', role_ids: ['night_manager'] as string[],
+  // No default role — the admin must pick one, and the first picked becomes primary.
+  role_id: '', role_ids: [] as string[],
   plant: '', designation: '',
   access_note: '', is_active: true,
   login_enabled: false, password: '',
@@ -333,8 +334,8 @@ export function UserManagement() {
       mobile: u.mobile || '',
       email: u.email || '',
       whatsapp: u.whatsapp || '',
-      role_id: u.role_id || 'night_manager',
-      role_ids: u.role_id ? [u.role_id] : [],
+      role_id: u.role_id && u.role_id !== 'night_manager' ? u.role_id : '',
+      role_ids: u.role_id && u.role_id !== 'night_manager' ? [u.role_id] : [],
       plant: u.plants?.name || u.plant_name || '',
       designation: u.designation || '',
       access_note: u.access_note || '',
@@ -354,14 +355,17 @@ export function UserManagement() {
       supabase.from('user_units').select('unit_id').eq('user_account_id', u.id).returns<{ unit_id: string }[]>(),
       supabase.from('user_roles').select('role_id').eq('user_account_id', u.id).returns<{ role_id: string }[]>(),
     ]);
-    // Keep the primary role first so it stays the display/login role.
-    const roleIds = (urs || []).map(r => r.role_id);
-    const ordered = u.role_id ? [u.role_id, ...roleIds.filter(id => id !== u.role_id)] : roleIds;
+    // Keep the primary role first so it stays the display/login role. Drop the
+    // retired night_manager role so it never re-appears as a selectable/primary role.
+    const roleIds = (urs || []).map(r => r.role_id).filter(id => id !== 'night_manager');
+    const primary = u.role_id && u.role_id !== 'night_manager' ? u.role_id : '';
+    const ordered = primary ? [primary, ...roleIds.filter(id => id !== primary)] : roleIds;
     setForm(f => ({
       ...f,
       plant_ids: (ups || []).map(r => r.plant_id),
       unit_ids: (uus || []).map(r => r.unit_id),
       role_ids: ordered.length ? ordered : f.role_ids,
+      role_id: ordered[0] || '',
     }));
   }
 

@@ -217,6 +217,99 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['stock_levels']['Insert']>;
       };
 
+      // ── Store stock ledger (Excel ingestion + living register) — migration 37 ──
+      store_stock_uploads: {
+        Row: {
+          id: string;
+          plant_id: string | null;
+          period_month: string;          // date (first of month)
+          file_name: string | null;
+          file_url: string | null;        // Cloudinary archive
+          uploaded_by: string | null;
+          uploaded_by_name: string | null;
+          row_count: number;
+          sheet_count: number;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_stock_uploads']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['store_stock_uploads']['Insert']>;
+      };
+
+      store_stock_months: {
+        Row: {
+          id: string;
+          upload_id: string | null;
+          plant_id: string | null;
+          period_month: string;           // date
+          item_name: string;
+          unit: string | null;
+          opening: number;
+          purchase_opening: number;
+          purchased: number;
+          used: number;
+          computed_closing: number;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_stock_months']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['store_stock_months']['Insert']>;
+      };
+
+      store_items: {
+        Row: {
+          id: string;
+          plant_id: string | null;
+          item_name: string;
+          unit: string | null;
+          equipment: string | null;
+          model: string | null;
+          baseline_qty: number;
+          baseline_month: string | null;  // date
+          procured_qty: number;
+          issued_qty: number;
+          manual_delta: number;
+          ticket_procured_qty: number;    // external units bought for tickets (audit only)
+          on_hand: number;
+          updated_at: string;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_items']['Row'], 'id' | 'created_at' | 'updated_at'>>;
+        Update: Partial<Database['public']['Tables']['store_items']['Insert']>;
+      };
+
+      pm_schedule_uploads: {
+        Row: {
+          id: string;
+          plant_id: string | null;
+          file_name: string | null;
+          file_url: string | null;
+          uploaded_by_name: string | null;
+          sheet_count: number;
+          schedule_count: number;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['pm_schedule_uploads']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['pm_schedule_uploads']['Insert']>;
+      };
+
+      store_stock_events: {
+        Row: {
+          id: string;
+          item_id: string | null;
+          plant_id: string | null;
+          event_type: 'baseline' | 'issue' | 'procure' | 'manual_edit' | 'rename';
+          qty_delta: number;
+          on_hand_after: number | null;
+          ref: string | null;
+          justification: string | null;
+          actor: string | null;
+          actor_name: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_stock_events']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['store_stock_events']['Insert']>;
+      };
+
       // Port + factory storage tanks (replaces the TANKS mock). See migration 0002.
       tanks: {
         Row: {
@@ -572,6 +665,9 @@ export interface Database {
           plant_id: string | null;
           name: string;
           identification_mark: string | null;
+          make: string | null;
+          serial_no: string | null;
+          quantity: number | null;
           model: string | null;
           capacity: string | null;
           origin: string | null;
@@ -614,12 +710,20 @@ export interface Database {
           title: string;
           equipment: string;
           plant_id: string | null;
-          frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'biannual' | 'triannual' | 'annual';
+          frequency: 'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'bimonthly' | 'quarterly' | 'biannual' | 'triannual' | 'annual';
           description: string | null;
           assigned_to: string | null;
           is_active: boolean;
           next_due_at: string | null;
           last_completed_at: string | null;
+          far_asset_id: string | null;
+          equipment_mark: string | null;
+          start_date: string | null;
+          until_date: string | null;
+          checklist: { component: string; activity: string }[] | null;
+          requires_approval: boolean | null;
+          unmatched_justification: string | null;
+          source: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_schedules']['Row'], 'id' | 'created_at'>>;
@@ -659,6 +763,10 @@ export interface Database {
           pm_items_count: number | null;            // Purchase Manager: declared # items
           pm_bill_total: number | null;             // Purchase Manager: declared bill total
           pm_bill_url: string | null;               // supplier bill photo (aggregate)
+          pm_billed_by: string | null;              // Purchase Manager who billed
+          pm_billed_at: string | null;              // when the bill was uploaded
+          checklist: { component: string; activity: string; done?: boolean }[] | null; // PM checkpoints
+          requires_approval: boolean | null;        // periodic: needs unit-head verify
           pm_ocr_total: number | null;              // OCR-read total
           pm_ocr_items: number | null;              // OCR-read line-item count
           pm_ocr_status: string | null;             // 'match' | 'mismatch' | 'unread' | null
@@ -698,6 +806,9 @@ export interface Database {
           handover_notes: string | null;
           handover_confirmed_at: string | null;
           bill_verified: boolean | null;
+          store_item_id: string | null;
+          split_group: string | null;
+          purchased_qty: number | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_store_requests']['Row'], 'id' | 'created_at'>>;
@@ -714,6 +825,7 @@ export interface Database {
           verified_by: string | null;
           photo_url: string | null;
           equipment: string | null;
+          note: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['activity_logs']['Row'], 'id' | 'created_at'>>;

@@ -17,6 +17,9 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { useTranslation } from 'react-i18next';
 import { useDirectory, useMentionNotifier, notifyWatchers, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
+import { similarity } from '../../../lib/blacklist/similarity';
+import { PMScheduleImport } from './PMScheduleImport';
+import { suggestAssets } from '../../../lib/far/assets';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import type { AppNotification } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
@@ -27,6 +30,92 @@ import {
 } from './maintenance/shared';
 
 type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
+
+// ── Store-inventory type-ahead ───────────────────────────────────────────────
+type StoreStockItem = { id: string; item_name: string; on_hand: number; unit: string | null };
+
+/** Rank the plant's stock items against what the technician is typing. */
+function suggestParts(query: string, stock: StoreStockItem[]): StoreStockItem[] {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return [];
+  return stock
+    .map(s => ({ s, score: s.item_name.toLowerCase().includes(q) ? 1 : similarity(q, s.item_name) }))
+    .filter(x => x.score > 0.34)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map(x => x.s);
+}
+
+type FarAssetLite = { id: string; name: string; identification_mark: string | null; plant_id: string | null };
+
+/** Equipment field backed by the FAR — pick a registered asset (links it) or type
+ *  free text (allowed, flagged as not-in-FAR). */
+function FarEquipField({ value, assets, onChange, onPick }: {
+  value: string;
+  assets: FarAssetLite[];
+  onChange: (v: string) => void;
+  onPick: (asset: FarAssetLite | null) => void;
+}) {
+  const [focus, setFocus] = React.useState(false);
+  const suggestions = React.useMemo(() => suggestAssets(value, assets), [value, assets]);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input value={value}
+        onChange={e => { onChange(e.target.value); onPick(null); }}
+        onFocus={() => setFocus(true)}
+        onBlur={() => window.setTimeout(() => setFocus(false), 150)}
+        placeholder="Search the FAR — e.g. Cooling Tower CT-1, Melter M1"
+        style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+      {focus && suggestions.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10, marginTop: 4, boxShadow: '0 10px 30px rgba(0,0,0,0.15)', maxHeight: 240, overflowY: 'auto' }}>
+          {suggestions.map(s => (
+            <button key={s.asset.id} type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(`${s.asset.name}${s.asset.identification_mark ? ` (${s.asset.identification_mark})` : ''}`); onPick(s.asset); setFocus(false); }}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
+              <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.asset.name}</span>
+              <span style={{ color: '#16A34A', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.asset.identification_mark || '—'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Part-name input backed by the plant's stock register (type-ahead + free text). */
+function PartNameField({ value, stock, onChange, onPick }: {
+  value: string;
+  stock: StoreStockItem[];
+  onChange: (v: string) => void;
+  onPick: (item: StoreStockItem | null) => void;
+}) {
+  const [focus, setFocus] = React.useState(false);
+  const suggestions = React.useMemo(() => suggestParts(value, stock), [value, stock]);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        value={value}
+        onChange={e => { onChange(e.target.value); onPick(null); }}
+        onFocus={() => setFocus(true)}
+        onBlur={() => window.setTimeout(() => setFocus(false), 150)}
+        placeholder={stock.length ? 'Type to search store — e.g. Acid Pump seal' : 'e.g. Mechanical seal, O-ring kit'}
+        style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
+      />
+      {focus && suggestions.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10, marginTop: 4, boxShadow: '0 10px 30px rgba(0,0,0,0.15)', maxHeight: 240, overflowY: 'auto' }}>
+          {suggestions.map(s => (
+            <button key={s.id} type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(s.item_name); onPick(s); setFocus(false); }}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
+              <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.item_name}</span>
+              <span style={{ color: s.on_hand > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.on_hand > 0 ? `${s.on_hand} in stock` : 'out of stock'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Full date+time for report cells (locale, IST).
 function fmtDT(d: string | null | undefined): string {
@@ -335,6 +424,8 @@ export function Maintenance() {
   const [actingReqId, setActingReqId] = useState<string | null>(null);
   const [showRaisePanel, setShowRaisePanel] = useState(false);
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
+  const [showPMImport, setShowPMImport] = useState(false);
+  const [schedPlantFilter, setSchedPlantFilter] = useState<string[]>([]); // empty = all plants
   // When set, the schedule panel is in "revise" mode editing this row; null = creating new.
   const [editingSchedule, setEditingSchedule] = useState<ScheduleRow | null>(null);
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
@@ -342,20 +433,27 @@ export function Maintenance() {
   // Form state
   const today = new Date().toISOString().split('T')[0];
   const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
-  const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' });
+  const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '', farAssetId: '', equipmentMark: '', until: '', unmatchedReason: '' });
+  const [farAssets, setFarAssets] = useState<{ id: string; name: string; identification_mark: string | null; plant_id: string | null }[]>([]);
   // Multi-item store request: a list of parts entered together (+ Add item).
-  type StoreItem = { partName: string; quantity: string; specification: string };
-  const BLANK_ITEM: StoreItem = { partName: '', quantity: '', specification: '' };
+  type StoreItem = { partName: string; quantity: string; specification: string; storeItemId: string | null };
+  const BLANK_ITEM: StoreItem = { partName: '', quantity: '', specification: '', storeItemId: null };
   const [storeItems, setStoreItems] = useState<StoreItem[]>([{ ...BLANK_ITEM }]);
   const [showStoreForm, setShowStoreForm] = useState(false);
+  // The ticket-plant's stock register — powers the part-name type-ahead.
+  const [storeStock, setStoreStock] = useState<StoreStockItem[]>([]);
 
-  // Store manager availability form
-  const [storeDecisionForm, setStoreDecisionForm] = useState({
+  // Store manager availability form. registerQty = what the stock file says (for
+  // the default + override check); qtyJustification is required if they differ.
+  const BLANK_STORE_DECISION = {
     available: null as boolean | null,
     qtyInStore: '',
     shelfLocation: '',
     partCondition: 'new',
-  });
+    registerQty: null as number | null,
+    qtyJustification: '',
+  };
+  const [storeDecisionForm, setStoreDecisionForm] = useState(BLANK_STORE_DECISION);
 
   // Handover form (store manager uploads invoice + product photo)
   const [handoverInvoiceBlob, setHandoverInvoiceBlob] = useState<Blob | null>(null);
@@ -370,10 +468,13 @@ export function Maintenance() {
   const [busyRef, setBusyRef] = useState('');
   const [unitPrice, setUnitPrice] = useState(''); // procurement unit price (₹) → feeds FAR cost
   const [supplierName, setSupplierName] = useState(''); // external vendor → recorded as a Purchase Order
+  const [purchaseQty, setPurchaseQty] = useState(''); // how many were actually bought (bulk ≥ shortfall)
   const [defectiveDecision, setDefectiveDecision] = useState<'repair' | 'scrap' | ''>('');
 
   // Upload
   const [completionBlob, setCompletionBlob] = useState<Blob | null>(null);
+  const [completionChecklist, setCompletionChecklist] = useState<{ component: string; activity: string; done: boolean }[]>([]);
+  const [verifyingTicket, setVerifyingTicket] = useState<TicketRow | null>(null); // unit-head verification of a completed periodic ticket
   const [defectiveBlob, setDefectiveBlob] = useState<Blob | null>(null);
   const [raisePhotoBlob, setRaisePhotoBlob] = useState<Blob | null>(null); // optional defective-item photo at raise
   const [uploading, setUploading] = useState(false);
@@ -428,30 +529,44 @@ export function Maintenance() {
       setLoading(false);
     }
 
+    // Materialise due periodic tickets — batched, so importing hundreds of schedules
+    // doesn't fire hundreds of sequential inserts/notifications on load.
     if (schedulesData) {
-      for (const s of schedulesData) {
-        if (!s.is_active || !s.next_due_at) continue;
-        if (new Date(s.next_due_at) > new Date()) continue;
-        const hasOpen = (ticketsData || []).some((t) => t.schedule_id === s.id && t.status !== 'closed');
-        if (hasOpen) continue;
-        const { data: newT } = await insertRows('maintenance_tickets', {
-          type: 'periodic', status: 'open', title: s.title,
-          equipment: s.equipment, plant_id: s.plant_id || null,
-          schedule_id: s.id, description: s.description || null,
-          assigned_to: s.assigned_to || null,
-          due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
-        }).select('*, plants(name)').single();
-        if (newT) {
-          notify({
-            target_roles: ['admin', 'unit_head', 'technician_shd'],
-            title: `Periodic maintenance due: ${s.title}`,
-            body: `${s.equipment} · ${FREQ_LABEL[s.frequency] || s.frequency}`,
-            type: 'warning', route: '/dashboard/purchase/maint',
-            actor_name: 'System', actor_role: 'system', read_by: [],
-            plant_id: s.plant_id || null, unit_id: null,
+      try {
+        const nowTs = Date.now();
+        const toCreate: Record<string, unknown>[] = [];
+        const toDeactivate: string[] = [];
+        for (const s of schedulesData) {
+          if (!s.is_active || !s.next_due_at) continue;
+          if (new Date(s.next_due_at).getTime() > nowTs) continue;
+          if (s.until_date && new Date(s.next_due_at) > new Date(`${s.until_date}T23:59:59`)) { toDeactivate.push(s.id); continue; }
+          if ((ticketsData || []).some((t) => t.schedule_id === s.id && t.status !== 'closed')) continue;
+          toCreate.push({
+            type: 'periodic', status: 'open', title: s.title,
+            equipment: s.equipment, plant_id: s.plant_id || null,
+            schedule_id: s.id, description: s.description || null,
+            assigned_to: s.assigned_to || null,
+            due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
+            checklist: (s.checklist || []).map(c => ({ component: c.component, activity: c.activity, done: false })),
+            requires_approval: s.requires_approval ?? (s.frequency !== 'daily'),
           });
         }
-      }
+        if (toDeactivate.length) await (supabase.from('maintenance_schedules') as never as { update: (v: unknown) => { in: (c: string, v: string[]) => Promise<unknown> } }).update({ is_active: false }).in('id', toDeactivate);
+        if (toCreate.length) {
+          for (let i = 0; i < toCreate.length; i += 200) await insertRows('maintenance_tickets', toCreate.slice(i, i + 200) as never);
+          notify({
+            target_roles: ['admin', 'unit_head', 'technician_shd'],
+            title: `${toCreate.length} periodic maintenance task${toCreate.length === 1 ? '' : 's'} due`,
+            body: `Auto-generated from the maintenance schedule — open the Periodic tab.`,
+            type: 'warning', route: '/dashboard/purchase/maint',
+            actor_name: 'System', actor_role: 'system', read_by: [],
+            plant_id: null, unit_id: null,
+          });
+          // Reflect the new tickets without a full reload loop.
+          const { data: refreshed } = await scopeQuery(supabase.from('maintenance_tickets').select('*, plants(name)'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<TicketRow[]>();
+          if (refreshed) setTickets(refreshed);
+        }
+      } catch (e) { console.error('[Maintenance] periodic generation failed', e); }
     }
   }, [scopeQuery]);
 
@@ -483,6 +598,33 @@ export function Maintenance() {
     loadStoreReqs(selectedTicket.id);
   }, [selectedTicket?.id, loadStoreReqs]);
 
+  // Load the ticket-plant's stock register → powers the part-name type-ahead.
+  useEffect(() => {
+    const pid = selectedTicket?.plant_id;
+    if (!pid) { setStoreStock([]); return; }
+    let alive = true;
+    supabase.from('store_items').select('id, item_name, on_hand, unit').eq('plant_id', pid).order('item_name')
+      .returns<StoreStockItem[]>().then(({ data }) => { if (alive) setStoreStock(data || []); });
+    return () => { alive = false; };
+  }, [selectedTicket?.plant_id]);
+
+  // FAR assets → the equipment dropdown when creating a schedule (validation against the register).
+  useEffect(() => {
+    let alive = true;
+    supabase.from('fixed_assets').select('id, name, identification_mark, plant_id').order('name')
+      .returns<{ id: string; name: string; identification_mark: string | null; plant_id: string | null }[]>()
+      .then(({ data }) => { if (alive) setFarAssets(data || []); });
+    return () => { alive = false; };
+  }, []);
+
+  // Seed the completion checklist from the open ticket (preserves prior ticks) or the schedule.
+  useEffect(() => {
+    if (!completingSchedule) return;
+    const lt = tickets.find(t => t.schedule_id === completingSchedule.id && t.status !== 'closed');
+    const base = (lt?.checklist as { component: string; activity: string; done?: boolean }[] | null) || completingSchedule.checklist || [];
+    setCompletionChecklist(base.map(c => ({ component: c.component, activity: c.activity, done: !!(c as { done?: boolean }).done })));
+  }, [completingSchedule]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Restrict the plant picker to the user's allowed plants (all if global) so a
   // scoped user can't raise a ticket for another plant. Falls back to the full
   // list until scope resolves.
@@ -493,6 +635,13 @@ export function Maintenance() {
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
   const periodicTickets = tickets.filter(t => t.type === 'periodic');
+  // Schedule-list plant filter (each plant has its own PM workbook).
+  const schedulePlants = (() => {
+    const m = new Map<string, string>();
+    for (const s of schedules) if (s.plant_id) m.set(s.plant_id, s.plants?.name || s.plant_id);
+    return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  const shownSchedules = schedPlantFilter.length ? schedules.filter(s => s.plant_id && schedPlantFilter.includes(s.plant_id)) : schedules;
   const emergencyTickets = tickets.filter(t => t.type === 'emergency');
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -786,11 +935,22 @@ export function Maintenance() {
     }
   }
 
+  // Advance a schedule to its next occurrence — calendar-anchored, rolls forward if
+  // behind, and self-deactivates once the "continue until" date is passed.
+  async function advanceSchedule(s: ScheduleRow) {
+    let nextDue = calculateNextDue(s.frequency, s.next_due_at || undefined);
+    let guard = 0;
+    while (new Date(nextDue) < new Date() && guard++ < 400) nextDue = calculateNextDue(s.frequency, nextDue);
+    const ended = !!s.until_date && new Date(nextDue) > new Date(`${s.until_date}T23:59:59`);
+    await updateRows('maintenance_schedules', { last_completed_at: new Date().toISOString(), next_due_at: nextDue, ...(ended ? { is_active: false } : {}) }).eq('id', s.id);
+  }
+
   async function handleCompletePeriodicTicket() {
     if (!completingSchedule || !completionBlob) return;
     setUploading(true);
     try {
-      let ticket = tickets.find(t => t.schedule_id === completingSchedule.id && t.status === 'open');
+      const requiresApproval = completingSchedule.requires_approval ?? (completingSchedule.frequency !== 'daily');
+      let ticket = tickets.find(t => t.schedule_id === completingSchedule.id && t.status !== 'closed');
       if (!ticket) {
         const { data } = await insertRows('maintenance_tickets', {
           type: 'periodic', status: 'open', title: completingSchedule.title,
@@ -799,6 +959,8 @@ export function Maintenance() {
           due_date: completingSchedule.next_due_at ? completingSchedule.next_due_at.split('T')[0] : null,
           raised_by: activeProfile.name, raised_role: role,
           assigned_to: completingSchedule.assigned_to || null,
+          checklist: completionChecklist,
+          requires_approval: requiresApproval,
         }).select('*, plants(name)').single();
         ticket = data ?? undefined;
       }
@@ -807,23 +969,53 @@ export function Maintenance() {
         ticketId: ticket.id, plantName: ticket.plants?.name || completingSchedule.plants?.name || 'Plant',
         photoType: 'completion', creator: activeProfile.name, onProgress: setUploadPct,
       });
-      await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), assigned_to: completingSchedule.assigned_to || activeProfile.name })
-        .eq('id', ticket.id);
-      const nextDue = calculateNextDue(completingSchedule.frequency);
-      await updateRows('maintenance_schedules', { last_completed_at: new Date().toISOString(), next_due_at: nextDue })
-        .eq('id', completingSchedule.id);
-      notify({
-        target_roles: ['admin', 'unit_head'],
-        title: `Periodic done: ${completingSchedule.title}`,
-        body: `${completingSchedule.equipment} · By ${activeProfile.name}`,
-        type: 'info', route: '/dashboard/purchase/maint',
-        actor_name: activeProfile.name, actor_role: role, read_by: [],
-        plant_id: completingSchedule.plant_id ?? null, unit_id: null,
-      });
-      setCompletingSchedule(null); setCompletionBlob(null); setUploadPct(0);
+      if (requiresApproval) {
+        // ≥ weekly → technician submits; the unit head must verify before it closes.
+        await updateRows('maintenance_tickets', { status: 'pending_unit_head', completion_photo_url: result.secure_url, checklist: completionChecklist, assigned_to: completingSchedule.assigned_to || activeProfile.name }).eq('id', ticket.id);
+        notify({
+          target_roles: ['unit_head', 'admin'],
+          title: `Verify maintenance: ${completingSchedule.title}`,
+          body: `${completingSchedule.equipment} · completed by ${activeProfile.name} · awaiting verification`,
+          type: 'warning', route: `/dashboard/purchase/maint?ticket=${ticket.id}`,
+          actor_name: activeProfile.name, actor_role: role, read_by: [],
+          plant_id: completingSchedule.plant_id ?? null, unit_id: null,
+        });
+      } else {
+        // Daily → auto-close on submit + advance immediately.
+        await updateRows('maintenance_tickets', { status: 'closed', completion_photo_url: result.secure_url, closed_at: new Date().toISOString(), checklist: completionChecklist, assigned_to: completingSchedule.assigned_to || activeProfile.name }).eq('id', ticket.id);
+        await advanceSchedule(completingSchedule);
+        notify({
+          target_roles: ['admin', 'unit_head'],
+          title: `Periodic done: ${completingSchedule.title}`,
+          body: `${completingSchedule.equipment} · By ${activeProfile.name}`,
+          type: 'info', route: '/dashboard/purchase/maint',
+          actor_name: activeProfile.name, actor_role: role, read_by: [],
+          plant_id: completingSchedule.plant_id ?? null, unit_id: null,
+        });
+      }
+      setCompletingSchedule(null); setCompletionBlob(null); setUploadPct(0); setCompletionChecklist([]);
       await loadData();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
     finally { setUploading(false); }
+  }
+
+  // Unit-head verification of a submitted (≥weekly) periodic ticket.
+  async function verifyPeriodicTicket(ticket: TicketRow, approve: boolean) {
+    const sched = schedules.find(s => s.id === ticket.schedule_id);
+    try {
+      if (approve) {
+        await updateRows('maintenance_tickets', { status: 'closed', closed_at: new Date().toISOString() }).eq('id', ticket.id);
+        if (sched) await advanceSchedule(sched);
+        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance verified: ${ticket.title}`, body: `${ticket.equipment} · verified by ${activeProfile.name}`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
+        toast.success('Verified & closed');
+      } else {
+        await updateRows('maintenance_tickets', { status: 'open' }).eq('id', ticket.id);
+        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance sent back: ${ticket.title}`, body: `${ticket.equipment} · ${activeProfile.name} asked for rework`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
+        toast.success('Sent back for rework');
+      }
+      setVerifyingTicket(null);
+      await loadData();
+    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); }
   }
 
   async function handleRaiseStoreReq() {
@@ -840,6 +1032,7 @@ export function Maintenance() {
       quantity: parseFloat(it.quantity) || null,
       specification: it.specification || null,
       plant_id: plant?.id || selectedTicket.plant_id || null,
+      store_item_id: it.storeItemId || null,
     }));
     await insertRows('maintenance_store_requests', rows);
     await updateTicketStatus(selectedTicket.id, 'pending_store');
@@ -941,29 +1134,88 @@ export function Maintenance() {
   }
 
   async function submitStoreDecision(req: StoreReqRow) {
-    if (!selectedTicket || storeDecisionForm.available === null) return;
+    if (!selectedTicket || storeDecisionForm.available === null || actionBusyRef.current) return;
     const available = storeDecisionForm.available;
+    const regQty = storeDecisionForm.registerQty;
+    const enteredQty = available ? (parseFloat(storeDecisionForm.qtyInStore) || 0) : null;
+    // The register is the default; overriding its quantity needs a justification.
+    const overrode = available && regQty != null && enteredQty != null && enteredQty !== regQty;
+    if (overrode && !storeDecisionForm.qtyJustification.trim()) {
+      toast.error('Your count differs from the register — please add a justification.');
+      return;
+    }
+    actionBusyRef.current = true;   // guard against a double-submit creating two shortfall rows
+    try {
+    // ── Partial fulfilment: if the store can't cover the full request, issue what
+    // it has and route the shortfall (requested − available) to procurement. This
+    // is what keeps stock from ever going negative. The two rows share a
+    // split_group so the UI shows them as two parallel tracks of one part. ───────
+    const requestedQty = Number(req.quantity) || 0;
+    const availQty = enteredQty ?? 0;
+    const fulfilledQty = available ? (requestedQty > 0 ? Math.min(availQty, requestedQty) : availQty) : 0;
+    const shortfall = available && requestedQty > availQty ? requestedQty - availQty : 0;
+    const splitGroup = shortfall > 0 ? req.id : null;
+
     await updateRows('maintenance_store_requests', {
         store_decision: available ? 'available' : 'unavailable',
         purchase_required: !available,
-        qty_in_store: available ? (parseFloat(storeDecisionForm.qtyInStore) || null) : null,
+        // when split, this row now represents only the part issued from store
+        quantity: available ? fulfilledQty : requestedQty,
+        qty_in_store: available ? availQty : null,
         shelf_location: available ? (storeDecisionForm.shelfLocation || null) : null,
         part_condition: available ? storeDecisionForm.partCondition : null,
+        ...(splitGroup ? { split_group: splitGroup } : {}),
       })
       .eq('id', req.id);
+
+    // Create the ONE procurement row for the shortfall → external procurement path.
+    if (shortfall > 0) {
+      await insertRows('maintenance_store_requests', {
+        ticket_id: selectedTicket.id, part_name: req.part_name, quantity: shortfall,
+        specification: `${req.specification ? req.specification + ' · ' : ''}Shortfall — ${shortfall} of ${requestedQty} not in store`,
+        plant_id: selectedTicket.plant_id, store_item_id: req.store_item_id ?? null,
+        store_decision: 'unavailable', purchase_required: true, split_group: splitGroup,
+      });
+      notify({
+        target_roles: ['admin', 'unit_head'],
+        title: `Partial stock — procure ${shortfall}× ${req.part_name}`,
+        body: `${fulfilledQty} issued from store, ${shortfall} short → procurement. Awaiting unit head approval.`,
+        type: 'warning', route: '/dashboard/purchase/maint',
+        actor_name: activeProfile.name, actor_role: role, read_by: [],
+        plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
+      });
+    }
+    // Record a register-override so admins can reconcile file vs physical count.
+    if (overrode) {
+      if (req.store_item_id) {
+        await insertRows('store_stock_events', {
+          item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'manual_edit',
+          qty_delta: (enteredQty as number) - (regQty as number), on_hand_after: null,
+          ref: `store-check · ticket ${selectedTicket.id.slice(0, 8)}`,
+          justification: `Register ${regQty} → counted ${enteredQty}. ${storeDecisionForm.qtyJustification.trim()}`,
+          actor_name: activeProfile.name,
+        });
+      }
+      await insertRows('activity_logs', {
+        equipment: `Stock check: ${req.part_name}`, type: 'stock_check_override',
+        date: new Date().toISOString().slice(0, 10), done_by: activeProfile.name, plant_id: selectedTicket.plant_id,
+        note: `Register said ${regQty}, store counted ${enteredQty}. ${storeDecisionForm.qtyJustification.trim()}`,
+      });
+    }
     notify({
       target_roles: ['admin', 'unit_head'],
       title: available ? `Part available: ${req.part_name}` : `Part not in store: ${req.part_name}`,
       body: available
-        ? `Qty: ${storeDecisionForm.qtyInStore || '?'} · Shelf: ${storeDecisionForm.shelfLocation || '—'} · Condition: ${storeDecisionForm.partCondition} · Awaiting unit head approval`
+        ? `Issuing ${fulfilledQty} from store${shortfall > 0 ? ` (${shortfall} short → procurement)` : ''}${overrode ? ` · register ${regQty}: ${storeDecisionForm.qtyJustification.trim()}` : ''} · Shelf: ${storeDecisionForm.shelfLocation || '—'} · Awaiting unit head approval`
         : `${selectedTicket.equipment} — external procurement needed. Awaiting unit head approval.`,
       type: available ? 'info' : 'warning', route: '/dashboard/purchase/maint',
       actor_name: activeProfile.name, actor_role: role, read_by: [],
       plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
     });
-    setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' });
+    setStoreDecisionForm({ ...BLANK_STORE_DECISION });
     setActingReqId(null);
     await refreshAfterItemChange();
+    } finally { actionBusyRef.current = false; }
   }
 
   async function unitHeadApprove(req: StoreReqRow, approved: boolean) {
@@ -986,14 +1238,17 @@ export function Maintenance() {
   async function markPurchased(req: StoreReqRow) {
     if (!selectedTicket || !busyRef.trim()) return;
     const supplier = supplierName.trim();
-    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null })
+    const need = Number(req.quantity) || 0;
+    // Bulk buy: default to the shortfall, but they can buy more (excess → stock on handover).
+    const bought = Math.max(need, parseFloat(purchaseQty) || need);
+    await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null, purchased_qty: bought })
       .eq('id', req.id);
     notify({ target_roles: ['purchase_manager', 'admin'], title: `Procured — Purchase Manager to bill: ${req.part_name}`, body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to upload the bill.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
     if (supplier) {
       const hits = await screenBlacklist([{ value: supplier, label: 'Supplier' }], { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment });
       if (hits.length) { const h = hits[0]; toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`); }
     }
-    setBusyRef(''); setSupplierName(''); setActingReqId(null);
+    setBusyRef(''); setSupplierName(''); setPurchaseQty(''); setActingReqId(null);
     await refreshAfterItemChange();
   }
 
@@ -1026,11 +1281,13 @@ export function Maintenance() {
         photoType: 'bill', creator: activeProfile.name, onProgress: setUploadPct,
       });
 
+      const billedAt = new Date().toISOString();
       await updateRows('maintenance_tickets', {
         pm_items_count: declaredItems, pm_bill_total: declaredTotal, pm_bill_url: r.secure_url,
+        pm_billed_by: activeProfile.name, pm_billed_at: billedAt,
         pm_ocr_total: ocrTotal, pm_ocr_items: ocrItems, pm_ocr_status: ocrStatus, pm_ocr_raw: ocrRaw, pm_mismatch: mismatch,
       }).eq('id', selectedTicket.id);
-      setSelectedTicket((t) => t ? { ...t, pm_items_count: declaredItems, pm_bill_total: declaredTotal, pm_bill_url: r.secure_url, pm_ocr_total: ocrTotal, pm_ocr_items: ocrItems, pm_ocr_status: ocrStatus, pm_mismatch: mismatch } : t);
+      setSelectedTicket((t) => t ? { ...t, pm_items_count: declaredItems, pm_bill_total: declaredTotal, pm_bill_url: r.secure_url, pm_billed_by: activeProfile.name, pm_billed_at: billedAt, pm_ocr_total: ocrTotal, pm_ocr_items: ocrItems, pm_ocr_status: ocrStatus, pm_mismatch: mismatch } : t);
 
       // Mark all procured-but-unbilled items as billed → they move to handover.
       const procured = storeReqs.filter(sr => itemStage(sr) === 'purchase_manager');
@@ -1089,6 +1346,49 @@ export function Maintenance() {
           bill_verified: true,
         })
         .eq('id', req.id);
+
+      // Decrement the store register: an own-store part linked to a stock item
+      // leaves the store on handover → issued_qty ↑, on_hand ↓, with an audit event.
+      if (req.store_item_id) {
+        const qty = Number(req.quantity) || 0;
+        if (fromOwnStore && qty > 0) {
+          // In-store track: issue from the register. Hard guard → on_hand can't go negative.
+          const { data: si } = await (supabase.from('store_items') as any).select('*').eq('id', req.store_item_id).single();
+          if (si) {
+            const issueQty = Math.min(qty, Math.max(0, Number(si.on_hand)));
+            const newOnHand = Number(si.on_hand) - issueQty;
+            await (supabase.from('store_items') as any)
+              .update({ issued_qty: Number(si.issued_qty) + issueQty, on_hand: newOnHand, updated_at: new Date().toISOString() }).eq('id', req.store_item_id);
+            await insertRows('store_stock_events', {
+              item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'issue',
+              qty_delta: -issueQty, on_hand_after: newOnHand, ref: `ticket ${selectedTicket.id.slice(0, 8)}`,
+              justification: `Handed over to technician · ${req.part_name}${issueQty < qty ? ` (only ${issueQty} of ${qty} were on hand)` : ''}`,
+              actor_name: activeProfile.name,
+            });
+          }
+        } else if (!fromOwnStore) {
+          // Procurement track: `qty` units were bought for the ticket (handed to the
+          // technician — recorded in ticket_procured_qty for visibility, does NOT change
+          // on_hand). Any BULK excess over the ticket need goes into the store (on_hand ↑).
+          const bought = Number(req.purchased_qty) || qty;
+          const excess = Math.max(0, bought - qty);
+          const { data: si } = await (supabase.from('store_items') as any).select('*').eq('id', req.store_item_id).single();
+          if (si) {
+            const newOnHand = Number(si.on_hand) + excess;
+            await (supabase.from('store_items') as any).update({
+              ticket_procured_qty: Number(si.ticket_procured_qty || 0) + qty,
+              procured_qty: Number(si.procured_qty) + excess,
+              on_hand: newOnHand, updated_at: new Date().toISOString(),
+            }).eq('id', req.store_item_id);
+            await insertRows('store_stock_events', {
+              item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'procure',
+              qty_delta: bought, on_hand_after: newOnHand, ref: req.busy_transaction_ref || `ticket ${selectedTicket.id.slice(0, 8)}`,
+              justification: `Procured ${bought} · ${qty} handed to technician${excess > 0 ? `, ${excess} added to stock` : ''} · ${req.part_name}`,
+              actor_name: activeProfile.name,
+            });
+          }
+        }
+      }
       notify({
         target_roles: ['technician_shd', 'admin', 'unit_head'],
         title: `Part handed over: ${req.part_name}`,
@@ -1136,7 +1436,7 @@ export function Maintenance() {
     finally { setUploading(false); }
   }
 
-  const EMPTY_SCHEDULE_FORM = { title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '' };
+  const EMPTY_SCHEDULE_FORM = { title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '', farAssetId: '', equipmentMark: '', until: '', unmatchedReason: '' };
 
   // Open the panel to create a brand-new schedule.
   function openAddSchedule() {
@@ -1157,6 +1457,10 @@ export function Maintenance() {
       description: s.description || '',
       firstDue: s.next_due_at ? s.next_due_at.split('T')[0] : today,
       assignedTo: s.assigned_to || '',
+      farAssetId: s.far_asset_id || '',
+      equipmentMark: s.equipment_mark || '',
+      until: s.until_date || '',
+      unmatchedReason: s.unmatched_justification || '',
     });
     setShowSchedulePanel(true);
   }
@@ -1172,6 +1476,10 @@ export function Maintenance() {
       description: s.description || '',
       firstDue: today,
       assignedTo: s.assigned_to || '',
+      farAssetId: s.far_asset_id || '',
+      equipmentMark: s.equipment_mark || '',
+      until: s.until_date || '',
+      unmatchedReason: s.unmatched_justification || '',
     });
     setShowSchedulePanel(true);
   }
@@ -1236,13 +1544,21 @@ export function Maintenance() {
     if (!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule) return;
     setSavingSchedule(true);
     try {
+    // A linked FAR asset dictates the plant — never let a mismatched selection through.
+    const linkedAsset = farAssets.find(a => a.id === scheduleForm.farAssetId);
     const plant = dbPlants.find(p => p.name === scheduleForm.plant);
     const payload = {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
-      plant_id: plant?.id || null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
+      plant_id: linkedAsset?.plant_id ?? plant?.id ?? null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
       description: scheduleForm.description || null,
       assigned_to: scheduleForm.assignedTo || null,
       next_due_at: scheduleForm.firstDue ? new Date(scheduleForm.firstDue).toISOString() : null,
+      far_asset_id: scheduleForm.farAssetId || null,
+      equipment_mark: scheduleForm.equipmentMark || null,
+      until_date: scheduleForm.until || null,
+      start_date: scheduleForm.firstDue || null,
+      requires_approval: scheduleForm.frequency !== 'daily',
+      unmatched_justification: (!scheduleForm.farAssetId && scheduleForm.unmatchedReason) ? scheduleForm.unmatchedReason : null,
     };
     const reassigned = !!editingSchedule && (editingSchedule.assigned_to || '') !== scheduleForm.assignedTo;
     if (editingSchedule) {
@@ -1302,12 +1618,17 @@ export function Maintenance() {
       case 'pending_unit_head':
         if (sr) body = <>{line('Unit head decision', sr.unit_head_approval)}{line('Part availability', sr.store_decision)}</>;
         break;
-      case 'pending_purchase':
-        if (sr) body = <>{line('BUSY transaction ref', sr.busy_transaction_ref)}{line('Supplier', sr.supplier_name)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement by unit head (price entered by Purchase Manager).</div></>;
+      case 'pending_purchase': {
+        const pr = storeReqs.find(r => r.store_decision === 'unavailable' || r.purchase_required) ?? sr;
+        if (pr) body = <>{line('Qty procured', pr.quantity)}{line('BUSY transaction ref', pr.busy_transaction_ref)}{line('Supplier', pr.supplier_name)}{line('Unit head', pr.unit_head_approval === 'approved' ? 'Approved procurement' : pr.unit_head_approval)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement for the quantity not in store.</div></>;
         break;
-      case 'pending_purchase_manager':
-        if (sr) body = <>{line('Supplier', sr.supplier_name)}{line('Unit price', sr.unit_price != null ? `₹ ${Number(sr.unit_price).toLocaleString('en-IN')}` : null)}{line('Total cost', sr.total_price != null ? `₹ ${Number(sr.total_price).toLocaleString('en-IN')}` : null)}{line('Bill uploaded', sr.bill_verified ? 'Yes' : '—')}{photo(sr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
+      }
+      case 'pending_purchase_manager': {
+        const pr = storeReqs.find(r => r.store_decision === 'unavailable' || r.purchase_required) ?? sr;
+        const amount = t.pm_bill_total ?? pr?.total_price ?? null;
+        if (pr) body = <>{line('Qty procured', pr.quantity)}{line('Purchase amount', amount != null ? `₹ ${Number(amount).toLocaleString('en-IN')}` : null)}{line('Items on bill', t.pm_items_count)}{line('Supplier', pr.supplier_name)}{line('BUSY ref', pr.busy_transaction_ref)}{line('Purchase Manager', t.pm_billed_by)}{line('Billed on', t.pm_billed_at ? formatDate(t.pm_billed_at) : null)}{line('Bill verified', pr.bill_verified ? 'Yes' : '—')}{photo(t.pm_bill_url || pr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
         break;
+      }
       case 'pending_handover':
         if (sr) body = <>{line('Receipt confirmed', sr.handover_confirmed_at ? formatDate(sr.handover_confirmed_at) : '—')}{line('Notes', sr.handover_notes)}{photo(sr.handover_invoice_url, 'Bill / invoice')}{photo(sr.handover_photo_url, 'Part received photo')}</>;
         break;
@@ -1374,7 +1695,15 @@ export function Maintenance() {
                   )}
                 </div>
                 <PanelField label="Part name *">
-                  <PanelInput value={it.partName} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, partName: e.target.value } : x))} placeholder="e.g. Mechanical seal, O-ring kit" />
+                  <PartNameField
+                    value={it.partName}
+                    stock={storeStock}
+                    onChange={v => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, partName: v } : x))}
+                    onPick={picked => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, storeItemId: picked?.id ?? null } : x))}
+                  />
+                  {it.storeItemId
+                    ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to store stock — availability will be checked automatically.</div>
+                    : (storeStock.length > 0 && it.partName.trim().length > 1 && <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>Not in store list — will be treated as a new part to procure.</div>)}
                 </PanelField>
                 <PanelRow>
                   <PanelField label="Quantity">
@@ -1447,7 +1776,8 @@ export function Maintenance() {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {storeReqs.map((req) => {
+        {(() => {
+          const renderReq = (req: StoreReqRow, grouped = false) => {
           const s = itemStage(req);
           const acting = actingReqId === req.id;
           const badge = STAGE_BADGE[s];
@@ -1456,21 +1786,54 @@ export function Maintenance() {
           const canConfirmHandover = fromOwnStore
             ? (!!handoverNotes.trim() || !!handoverPhotoBlob)
             : (!!handoverInvoiceBlob || !!handoverPhotoBlob);
+          // Map the request to the plant's stock so the store manager confirms
+          // rather than re-counts: exact link if the tech picked it, else fuzzy.
+          const linkedStock = req.store_item_id ? storeStock.find(x => x.id === req.store_item_id) ?? null : null;
+          const storeSuggestions = (s === 'store' && acting)
+            ? (linkedStock ? [linkedStock] : suggestParts(req.part_name, storeStock).slice(0, 3))
+            : [];
           return (
-            <div key={req.id} style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 14 }}>
+            <div key={req.id} style={{ border: `1px solid ${grouped ? '#F1F5F9' : '#E2E8F0'}`, borderRadius: grouped ? 10 : 14, padding: grouped ? 11 : 14, background: grouped ? '#FCFCFD' : undefined }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{req.part_name}</div>
-                  <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
-                    {req.quantity ? `Qty ${req.quantity}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
-                  </div>
+                  {grouped ? (
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#475569' }}>
+                      {req.store_decision === 'available' ? '① From store' : req.store_decision === 'unavailable' ? '② Procurement' : 'Store check'} · Qty {req.quantity ?? '—'}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{req.part_name}</div>
+                      <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
+                        {req.quantity ? `Qty ${req.quantity}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
+                      </div>
+                    </>
+                  )}
                 </div>
                 <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color, whiteSpace: 'nowrap' }}>{badge.label}</span>
               </div>
 
               {/* STORE CHECK */}
-              {s === 'store' && (storeManagerCanAct ? (acting ? (
+              {s === 'store' && (storeManagerCanAct ? (acting ? (() => {
+                const regQty = storeDecisionForm.registerQty;
+                const enteredQty = storeDecisionForm.qtyInStore.trim() === '' ? null : Number(storeDecisionForm.qtyInStore);
+                const qtyDiffers = regQty != null && enteredQty != null && enteredQty !== regQty;
+                const needJustify = qtyDiffers && !storeDecisionForm.qtyJustification.trim();
+                const reqQty = Number(req.quantity) || 0;
+                const willSplit = enteredQty != null && reqQty > 0 && enteredQty < reqQty;
+                return (
                 <div style={{ marginTop: 12 }}>
+                  {storeSuggestions.length > 0 && (
+                    <div style={{ border: '1px solid #BBF7D0', background: '#F0FDF4', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#16A34A', marginBottom: 6 }}>{linkedStock ? 'Linked to your store stock' : 'Closest match in your store — is it one of these?'}</div>
+                      {storeSuggestions.map(mi => (
+                        <div key={mi.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                          <span style={{ fontSize: 12.5, color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mi.item_name} · <strong style={{ color: mi.on_hand > 0 ? '#16A34A' : '#DC2626' }}>{mi.on_hand} in stock</strong></span>
+                          <button onClick={() => setStoreDecisionForm(f => ({ ...f, available: mi.on_hand > 0, qtyInStore: String(mi.on_hand), registerQty: Number(mi.on_hand) }))} style={{ border: '1px solid #16A34A', background: '#fff', color: '#16A34A', borderRadius: 8, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>Use {mi.on_hand}</button>
+                        </div>
+                      ))}
+                      <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 5 }}>Quantity comes from the uploaded stock file — you just confirm it, or correct it with a reason.</div>
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 8 }}>Is this part in store?</div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                     {([true, false] as const).map(v => (
@@ -1478,18 +1841,32 @@ export function Maintenance() {
                     ))}
                   </div>
                   {storeDecisionForm.available === true && (
-                    <PanelRow>
-                      <PanelField label="Qty available"><PanelInput type="number" value={storeDecisionForm.qtyInStore} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyInStore: e.target.value }))} placeholder="e.g. 3" /></PanelField>
-                      <PanelField label="Shelf / bin"><PanelInput value={storeDecisionForm.shelfLocation} onChange={e => setStoreDecisionForm(f => ({ ...f, shelfLocation: e.target.value }))} placeholder="Rack B-12" /></PanelField>
-                    </PanelRow>
+                    <>
+                      <PanelRow>
+                        <PanelField label={regQty != null ? `Qty available · register says ${regQty}` : 'Qty available'}><PanelInput type="number" value={storeDecisionForm.qtyInStore} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyInStore: e.target.value }))} placeholder="e.g. 3" /></PanelField>
+                        <PanelField label="Shelf / bin"><PanelInput value={storeDecisionForm.shelfLocation} onChange={e => setStoreDecisionForm(f => ({ ...f, shelfLocation: e.target.value }))} placeholder="Rack B-12" /></PanelField>
+                      </PanelRow>
+                      {willSplit && (
+                        <div style={{ fontSize: 11.5, color: '#7C3AED', background: '#FAF5FF', border: '1px solid #E9D5FF', borderRadius: 8, padding: '7px 10px', marginTop: 6 }}>
+                          ⤿ Only {enteredQty} of {reqQty} in store → <strong>{enteredQty} issued now</strong>, <strong>{reqQty - (enteredQty ?? 0)} sent to procurement</strong> automatically.
+                        </div>
+                      )}
+                      {qtyDiffers && (
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontSize: 11, color: '#B45309', marginBottom: 4 }}>⚠ Register says <strong>{regQty}</strong>, you entered <strong>{enteredQty}</strong> — a justification is required.</div>
+                          <PanelTextarea value={storeDecisionForm.qtyJustification} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyJustification: e.target.value }))} placeholder="Why does your count differ from the register? e.g. 2 damaged units removed; file not yet updated." />
+                        </div>
+                      )}
+                    </>
                   )}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => { setActingReqId(null); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }} style={cancelBtn}>Cancel</button>
-                    <button onClick={() => submitStoreDecision(req)} disabled={storeDecisionForm.available === null} style={{ ...primaryBtn('#F47651'), flex: 2, opacity: storeDecisionForm.available === null ? 0.4 : 1 }}>Submit to unit head</button>
+                    <button onClick={() => { setActingReqId(null); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }} style={cancelBtn}>Cancel</button>
+                    <button onClick={() => submitStoreDecision(req)} disabled={storeDecisionForm.available === null || needJustify} style={{ ...primaryBtn('#F47651'), flex: 2, opacity: (storeDecisionForm.available === null || needJustify) ? 0.4 : 1 }}>Submit to unit head</button>
                   </div>
                 </div>
-              ) : (
-                <button onClick={() => { setActingReqId(req.id); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }} style={{ ...primaryBtn('#F47651'), width: '100%', marginTop: 10 }}>Check availability</button>
+                );
+              })() : (
+                <button onClick={() => { const linked = req.store_item_id ? storeStock.find(x => x.id === req.store_item_id) : null; setActingReqId(req.id); setStoreDecisionForm({ ...BLANK_STORE_DECISION, available: linked ? Number(linked.on_hand) > 0 : null, qtyInStore: linked ? String(linked.on_hand) : '', registerQty: linked ? Number(linked.on_hand) : null }); }} style={{ ...primaryBtn('#F47651'), width: '100%', marginTop: 10 }}>Check availability</button>
               )) : <div style={awaitTxt}>Awaiting store manager…</div>)}
 
               {/* UNIT HEAD */}
@@ -1509,14 +1886,22 @@ export function Maintenance() {
               {s === 'purchase' && ((isUnitHead || isAdmin) ? (acting ? (
                 <div style={{ marginTop: 10 }}>
                   <PanelField label="BUSY transaction reference *"><PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" /></PanelField>
-                  <PanelField label="Supplier / vendor"><PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals" /></PanelField>
+                  <PanelRow>
+                    <PanelField label={`Qty purchased · need ${req.quantity ?? 0}`}><PanelInput type="number" value={purchaseQty} onChange={e => setPurchaseQty(e.target.value)} placeholder={`${req.quantity ?? ''}`} /></PanelField>
+                    <PanelField label="Supplier / vendor"><PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals" /></PanelField>
+                  </PanelRow>
+                  {req.store_item_id && (parseFloat(purchaseQty) || 0) > (Number(req.quantity) || 0) && (
+                    <div style={{ fontSize: 11.5, color: '#7C3AED', background: '#FAF5FF', border: '1px solid #E9D5FF', borderRadius: 8, padding: '6px 10px', marginBottom: 8 }}>
+                      Bought in bulk → {req.quantity} to the technician, <strong>{(parseFloat(purchaseQty) || 0) - (Number(req.quantity) || 0)} added to store stock</strong> on handover.
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => { setActingReqId(null); setBusyRef(''); setSupplierName(''); }} style={cancelBtn}>Cancel</button>
+                    <button onClick={() => { setActingReqId(null); setBusyRef(''); setSupplierName(''); setPurchaseQty(''); }} style={cancelBtn}>Cancel</button>
                     <button onClick={() => markPurchased(req)} disabled={!busyRef.trim()} style={{ ...primaryBtn('#7C3AED'), flex: 2, opacity: !busyRef.trim() ? 0.5 : 1 }}>Mark purchased</button>
                   </div>
                 </div>
               ) : (
-                <button onClick={() => { setActingReqId(req.id); setBusyRef(''); setSupplierName(''); }} style={{ ...primaryBtn('#7C3AED'), width: '100%', marginTop: 10 }}>Procure — enter BUSY ref</button>
+                <button onClick={() => { setActingReqId(req.id); setBusyRef(''); setSupplierName(''); setPurchaseQty(String(req.quantity ?? '')); }} style={{ ...primaryBtn('#7C3AED'), width: '100%', marginTop: 10 }}>Procure — enter BUSY ref</button>
               )) : <div style={awaitTxt}>Unit head procuring…</div>)}
 
               {s === 'purchase_manager' && <div style={awaitTxt}>Procured ({req.busy_transaction_ref || 'ref pending'}) · awaiting purchase bill below…</div>}
@@ -1548,7 +1933,45 @@ export function Maintenance() {
               {s === 'rejected' && <div style={{ fontSize: 12, color: '#DC2626', marginTop: 8 }}>Rejected by unit head.</div>}
             </div>
           );
-        })}
+          };
+          // Group the two parallel tracks (same split_group) under one part header.
+          const groups: StoreReqRow[][] = [];
+          const groupIdx = new Map<string, number>();
+          for (const r of storeReqs) {
+            const k = r.split_group || r.id;
+            if (groupIdx.has(k)) groups[groupIdx.get(k)!].push(r);
+            else { groupIdx.set(k, groups.length); groups.push([r]); }
+          }
+          return groups.map(group => {
+            if (group.length === 1) return renderReq(group[0]);
+            const sorted = [...group].sort((a, b) => (a.store_decision === 'available' ? 0 : 1) - (b.store_decision === 'available' ? 0 : 1));
+            const g = sorted[0];
+            const allDone = sorted.every(r => itemStage(r) === 'done');
+            const issuedQty = sorted.filter(r => r.store_decision === 'available').reduce((n, r) => n + (Number(r.quantity) || 0), 0);
+            const procuredQty = sorted.filter(r => r.store_decision === 'unavailable' || r.purchase_required).reduce((n, r) => n + (Number(r.quantity) || 0), 0);
+            const requestedQty = issuedQty + procuredQty;
+            const deliveredQty = sorted.filter(r => itemStage(r) === 'done').reduce((n, r) => n + (Number(r.quantity) || 0), 0);
+            return (
+              <div key={g.split_group || g.id} style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{g.part_name}</div>
+                    <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>Two parallel tracks — each is delivered to the technician as it completes.</div>
+                  </div>
+                  {allDone && <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#DCFCE7', color: '#16A34A', whiteSpace: 'nowrap' }}>DONE</span>}
+                </div>
+                {/* Fulfilment summary — how the requested qty is being delivered */}
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11.5, color: '#64748B', marginTop: 8, background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: '7px 10px' }}>
+                  <span>Requested <strong style={{ color: '#334155' }}>{requestedQty}</strong></span>
+                  <span>· From store <strong style={{ color: '#16A34A' }}>{issuedQty}</strong></span>
+                  <span>· Procured <strong style={{ color: '#7C3AED' }}>{procuredQty}</strong></span>
+                  <span>· Delivered <strong style={{ color: deliveredQty >= requestedQty ? '#16A34A' : '#D97706' }}>{deliveredQty}/{requestedQty}</strong></span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>{sorted.map(r => renderReq(r, true))}</div>
+              </div>
+            );
+          });
+        })()}
 
         {(isUnitHead || isAdmin) && storeReqs.some(r => itemStage(r) === 'store') && ticketUnit && (
           <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>⇄ Reroute to {UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser']} store</button>
@@ -1598,9 +2021,11 @@ export function Maintenance() {
     );
   }
 
-  // skipped stages for stage strip (pending_purchase skipped if part was in store)
-  // Part-in-store path skips both the external purchase and the purchase-manager dispatch.
-  const skippedStages = selectedTicket && selectedStoreReq?.store_decision === 'available'
+  // Skip the purchase / purchase-manager stages ONLY when NO part on this ticket
+  // went through procurement. A partial split (some in-store, some procured) means
+  // procurement DID happen → don't mark it skipped.
+  const anyProcured = storeReqs.some(sr => sr.store_decision === 'unavailable' || sr.purchase_required);
+  const skippedStages = selectedTicket && !anyProcured
     ? ['pending_purchase', 'pending_purchase_manager']
     : [];
 
@@ -1708,10 +2133,12 @@ export function Maintenance() {
                   )}
                   {schedules.map(s => {
                     const linkedTicket = tickets.find(t => t.schedule_id === s.id && t.status !== 'closed');
+                    const awaitingVerify = linkedTicket?.status === 'pending_unit_head';
                     const days = daysFromNow(s.next_due_at);
                     const due = dueDateLabel(days);
                     let statusKey = 'maint.schedStatusOnTrack'; let statusBg = '#DCFCE7'; let statusColor = '#16A34A';
-                    if (linkedTicket) { statusKey = 'maint.schedStatusTicketOpen'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
+                    if (awaitingVerify) { statusKey = ''; statusBg = '#EDE9FE'; statusColor = '#7C3AED'; }
+                    else if (linkedTicket) { statusKey = 'maint.schedStatusTicketOpen'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
                     else if (days !== null && days < 0) { statusKey = 'maint.schedStatusOverdue'; statusBg = '#FEE2E2'; statusColor = '#DC2626'; }
                     else if (days !== null && days <= 3) { statusKey = 'maint.schedStatusDueSoon'; statusBg = '#FEF3C7'; statusColor = '#D97706'; }
                     return (
@@ -1722,10 +2149,14 @@ export function Maintenance() {
                         <td className="text-slate-500">{t('maint.freq_' + s.frequency, FREQ_LABEL[s.frequency] || s.frequency)}</td>
                         <td className="text-slate-500 text-xs">{s.last_completed_at ? formatDate(s.last_completed_at) : '—'}</td>
                         <td style={{ color: due.color, fontWeight: 600, fontSize: 12 }}>{due.text}</td>
-                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{t(statusKey)}</span></td>
+                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{awaitingVerify ? 'Awaiting verification' : t(statusKey)}</span></td>
                         {(isTechnician || isAdmin || isUnitHead) && (
                           <td>
-                            {(linkedTicket || (days !== null && days <= 0)) ? (
+                            {awaitingVerify ? (
+                              (isUnitHead || isAdmin)
+                                ? <button onClick={() => setVerifyingTicket(linkedTicket!)} className="pill px-3 py-1.5 font-semibold text-xs" style={{ background: '#7C3AED', color: '#fff', border: 'none', cursor: 'pointer' }}>Verify</button>
+                                : <span className="text-xs" style={{ color: '#7C3AED' }}>Awaiting verify</span>
+                            ) : (linkedTicket || (days !== null && days <= 0)) ? (
                               <button onClick={() => setCompletingSchedule(s)} className="btn-accent pill px-3 py-1.5 font-semibold text-xs">
                                 {t('maint.markComplete')}
                               </button>
@@ -1840,26 +2271,39 @@ export function Maintenance() {
               <div className="text-base font-bold">{t('maint.schedulesTitle')}</div>
               <div className="text-xs text-slate-500">{t('maint.schedulesSub')}</div>
             </div>
-            {isAdmin && (
-              <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAddSchedule}>
-                {t('maint.addSchedule')}
-              </button>
+            {(isAdmin || isUnitHead) && (
+              <div className="flex items-center gap-2">
+                <button className="chip" onClick={() => setShowPMImport(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>⬆ Import PM workbook</button>
+                <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAddSchedule}>
+                  {t('maint.addSchedule')}
+                </button>
+              </div>
             )}
           </div>
+          {/* Each plant maintains its own PM workbook — filter the register by plant. */}
+          {schedulePlants.length > 1 && (
+            <div className="flex gap-2 mb-3 flex-wrap">
+              <button onClick={() => setSchedPlantFilter([])} className={`chip${schedPlantFilter.length === 0 ? ' active' : ''}`}>All plants</button>
+              {schedulePlants.map(p => (
+                <button key={p.id} onClick={() => setSchedPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])} className={`chip${schedPlantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
+              ))}
+              {schedPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>combined</span>}
+            </div>
+          )}
           <div className="overflow-x-auto scroll-x">
             <table className="dt">
               <thead>
                 <tr>
                   <th>{t('maint.colTaskTitle')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
                   <th>{t('maint.colAssignedTo')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
-                  {isAdmin && <th>{t('maint.colActions')}</th>}
+                  {(isAdmin || isUnitHead) && <th>{t('maint.colActions')}</th>}
                 </tr>
               </thead>
               <tbody>
-                {schedules.length === 0 && (
-                  <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noSchedulesDefined')}</td></tr>
+                {shownSchedules.length === 0 && (
+                  <tr><td colSpan={(isAdmin || isUnitHead) ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noSchedulesDefined')}</td></tr>
                 )}
-                {schedules.map(s => {
+                {shownSchedules.map(s => {
                   const due = dueDateLabel(daysFromNow(s.next_due_at));
                   const paused = !s.is_active;
                   return (
@@ -1871,7 +2315,7 @@ export function Maintenance() {
                       <td>{s.assigned_to || <span className="text-slate-400">{t('maint.unassigned')}</span>}</td>
                       <td style={{ color: paused ? '#94A3B8' : due.color, fontWeight: 600 }}>{paused ? t('maint.paused') : due.text}</td>
                       <td><span className="badge" style={{ background: s.is_active ? '#DCFCE7' : '#F1F5F9', color: s.is_active ? '#16A34A' : '#94A3B8' }}>{s.is_active ? t('maint.active') : t('maint.paused')}</span></td>
-                      {isAdmin && (
+                      {(isAdmin || isUnitHead) && (
                         <td>
                           <ScheduleRowMenu
                             isActive={s.is_active}
@@ -1934,15 +2378,75 @@ export function Maintenance() {
       <SlidePanel open={!!completingSchedule} onClose={() => { setCompletingSchedule(null); setCompletionBlob(null); }} title="Mark maintenance complete" subtitle={completingSchedule?.title || 'Periodic · Maintenance'}>
         {completingSchedule && (
           <>
-            <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, padding: 14, marginBottom: 20 }}>
+            {(() => { const ra = completingSchedule.requires_approval ?? (completingSchedule.frequency !== 'daily'); const doneN = completionChecklist.filter(c => c.done).length; return (
+            <>
+            <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>{completingSchedule.equipment}</div>
               <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{FREQ_LABEL[completingSchedule.frequency]} maintenance · {completingSchedule.plants?.name || '—'}</div>
               {completingSchedule.description && <div style={{ fontSize: 12, color: '#475569', marginTop: 6 }}>{completingSchedule.description}</div>}
+              <div style={{ fontSize: 11.5, color: ra ? '#B45309' : '#16A34A', marginTop: 6, fontWeight: 600 }}>{ra ? '🔎 Needs unit-head verification after you submit.' : '✓ Daily task — closes automatically on submit.'}</div>
             </div>
+            {/* Checklist — technician ticks off each checkpoint */}
+            {completionChecklist.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Checkpoints</span><span style={{ color: doneN === completionChecklist.length ? '#16A34A' : '#94A3B8' }}>{doneN}/{completionChecklist.length} done</span>
+                </div>
+                <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, maxHeight: 220, overflowY: 'auto' }}>
+                  {completionChecklist.map((c, i) => (
+                    <label key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '8px 12px', borderBottom: i < completionChecklist.length - 1 ? '1px solid #F1F5F9' : 'none', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={c.done} onChange={e => setCompletionChecklist(prev => prev.map((x, j) => j === i ? { ...x, done: e.target.checked } : x))} style={{ marginTop: 2 }} />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: c.done ? '#94A3B8' : '#334155', textDecoration: c.done ? 'line-through' : 'none' }}>{c.component}</span>
+                        {c.activity && <span style={{ fontSize: 11.5, color: '#94A3B8' }}> · {c.activity}</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
             <PhotoUploader onBlobReady={setCompletionBlob} label="Upload completion photo *" hint="Photo of the completed maintenance work as proof" />
             {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
             <PanelDivider />
-            <PanelFooter saved={false} onCancel={() => { setCompletingSchedule(null); setCompletionBlob(null); }} onSave={handleCompletePeriodicTicket} saveLabel={uploading ? `Uploading… ${uploadPct}%` : 'Submit & close ticket'} successLabel="Ticket closed" successSub="Admin notified · next due date updated" disabled={!completionBlob || uploading} requiredHint="Upload a photo to confirm completion" />
+            <PanelFooter saved={false} onCancel={() => { setCompletingSchedule(null); setCompletionBlob(null); }} onSave={handleCompletePeriodicTicket} saveLabel={uploading ? `Uploading… ${uploadPct}%` : (ra ? 'Submit for verification' : 'Submit & close')} successLabel={ra ? 'Sent for verification' : 'Ticket closed'} successSub={ra ? 'Unit head notified to verify' : 'Next due date updated'} disabled={!completionBlob || uploading} requiredHint="Upload a photo to confirm completion" />
+            </>
+            ); })()}
+          </>
+        )}
+      </SlidePanel>
+
+      {/* ── PANEL: Verify periodic (unit head) ───────────────────────────── */}
+      <SlidePanel open={!!verifyingTicket} onClose={() => setVerifyingTicket(null)} title="Verify maintenance" subtitle={verifyingTicket?.equipment || 'Periodic · Verification'}>
+        {verifyingTicket && (
+          <>
+            <div style={{ background: '#F5F3FF', border: '1px solid #DDD6FE', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{verifyingTicket.title}</div>
+              <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{verifyingTicket.equipment} · {verifyingTicket.plants?.name || '—'} · completed by {verifyingTicket.assigned_to || '—'}</div>
+            </div>
+            {Array.isArray(verifyingTicket.checklist) && verifyingTicket.checklist.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6 }}>Checkpoints reported</div>
+                <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, maxHeight: 220, overflowY: 'auto' }}>
+                  {verifyingTicket.checklist.map((c, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 12px', borderBottom: i < verifyingTicket.checklist!.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+                      <span style={{ color: c.done ? '#16A34A' : '#CBD5E1', fontWeight: 800 }}>{c.done ? '✓' : '○'}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: '#334155' }}>{c.component}</span>
+                      {c.activity && <span style={{ fontSize: 11.5, color: '#94A3B8' }}> · {c.activity}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {verifyingTicket.completion_photo_url && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6 }}>Completion photo</div>
+                <a href={verifyingTicket.completion_photo_url} target="_blank" rel="noreferrer"><img src={verifyingTicket.completion_photo_url} alt="Completion" style={{ width: '100%', borderRadius: 10, border: '1px solid #E2E8F0' }} /></a>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => verifyPeriodicTicket(verifyingTicket, false)} style={{ flex: 1, padding: '11px', borderRadius: 12, border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#DC2626', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>↩ Send back</button>
+              <button onClick={() => verifyPeriodicTicket(verifyingTicket, true)} style={{ flex: 2, padding: '11px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>✓ Verify &amp; close</button>
+            </div>
           </>
         )}
       </SlidePanel>
@@ -1950,7 +2454,7 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ available: null, qtyInStore: '', shelfLocation: '', partCondition: 'new' }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
       >
@@ -2022,20 +2526,37 @@ export function Maintenance() {
         )}
       </SlidePanel>
 
+      {/* PM workbook import → FAR-validated recurring schedules */}
+      <PMScheduleImport open={showPMImport} onClose={() => setShowPMImport(false)} onImported={loadData} />
+
       {/* ── PANEL: Add / revise schedule ─────────────────────────────────── */}
       <SlidePanel open={showSchedulePanel} onClose={closeSchedulePanel} title={editingSchedule ? 'Revise maintenance schedule' : 'Add maintenance schedule'} subtitle="Schedule Setup · Maintenance">
         <PanelField label="Task title *">
           <PanelInput value={scheduleForm.title} onChange={e => setScheduleForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Boiler bearing check, Filter replacement" />
         </PanelField>
-        <PanelField label="Equipment *">
-          <PanelInput value={scheduleForm.equipment} onChange={e => setScheduleForm(f => ({ ...f, equipment: e.target.value }))} placeholder="e.g. Boiler B-01, Cooling tower pump" />
+        <PanelField label="Equipment * (from FAR)">
+          <FarEquipField
+            value={scheduleForm.equipment}
+            assets={farAssets}
+            onChange={v => setScheduleForm(f => ({ ...f, equipment: v }))}
+            onPick={a => setScheduleForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
+          />
+          {scheduleForm.equipment.trim().length > 1 && (scheduleForm.farAssetId
+            ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to FAR asset{scheduleForm.equipmentMark ? ` · ${scheduleForm.equipmentMark}` : ''}.</div>
+            : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>⚠ Not a registered FAR asset — allowed, but add a reason below (admin is notified).</div>)}
         </PanelField>
+        {scheduleForm.equipment.trim().length > 1 && !scheduleForm.farAssetId && (
+          <PanelField label="Reason (equipment not in FAR)">
+            <PanelInput value={scheduleForm.unmatchedReason} onChange={e => setScheduleForm(f => ({ ...f, unmatchedReason: e.target.value }))} placeholder="e.g. Newly installed; FAR upload pending" />
+          </PanelField>
+        )}
         <PanelRow>
-          <PanelField label="Plant">
-            <PanelSelect value={scheduleForm.plant} onChange={e => setScheduleForm(f => ({ ...f, plant: e.target.value }))}>
+          <PanelField label={scheduleForm.farAssetId ? 'Plant (set by FAR asset)' : 'Plant'}>
+            <PanelSelect value={scheduleForm.plant} disabled={!!scheduleForm.farAssetId} onChange={e => setScheduleForm(f => ({ ...f, plant: e.target.value }))}>
               <option value="">— All plants —</option>
               {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
+            {scheduleForm.farAssetId && <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>🔒 Locked to the FAR asset's plant.</div>}
           </PanelField>
           <PanelField label="Frequency">
             <PanelSelect value={scheduleForm.frequency} onChange={e => setScheduleForm(f => ({ ...f, frequency: e.target.value }))}>
@@ -2047,6 +2568,11 @@ export function Maintenance() {
           <PanelField label={editingSchedule ? 'Next due date' : 'First due date'}>
             <PanelInput type="date" value={scheduleForm.firstDue} onChange={e => setScheduleForm(f => ({ ...f, firstDue: e.target.value }))} />
           </PanelField>
+          <PanelField label="Continue until (optional)">
+            <PanelInput type="date" value={scheduleForm.until} onChange={e => setScheduleForm(f => ({ ...f, until: e.target.value }))} />
+          </PanelField>
+        </PanelRow>
+        <PanelRow>
           <PanelField label="Assign to">
             <PanelSelect value={scheduleForm.assignedTo} onChange={e => setScheduleForm(f => ({ ...f, assignedTo: e.target.value }))}>
               <option value="">— Unassigned —</option>

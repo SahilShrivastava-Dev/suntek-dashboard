@@ -11,6 +11,7 @@ import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { OcrUploadCard } from '../../../components/OcrUploadCard';
+import { AddPurchaseModal } from './AddPurchaseModal';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import type { Database } from '../../../lib/database.types';
 
@@ -57,6 +58,7 @@ export function PurchaseOrders() {
   const screenBlacklist = useBlacklistGuard();
   const [filter, setFilter] = useState('all');
   const [open, setOpen] = useState(false);
+  const [showPurchase, setShowPurchase] = useState(false);
   const [saved, setSaved] = useState(false);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [maintPOs, setMaintPOs] = useState<MaintPO[]>([]); // derived from the maintenance flow
@@ -169,6 +171,16 @@ export function PurchaseOrders() {
     <>
       {/* Purchase sheet OCR upload — management/finance only */}
       {CAN_UPLOAD_SHEET.includes(activeProfile.id) && <OcrUploadCard kind="purchase" />}
+
+      {/* Add purchased spares to the stock register (bill AI or manual) */}
+      <div className="card p-6 mb-5" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div className="text-base font-bold">Add purchase to stock register</div>
+          <div className="text-xs text-slate-500">Bought new spares? Upload the bill (image / PDF) to auto-read items &amp; quantities, or enter them manually — matched items increment, new items are created.</div>
+        </div>
+        <button onClick={() => setShowPurchase(true)} className="btn-accent pill px-4 py-2 font-semibold text-sm">＋ Add purchase</button>
+      </div>
+      <AddPurchaseModal open={showPurchase} onClose={() => setShowPurchase(false)} onApplied={() => {}} />
 
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-5 mb-5">

@@ -34,6 +34,9 @@ type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
 // ── Store-inventory type-ahead ───────────────────────────────────────────────
 type StoreStockItem = { id: string; item_name: string; on_hand: number; unit: string | null };
 
+// Measurement units a requested part can be recorded in (count / weight / volume).
+const STORE_UNITS = ['Units', 'mg', 'g', 'kg', 'mL', 'L'];
+
 /** Rank the plant's stock items against what the technician is typing. */
 function suggestParts(query: string, stock: StoreStockItem[]): StoreStockItem[] {
   const q = query.trim().toLowerCase();
@@ -436,8 +439,8 @@ export function Maintenance() {
   const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '', farAssetId: '', equipmentMark: '', until: '', unmatchedReason: '' });
   const [farAssets, setFarAssets] = useState<{ id: string; name: string; identification_mark: string | null; plant_id: string | null }[]>([]);
   // Multi-item store request: a list of parts entered together (+ Add item).
-  type StoreItem = { partName: string; quantity: string; specification: string; storeItemId: string | null };
-  const BLANK_ITEM: StoreItem = { partName: '', quantity: '', specification: '', storeItemId: null };
+  type StoreItem = { partName: string; quantity: string; unit: string; specification: string; storeItemId: string | null };
+  const BLANK_ITEM: StoreItem = { partName: '', quantity: '', unit: 'Units', specification: '', storeItemId: null };
   const [storeItems, setStoreItems] = useState<StoreItem[]>([{ ...BLANK_ITEM }]);
   const [showStoreForm, setShowStoreForm] = useState(false);
   // The ticket-plant's stock register — powers the part-name type-ahead.
@@ -1030,6 +1033,7 @@ export function Maintenance() {
     const rows = items.map(it => ({
       ticket_id: selectedTicket.id, part_name: it.partName,
       quantity: parseFloat(it.quantity) || null,
+      unit: it.unit || 'Units',
       specification: it.specification || null,
       plant_id: plant?.id || selectedTicket.plant_id || null,
       store_item_id: it.storeItemId || null,
@@ -1699,7 +1703,7 @@ export function Maintenance() {
                     value={it.partName}
                     stock={storeStock}
                     onChange={v => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, partName: v } : x))}
-                    onPick={picked => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, storeItemId: picked?.id ?? null } : x))}
+                    onPick={picked => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, storeItemId: picked?.id ?? null, unit: picked?.unit || x.unit } : x))}
                   />
                   {it.storeItemId
                     ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to store stock — availability will be checked automatically.</div>
@@ -1708,6 +1712,13 @@ export function Maintenance() {
                 <PanelRow>
                   <PanelField label="Quantity">
                     <PanelInput type="number" value={it.quantity} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} placeholder="e.g. 2" />
+                  </PanelField>
+                  <PanelField label="Unit">
+                    <PanelSelect value={it.unit} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, unit: e.target.value } : x))}>
+                      {STORE_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      {/* keep a registry-supplied unit selectable even if it's outside the standard list */}
+                      {it.unit && !STORE_UNITS.includes(it.unit) && <option value={it.unit}>{it.unit}</option>}
+                    </PanelSelect>
                   </PanelField>
                 </PanelRow>
                 <PanelField label="Specification / quality">
@@ -1798,13 +1809,13 @@ export function Maintenance() {
                 <div style={{ minWidth: 0 }}>
                   {grouped ? (
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: '#475569' }}>
-                      {req.store_decision === 'available' ? '① From store' : req.store_decision === 'unavailable' ? '② Procurement' : 'Store check'} · Qty {req.quantity ?? '—'}
+                      {req.store_decision === 'available' ? '① From store' : req.store_decision === 'unavailable' ? '② Procurement' : 'Store check'} · Qty {req.quantity ?? '—'}{req.quantity != null && req.unit ? ` ${req.unit}` : ''}
                     </div>
                   ) : (
                     <>
                       <div style={{ fontSize: 14, fontWeight: 700 }}>{req.part_name}</div>
                       <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
-                        {req.quantity ? `Qty ${req.quantity}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
+                        {req.quantity ? `Qty ${req.quantity}${req.unit ? ` ${req.unit}` : ''}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
                       </div>
                     </>
                   )}

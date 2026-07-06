@@ -789,6 +789,7 @@ export interface Database {
           ticket_id: string;
           part_name: string;
           quantity: number | null;
+          unit: string | null;            // Units | mg | g | kg | mL | L
           specification: string | null;
           plant_id: string | null;
           store_decision: 'available' | 'unavailable' | null;

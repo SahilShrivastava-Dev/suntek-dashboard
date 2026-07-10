@@ -3,6 +3,8 @@ import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows } from '../../../components/ui/states';
+import { usePagination } from '../../../components/ui/usePagination';
+import { TablePagination } from '../../../components/ui/TablePagination';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
@@ -124,12 +126,31 @@ export function StockRegister() {
   const plantOptions = allowedPlants.length > 0 ? allowedPlants as Plant[] : plants;
   const plantName = (id: string | null) => plants.find(p => p.id === id)?.name || '—';
 
-  // Live anomalies from persisted snapshots (latest two months).
+  // Live anomalies from persisted snapshots (latest two months). Respects the active
+  // store filter so the count always matches the visible table (fixes the count being
+  // stuck at the all-plants total when a single store is selected). Each plant is
+  // reconciled independently — same-named items in different plants are distinct — then
+  // the per-plant anomalies are combined.
   const anomalies = useMemo(() => {
-    const ms = monthsFromRows(months);
-    if (!ms.length) return [];
-    return reconcile(ms.length >= 2 ? ms[ms.length - 2] : null, ms[ms.length - 1]);
-  }, [months]);
+    const scoped = plantFilter.length ? months.filter(m => m.plant_id && plantFilter.includes(m.plant_id)) : months;
+    if (!scoped.length) return [];
+    const byPlant = new Map<string, StockMonthRow[]>();
+    for (const r of scoped) {
+      const k = r.plant_id || '—';
+      const arr = byPlant.get(k);
+      if (arr) arr.push(r); else byPlant.set(k, [r]);
+    }
+    const out: (Anomaly & { plant?: string })[] = [];
+    for (const [pid, rows] of byPlant.entries()) {
+      const ms = monthsFromRows(rows);
+      if (!ms.length) continue;
+      const plant = pid === '—' ? undefined : plantName(pid);
+      for (const a of reconcile(ms.length >= 2 ? ms[ms.length - 2] : null, ms[ms.length - 1])) {
+        out.push({ ...a, plant });
+      }
+    }
+    return out;
+  }, [months, plantFilter, plants]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const latestUpload = useMemo(() => {
     if (!months.length) return null;
@@ -186,6 +207,9 @@ export function StockRegister() {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir(key === 'item' ? 'asc' : 'desc'); }
   }
+
+  // Paginate the register — it can hold hundreds of items per plant.
+  const { pageRows, controls } = usePagination(sortedMerged, { resetKey: `${search}|${plantFilter.join(',')}|${sortKey}|${sortDir}` });
   const arrow = (key: typeof sortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
 
   // ── Import ──────────────────────────────────────────────────────────────────
@@ -381,7 +405,10 @@ export function StockRegister() {
                         <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, background: '#fff', border: '1px solid #FDE68A', borderRadius: 8, padding: '7px 10px' }}>
                           <span title={ANOM_META[a.type].label}>{ANOM_META[a.type].icon}</span>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontWeight: 600, color: '#334155' }}>{a.item}</div>
+                            <div style={{ fontWeight: 600, color: '#334155' }}>
+                              {a.item}
+                              {a.plant && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: '#B45309', background: '#FEF3C7', borderRadius: 6, padding: '1px 6px' }}>{a.plant}</span>}
+                            </div>
                             <div style={{ color: '#64748B' }}>{a.detail}</div>
                           </div>
                         </div>
@@ -404,7 +431,7 @@ export function StockRegister() {
                   </thead>
                   <tbody>
                     {sortedMerged.length === 0 && <tr><td colSpan={multiStore ? 9 : 8} className="text-center text-slate-400 py-6 text-sm">No items match.</td></tr>}
-                    {sortedMerged.map(m => {
+                    {pageRows.map(m => {
                       const st = stockStatus(m.onHand);
                       const isOpen = expanded === m.key;
                       const single = m.stores.length === 1;
@@ -445,6 +472,7 @@ export function StockRegister() {
                   </tbody>
                 </table>
               </div>
+              <TablePagination controls={controls} />
             </div>
           )}
         </>

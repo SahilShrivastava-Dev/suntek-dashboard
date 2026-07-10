@@ -2,6 +2,8 @@ import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+import { useRoleContext } from '../../../contexts/RoleContext';
+import { profileCanAccess } from '../../../lib/profiles';
 
 // Each subtab maps to the Supabase table that backs its page. The badge shows
 // the live row count for that table (hidden when zero) — no hardcoded numbers.
@@ -18,14 +20,23 @@ export function PurchaseLayout() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const { activeProfile } = useRoleContext();
   const [counts, setCounts] = React.useState<Record<string, number>>({});
 
-  // Fetch live row counts for each tab (count-only, no rows downloaded).
+  // Only show sub-tabs the current role can actually open — mirrors the sidebar's
+  // permission gating (Sidebar visiblePurchaseTabs). A technician sees just Maintenance,
+  // not FAR/Activity/Store Req/POs that would otherwise route to "Access Restricted".
+  const visibleTabs = React.useMemo(
+    () => SUBTABS.filter(tab => profileCanAccess(activeProfile, `/dashboard/purchase/${tab.id}`)),
+    [activeProfile],
+  );
+
+  // Fetch live row counts for each visible tab (count-only, no rows downloaded).
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       const results = await Promise.all(
-        SUBTABS.map(async (tab) => {
+        visibleTabs.map(async (tab) => {
           const { count, error } = await supabase
             .from(tab.table)
             .select('*', { count: 'exact', head: true });
@@ -35,7 +46,7 @@ export function PurchaseLayout() {
       if (!cancelled) setCounts(Object.fromEntries(results));
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [visibleTabs]);
 
   // Determine active subtab from URL
   const segments = location.pathname.split('/');
@@ -50,7 +61,7 @@ export function PurchaseLayout() {
     <>
       {/* Sub-tabs */}
       <div className="flex items-center gap-2 mb-5 overflow-x-auto scroll-x">
-        {SUBTABS.map(tab => (
+        {visibleTabs.map(tab => (
           <div
             key={tab.id}
             className={`subtab${activeTab === tab.id ? ' active' : ''}`}

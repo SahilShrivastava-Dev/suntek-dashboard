@@ -475,10 +475,23 @@ export async function extractPurchaseSheet(imageDataUrl: string): Promise<Extrac
 
 // ── Supplier bill verification (Purchase Manager) ─────────────────────────────
 
+export interface SupplierBillLine {
+  description: string;
+  quantity: number | null;
+  unit: string | null;
+  unitPrice: number | null;
+  amount: number | null;
+}
 export interface ExtractedSupplierBill {
   totalAmount: number | null;
+  /** Taxable value before GST — pair with taxAmount to compute a robust grand total. */
+  subTotal?: number | null;
+  taxAmount?: number | null;
+  /** Total quantity across all line items (e.g. 466 Boxes). */
+  grandTotalQty?: number | null;
   lineItemCount: number | null;
   currency: string | null;
+  lineItems?: SupplierBillLine[];
   raw?: string;
 }
 

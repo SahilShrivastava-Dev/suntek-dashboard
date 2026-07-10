@@ -14,6 +14,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { nvidiaChat } from '../_shared/nvidiaVision.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -24,7 +25,9 @@ const CORS = {
 const EXTRACTION_PROMPT = `You are a precise OCR assistant for a CP (Chlorinated Paraffin) manufacturing company in India.
 
 Carefully read and extract ALL data from this purchase invoice or delivery challan image.
-Return ONLY a valid JSON object — no markdown fences, no explanation, just raw JSON.
+Return ONLY a valid JSON object. Do NOT use markdown, asterisks, bold, headings, or bullet
+points anywhere. Your ENTIRE response must be a single JSON object that begins with { and ends
+with } — nothing before or after it.
 
 Extract the following fields:
 - invoiceNumber: the invoice / bill / challan number (string)
@@ -105,14 +108,14 @@ serve(async (req: Request) => {
       );
     }
 
-    const nvidiaRes = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'meta/llama-3.2-90b-vision-instruct',
+    let content: string;
+    let usedModel: string;
+    try {
+      const r = await nvidiaChat({
+        apiKey,
+        fallbackModel: 'meta/llama-3.2-90b-vision-instruct',
+        maxTokens: 4096,
+        jsonMode: true,
         messages: [
           {
             role: 'user',
@@ -122,25 +125,19 @@ serve(async (req: Request) => {
             ],
           },
         ],
-        max_tokens: 2048,
-        temperature: 0.05,
-      }),
-    });
-
-    if (!nvidiaRes.ok) {
-      const errText = await nvidiaRes.text().catch(() => '');
+      });
+      content = r.content;
+      usedModel = r.model;
+    } catch (e) {
       return new Response(
-        JSON.stringify({ error: `NVIDIA API returned ${nvidiaRes.status}: ${errText.slice(0, 400)}` }),
+        JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
         { status: 502, headers: { ...CORS, 'Content-Type': 'application/json' } },
       );
     }
 
-    const nvidiaJson = await nvidiaRes.json();
-    const content: string = nvidiaJson?.choices?.[0]?.message?.content ?? '';
-
     if (!content) {
       return new Response(
-        JSON.stringify({ error: 'NVIDIA API returned an empty response.' }),
+        JSON.stringify({ error: `NVIDIA API returned an empty response (model ${usedModel}).` }),
         { status: 502, headers: { ...CORS, 'Content-Type': 'application/json' } },
       );
     }

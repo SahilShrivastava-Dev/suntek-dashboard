@@ -6,6 +6,8 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelRow, PanelDivider
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { usePagination } from '../../../components/ui/usePagination';
+import { TablePagination } from '../../../components/ui/TablePagination';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import * as XLSX from 'xlsx';
@@ -303,6 +305,10 @@ export function FAR() {
   const fyTotal = fyEntries.reduce((s, e) => s + e.cost, 0);
   const fyLastUpdated = fyEntries.reduce((mx, e) => { const d = e.closed_at || e.created_at; return d > mx ? d : mx; }, '');
 
+  // Pagination (default 10/page) for the FAR register + the FY maintenance table.
+  const groupPg = usePagination(sortedGroups, { resetKey: sortedGroups.length });
+  const fyPg = usePagination(fyEntries, { resetKey: activeFY ?? '' });
+
   // ── Insurance deduction math (for the displayed financial year) ───────────────
   // Deduction = capital assets bought in the FY + maintenance/repair procurement.
   // Coverage − deduction = headroom left; negative = paid out of pocket.
@@ -473,7 +479,7 @@ export function FAR() {
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Assets Flagged for Repair', what: 'Count of fixed assets that have been flagged as requiring repair or maintenance and are awaiting resolution. High count = production downtime risk.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Assets with repair flag set in FAR_DATA.' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('far.repairFlagged')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">3</div>
+          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{maintEntries.filter(e => e.status !== 'closed').length}</div>
           <div className="text-[11px] text-amber-600 mt-1">{t('far.awaitingClosure')}</div>
         </div>
         <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
@@ -535,7 +541,7 @@ export function FAR() {
                   {fyEntries.length === 0 && (
                     <tr><td colSpan={6} className="text-center text-slate-400 py-6 text-sm">{t('far.noMaintInFy', { fy: activeFY })}</td></tr>
                   )}
-                  {fyEntries.map(e => (
+                  {fyPg.pageRows.map(e => (
                     <tr key={e.id} onClick={() => setDrillEntry(e)} style={{ cursor: 'pointer' }}>
                       <td className="num text-xs text-slate-500">#{e.id.slice(0, 8)}</td>
                       <td className="font-semibold text-slate-700">{e.equipment}</td>
@@ -554,6 +560,7 @@ export function FAR() {
                 </tbody>
               </table>
             </div>
+            <TablePagination controls={fyPg.controls} />
           </>
         )}
       </div>
@@ -700,7 +707,7 @@ export function FAR() {
                     </thead>
                     <tbody>
                       {sortedGroups.length === 0 && <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{assets.length === 0 ? t('far.noAssetsYet') : 'No equipment matches.'}</td></tr>}
-                      {sortedGroups.map(g => {
+                      {groupPg.pageRows.map(g => {
                         const open = expandedType === g.type;
                         const make = repVal(g.assets.map(a => a.make));
                         const model = repVal(g.assets.map(a => a.model));
@@ -752,6 +759,7 @@ export function FAR() {
                     </tbody>
                   </table>
                 </div>
+                <TablePagination controls={groupPg.controls} />
               </div>
             )}
           </>

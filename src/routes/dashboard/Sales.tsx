@@ -1,4 +1,8 @@
 import React, { useState } from 'react';
+import { EmptyState } from '../../components/ui/states';
+import { usePagination } from '../../components/ui/usePagination';
+import { TablePagination } from '../../components/ui/TablePagination';
+import { TableSearch, useTextFilter } from '../../components/ui/TableSearch';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { insertRows } from '../../lib/db';
@@ -29,6 +33,10 @@ export function Sales() {
   const { activeProfile } = useRoleContext();
   const { data: salesKPIs } = useSalesMTD();
   const { data: liveContracts } = useSalesContracts();
+  const [salesSearch, setSalesSearch] = useState('');
+  const contractRows = liveContracts || [];
+  const filteredContracts = useTextFilter(contractRows, salesSearch, c => [c.customer, c.status]);
+  const salesPg = usePagination(filteredContracts, { resetKey: salesSearch });
   const { data: analytics } = useAnalyticsKPIs();
 
   function handleExport() {
@@ -318,6 +326,10 @@ export function Sales() {
             {t('sales.newContract')}
           </button>
         </div>
+        <TableSearch value={salesSearch} onChange={setSalesSearch} placeholder={t('sales.searchPh', 'Search customer…')} />
+        {filteredContracts.length === 0 ? (
+          <EmptyState title={salesSearch ? t('sales.noMatches', 'No customers match your search.') : t('sales.noContracts', 'No contracts — data loads from BUSY')} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -331,7 +343,7 @@ export function Sales() {
               </tr>
             </thead>
             <tbody>
-              {(liveContracts || []).map(c => {
+              {salesPg.pageRows.map(c => {
                 const sc = c.status === 'on track' ? '#16A34A' : c.status === 'cleared' ? '#475569' : '#DC2626';
                 const sb = c.status === 'on track' ? '#DCFCE7' : c.status === 'cleared' ? '#F1F5F9' : '#FEE2E2';
                 return (
@@ -351,12 +363,11 @@ export function Sales() {
                   </tr>
                 );
               })}
-              {(!liveContracts || liveContracts.length === 0) && (
-                <tr><td colSpan={6} className="text-center text-slate-400 py-6 text-sm">No contracts — data loads from BUSY</td></tr>
-              )}
             </tbody>
           </table>
+          <TablePagination controls={salesPg.controls} />
         </div>
+        )}
       </div>
 
       {/* ── New Contract Modal ── */}

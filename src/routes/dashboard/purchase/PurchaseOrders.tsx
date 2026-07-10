@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
@@ -9,7 +11,10 @@ import { useRoleContext } from '../../../contexts/RoleContext';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelSection, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
-import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/states';
+import { usePagination } from '../../../components/ui/usePagination';
+import { TablePagination } from '../../../components/ui/TablePagination';
+import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
 import { OcrUploadCard } from '../../../components/OcrUploadCard';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
@@ -26,8 +31,11 @@ const UNIT_LABELS: Record<string, string> = { chlorides: 'Suntek Chlorides', pla
 
 /** An externally-bought maintenance part, DERIVED from a store request (single source). */
 interface MaintPO {
-  id: string; ticketRef: string; part: string; equipment: string; store: string; supplier: string;
-  qty: number; unitPrice: number | null; total: number | null; date: string | null; busyRef: string | null;
+  id: string; ticketRef: string; ticketId: string; part: string; equipment: string; store: string; supplier: string;
+  qty: number; unitPrice: number | null; total: number | null;
+  // Bulk supplier bill (per ticket) — used when a single bill covers several procured parts.
+  billTotal: number | null; billItems: number | null; billUrl: string | null;
+  date: string | null; busyRef: string | null;
 }
 
 function PicBadge({ has }: { has: boolean }) {
@@ -54,6 +62,8 @@ const UNITS  = ['nos', 'kg', 'MT', 'L', 'sets', 'boxes'];
 export function PurchaseOrders() {
   const { t } = useTranslation();
   const toast = useToast();
+  const navigate = useNavigate();
+  const [billLightbox, setBillLightbox] = useState<LightboxImage[] | null>(null);
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
   const [filter, setFilter] = useState('all');
@@ -93,10 +103,13 @@ export function PurchaseOrders() {
           const t = tById.get(s.ticket_id);
           const store = t?.unit ? (UNIT_LABELS[t.unit] || t.unit) : (t?.plants?.name || '—');
           return {
-            id: s.id, ticketRef: s.ticket_id.slice(0, 8), part: s.part_name, equipment: t?.equipment || '', store,
+            id: s.id, ticketRef: s.ticket_id.slice(0, 8), ticketId: s.ticket_id, part: s.part_name, equipment: t?.equipment || '', store,
             supplier: s.supplier_name || '—', qty: Number(s.quantity ?? 0),
             unitPrice: s.unit_price != null ? Number(s.unit_price) : null,
             total: s.total_price != null ? Number(s.total_price) : null,
+            billTotal: t?.pm_bill_total != null ? Number(t.pm_bill_total) : null,
+            billItems: t?.pm_items_count != null ? Number(t.pm_items_count) : null,
+            billUrl: t?.pm_bill_url ?? s.handover_invoice_url ?? null,
             date: t?.closed_at || t?.created_at || null, busyRef: s.busy_transaction_ref,
           };
         });
@@ -166,6 +179,10 @@ export function PurchaseOrders() {
   }
 
   const list = filter === 'all' ? orders : orders.filter(r => r.status === filter);
+  const [poSearch, setPoSearch] = useState('');
+  const filteredList = useTextFilter(list, poSearch, r => [r.oil_type, r.paraffin_type, r.company, r.port]);
+  const ordersPg = usePagination(filteredList, { resetKey: `${poSearch}|${filter}` });
+  const maintPg = usePagination(maintPOs, { resetKey: maintPOs.length });
 
   return (
     <>
@@ -248,6 +265,11 @@ export function PurchaseOrders() {
         ) : loading ? (
           <SkeletonRows rows={6} />
         ) : (
+        <>
+        <TableSearch value={poSearch} onChange={setPoSearch} placeholder={t('po.search_ph', 'Search material, company, port…')} />
+        {filteredList.length === 0 ? (
+          <EmptyState title={t('po.empty_orders')} message={poSearch ? t('common.noMatches', 'No rows match your search.') : undefined} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -259,7 +281,7 @@ export function PurchaseOrders() {
               </tr>
             </thead>
             <tbody>
-              {list.map(r => (
+              {ordersPg.pageRows.map(r => (
                 <tr key={r.id} style={{ cursor: 'pointer' }}>
                   <td className="font-semibold">{r.oil_type || '—'}</td>
                   <td className="text-slate-500">{r.paraffin_type || '—'}</td>
@@ -272,12 +294,12 @@ export function PurchaseOrders() {
                   <td className="text-slate-500 text-xs">{r.date || '—'}</td>
                 </tr>
               ))}
-              {list.length === 0 && (
-                <tr><td colSpan={9} className="text-center text-slate-400 py-6 text-sm">{t('po.empty_orders')}</td></tr>
-              )}
             </tbody>
           </table>
+          <TablePagination controls={ordersPg.controls} />
         </div>
+        )}
+        </>
         )}
       </div>
 
@@ -293,29 +315,37 @@ export function PurchaseOrders() {
         <div className="text-xs text-slate-500 mb-4">{t('po.section_maint_sub')}</div>
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
-            <thead><tr><th>{t('po.col_ticket')}</th><th>{t('po.col_part')}</th><th>{t('po.col_equipment')}</th><th>{t('po.col_store_unit')}</th><th>{t('po.col_supplier')}</th><th className="num">{t('po.col_qty')}</th><th className="num">{t('po.col_unit_price')}</th><th className="num">{t('po.col_total')}</th><th>{t('po.col_busy_ref')}</th><th>{t('po.col_date')}</th></tr></thead>
+            <thead><tr><th>{t('po.col_ticket')}</th><th>{t('po.col_part')}</th><th>{t('po.col_equipment')}</th><th>{t('po.col_store_unit')}</th><th>{t('po.col_supplier')}</th><th className="num">{t('po.col_qty')}</th><th className="num">{t('po.col_unit_price')}</th><th className="num">{t('po.col_total')}</th><th>{t('po.col_busy_ref')}</th><th>{t('po.col_bill', 'Bill')}</th><th>{t('po.col_date')}</th></tr></thead>
             <tbody>
               {maintPOs.length === 0 && (
-                <tr><td colSpan={10} className="text-center text-slate-400 py-6 text-sm">{t('po.empty_maint')}</td></tr>
+                <tr><td colSpan={11} className="text-center text-slate-400 py-6 text-sm">{t('po.empty_maint')}</td></tr>
               )}
-              {maintPOs.map(m => (
+              {maintPg.pageRows.map(m => {
+                const totalCost = m.total ?? m.billTotal;
+                return (
                 <tr key={m.id}>
-                  <td className="num text-xs text-slate-500">#{m.ticketRef}</td>
+                  <td><button type="button" onClick={() => navigate(`/dashboard/purchase/maint?ticket=${m.ticketId}`)} className="num text-xs" style={{ color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }} title={t('po.open_ticket', 'Open maintenance ticket')}>#{m.ticketRef}</button></td>
                   <td className="font-semibold">{m.part}</td>
                   <td className="text-slate-500 text-xs">{m.equipment}</td>
                   <td className="text-slate-500 text-xs">{m.store}</td>
                   <td>{m.supplier}</td>
                   <td className="num">{m.qty}</td>
-                  <td className="num">{m.unitPrice != null ? `₹ ${m.unitPrice.toLocaleString('en-IN')}` : '—'}</td>
-                  <td className="num font-semibold">{m.total != null ? `₹ ${m.total.toLocaleString('en-IN')}` : '—'}</td>
+                  {/* Bulk bills have no per-unit price → show the bill's line-item count instead. */}
+                  <td className="num">{m.unitPrice != null ? `₹ ${m.unitPrice.toLocaleString('en-IN')}` : (m.billItems ? <span className="text-xs text-slate-400">{m.billItems} on bill</span> : '—')}</td>
+                  <td className="num font-semibold">{totalCost != null ? `₹ ${Number(totalCost).toLocaleString('en-IN')}` : '—'}</td>
                   <td className="text-slate-500 text-xs">{m.busyRef || '—'}</td>
+                  <td>{m.billUrl ? <button type="button" onClick={() => setBillLightbox([{ url: m.billUrl as string, label: `Supplier bill · #${m.ticketRef}` }])} style={{ color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, textDecoration: 'underline' }}>View</button> : <span className="text-slate-300 text-xs">—</span>}</td>
                   <td className="text-slate-500 text-xs">{m.date ? new Date(m.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
+          <TablePagination controls={maintPg.controls} />
         </div>
       </div>
+
+      <ImageLightbox images={billLightbox || []} open={!!billLightbox} onClose={() => setBillLightbox(null)} />
 
       {/* Modal */}
       <SlidePanel open={open} onClose={handleClose} title={t('po.panel_title')} subtitle={t('po.panel_subtitle')}>

@@ -5,7 +5,11 @@ import { insertRows } from '../../../lib/db';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
-import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/states';
+import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
+import { usePagination } from '../../../components/ui/usePagination';
+import { TablePagination } from '../../../components/ui/TablePagination';
+import { TableSearch } from '../../../components/ui/TableSearch';
 import { useDirectory, extractMentionIds, truncate } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { useRoleContext } from '../../../contexts/RoleContext';
@@ -31,23 +35,43 @@ type UnifiedRow = {
   verifiedBy: string | null;
   plant: string | null;
   hasPhoto: boolean;
+  photos: LightboxImage[];    // actual evidence images for this row (opens the lightbox)
   ticketRef: string | null;   // short maintenance ticket id, e.g. "f855d730"
   source: 'manual' | 'maintenance';
 };
 
 const ticketRef = (id: string) => id.slice(0, 8);
+/** Build a lightbox image list from [url, label] pairs, dropping empties. */
+const photoList = (pairs: [string | null | undefined, string][]): LightboxImage[] =>
+  pairs.filter(([u]) => !!u).map(([u, label]) => ({ url: u as string, label }));
 const toMs = (ts: string | null | undefined) => (ts ? new Date(ts).getTime() : 0);
 const fmtDate = (d: string | null | undefined) =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
-function PicBadge({ has }: { has: boolean }) {
+const CameraSvg = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+    <circle cx="12" cy="13" r="4"/>
+  </svg>
+);
+
+/** Clickable when the row has photos → opens them in the lightbox; a muted
+ *  placeholder otherwise. Previously this was a dead badge that did nothing. */
+function PicBadge({ photos, onOpen }: { photos: LightboxImage[]; onOpen: () => void }) {
+  if (photos.length === 0) {
+    return <span className="pic-badge missing" title="No pic yet"><CameraSvg /></span>;
+  }
   return (
-    <span className={`pic-badge${has ? '' : ' missing'}`} title={has ? 'Pic on file' : 'No pic yet'}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-        <circle cx="12" cy="13" r="4"/>
-      </svg>
-    </span>
+    <button
+      type="button"
+      className="pic-badge"
+      title={`View ${photos.length} photo${photos.length > 1 ? 's' : ''}`}
+      onClick={onOpen}
+      style={{ cursor: 'pointer', border: 'none', background: 'none', padding: 0, color: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 2 }}
+    >
+      <CameraSvg />
+      {photos.length > 1 && <span style={{ fontSize: 9, fontWeight: 700 }}>{photos.length}</span>}
+    </button>
   );
 }
 
@@ -71,50 +95,55 @@ function deriveMaintenanceEvents(tickets: TicketRow[], srs: StoreReqRow[]): Unif
     const kindWord = tk.type === 'emergency' ? 'Emergency' : 'Periodic';
 
     // 1) Raised
+    const raisePhotos = photoList([[tk.defective_raise_photo_url, 'Raise photo']]);
     out.push({
       key: `${tk.id}:raised`, equipment: tk.equipment, type: `${kindWord} raised`,
       date: tk.created_at, doneBy: tk.raised_by || tk.assigned_to || null,
-      verifiedBy: null, plant, hasPhoto: false, ticketRef: ref, source: 'maintenance',
+      verifiedBy: null, plant, hasPhoto: raisePhotos.length > 0, photos: raisePhotos, ticketRef: ref, source: 'maintenance',
     });
 
     // Store-request driven milestones
     for (const sr of srByTicket.get(tk.id) ?? []) {
       if (sr.supplier_name || sr.busy_transaction_ref) {
+        const procPhotos = photoList([[sr.handover_invoice_url, 'Supplier invoice']]);
         out.push({
           key: `${sr.id}:procured`, equipment: tk.equipment,
           type: `Part procured · ${sr.part_name}`, date: tk.closed_at || sr.created_at,
           doneBy: sr.supplier_name || 'Procurement', verifiedBy: null, plant,
-          hasPhoto: !!sr.handover_invoice_url, ticketRef: ref, source: 'maintenance',
+          hasPhoto: procPhotos.length > 0, photos: procPhotos, ticketRef: ref, source: 'maintenance',
         });
       }
       if (sr.handover_confirmed_at) {
+        const hoPhotos = photoList([[sr.handover_photo_url, 'Handover photo'], [sr.handover_invoice_url, 'Handover invoice']]);
         out.push({
           key: `${sr.id}:handover`, equipment: tk.equipment,
           type: `Part handed over · ${sr.part_name}`, date: sr.handover_confirmed_at,
           doneBy: 'Store', verifiedBy: null, plant,
-          hasPhoto: !!(sr.handover_photo_url || sr.handover_invoice_url), ticketRef: ref, source: 'maintenance',
+          hasPhoto: hoPhotos.length > 0, photos: hoPhotos, ticketRef: ref, source: 'maintenance',
         });
       }
     }
 
     // 2) Defective-part decision
     if (tk.defective_part_decision) {
+      const defPhotos = photoList([[tk.defective_part_photo_url, 'Defective part']]);
       out.push({
         key: `${tk.id}:defective`, equipment: tk.equipment,
         type: `Defective part ${tk.defective_part_decision === 'scrap' ? 'scrapped' : 'sent for repair'}`,
         date: tk.closed_at || tk.created_at, doneBy: tk.assigned_to || null, verifiedBy: null, plant,
-        hasPhoto: !!tk.defective_part_photo_url, ticketRef: ref, source: 'maintenance',
+        hasPhoto: defPhotos.length > 0, photos: defPhotos, ticketRef: ref, source: 'maintenance',
       });
     }
 
     // 3) Completed / closed
     if (tk.status === 'closed') {
+      const donePhotos = photoList([[tk.completion_photo_url, 'Completion photo'], [tk.defective_part_photo_url, 'Defective part']]);
       out.push({
         key: `${tk.id}:done`, equipment: tk.equipment,
         type: tk.type === 'emergency' ? 'Repair completed' : 'Periodic check completed',
         date: tk.closed_at || tk.created_at, doneBy: tk.assigned_to || null,
         verifiedBy: tk.raised_role || null,
-        plant, hasPhoto: !!(tk.completion_photo_url || tk.defective_part_photo_url),
+        plant, hasPhoto: donePhotos.length > 0, photos: donePhotos,
         ticketRef: ref, source: 'maintenance',
       });
     }
@@ -139,6 +168,9 @@ export function ActivityLog() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [showManualOnly, setShowManualOnly] = useState(false);
+  const [lightbox, setLightbox] = useState<LightboxImage[] | null>(null);
+  const [search, setSearch] = useState('');
+  const [plantFilter, setPlantFilter] = useState('');
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' });
 
@@ -194,6 +226,7 @@ export function ActivityLog() {
       verifiedBy: a.verified_by,
       plant: a.plants?.name ?? null,
       hasPhoto: !!a.photo_url,
+      photos: a.photo_url ? [{ url: a.photo_url, label: 'Activity photo' }] : [],
       ticketRef: null,
       source: 'manual',
     }));
@@ -207,6 +240,16 @@ export function ActivityLog() {
   const withPhoto = rows.length ? Math.round((rows.filter(r => r.hasPhoto).length / rows.length) * 100) : 0;
 
   const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
+
+  // Search + plant filter, then paginate — Activity Log grows unbounded over time.
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter(r =>
+      (!plantFilter || r.plant === plantFilter) &&
+      (!q || [r.equipment, r.type, r.doneBy, r.verifiedBy, r.plant, r.ticketRef].some(f => (f || '').toLowerCase().includes(q))),
+    );
+  }, [rows, search, plantFilter]);
+  const { pageRows, controls } = usePagination(filtered, { resetKey: `${search}|${plantFilter}|${showManualOnly}` });
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -311,11 +354,22 @@ export function ActivityLog() {
             </button>
           </div>
         </div>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <TableSearch value={search} onChange={setSearch} placeholder={t('activity.searchPh', 'Search equipment, activity, person, ticket…')} style={{ marginBottom: 0 }} />
+          </div>
+          <select value={plantFilter} onChange={e => setPlantFilter(e.target.value)} style={{ border: '1px solid #E2E8F0', borderRadius: 8, padding: '7px 10px', fontSize: 13, fontFamily: 'inherit', background: '#fff', cursor: 'pointer' }}>
+            <option value="">{t('activity.allPlants', 'All plants')}</option>
+            {plantNames.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
         {loadError ? (
           <ErrorState title={t('activity.errorTitle')} message={t('activity.errorMessage')}
             onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
         ) : loading ? (
           <SkeletonRows rows={6} />
+        ) : filtered.length === 0 ? (
+          <EmptyState title={t('activity.emptyState')} message={search || plantFilter ? t('activity.noMatches', 'No rows match your filters.') : undefined} />
         ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
@@ -326,8 +380,8 @@ export function ActivityLog() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((a) => (
-                <tr key={a.key} style={{ cursor: 'default' }}>
+              {pageRows.map((a) => (
+                <tr key={a.key} style={{ cursor: a.photos.length ? 'pointer' : 'default' }} onClick={() => a.photos.length && setLightbox(a.photos)} title={a.photos.length ? 'View photo(s)' : undefined}>
                   <td className="font-semibold">{a.equipment || '—'}</td>
                   <td className="text-slate-600">
                     {a.type}
@@ -340,14 +394,12 @@ export function ActivityLog() {
                   <td>{a.doneBy || '—'}</td>
                   <td className="text-slate-500">{a.verifiedBy || '—'}</td>
                   <td>{a.plant || '—'}</td>
-                  <td><PicBadge has={a.hasPhoto} /></td>
+                  <td><PicBadge photos={a.photos} onOpen={() => setLightbox(a.photos)} /></td>
                 </tr>
               ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{t('activity.emptyState')}</td></tr>
-              )}
             </tbody>
           </table>
+          <TablePagination controls={controls} />
         </div>
         )}
       </div>
@@ -420,6 +472,8 @@ export function ActivityLog() {
           requiredHint={t('activity.requiredHint')}
         />
       </SlidePanel>
+
+      <ImageLightbox images={lightbox || []} open={!!lightbox} onClose={() => setLightbox(null)} />
     </>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
@@ -7,23 +8,37 @@ import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
-import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/states';
+import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
+import { usePagination } from '../../../components/ui/usePagination';
+import { TablePagination } from '../../../components/ui/TablePagination';
+import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
 import { StockRegister } from './StockRegister';
+import { RepairScrapPanel } from './RepairScrapPanel';
 import type { Database } from '../../../lib/database.types';
 
-type ReqRow = Database['public']['Tables']['store_requisitions']['Row'] & { plants?: { name: string | null } | null };
+// ticket_id is added by migration NN_requisition_ticket_link.sql; typed here until
+// database.types.ts is regenerated so requisitions raised from a maintenance ticket
+// can deep-link back to it.
+type ReqRow = Database['public']['Tables']['store_requisitions']['Row']
+  & { plants?: { name: string | null } | null; ticket_id?: string | null };
 
-function PicBadge({ has }: { has: boolean }) {
+function PicBadge({ url, onOpen }: { url: string | null; onOpen: () => void }) {
   const { t } = useTranslation();
+  const Icon = (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+      <circle cx="12" cy="13" r="4"/>
+    </svg>
+  );
+  if (!url) return <span className="pic-badge missing" title={t('storereq.no_pic_yet')}>{Icon}</span>;
   return (
-    <span className={`pic-badge${has ? '' : ' missing'}`} title={has ? t('storereq.pic_on_file') : t('storereq.no_pic_yet')}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-        <circle cx="12" cy="13" r="4"/>
-      </svg>
-    </span>
+    <button type="button" className="pic-badge" title={t('storereq.pic_on_file')} onClick={onOpen}
+      style={{ cursor: 'pointer', border: 'none', background: 'none', padding: 0, color: 'inherit' }}>
+      {Icon}
+    </button>
   );
 }
 
@@ -46,6 +61,7 @@ const STATUS_STAGE: Record<string, { bg: string; color: string; label: string }>
 export function StoreRequisitions() {
   const { t } = useTranslation();
   const toast = useToast();
+  const navigate = useNavigate();
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
   const { scopeQuery, allowedPlants } = usePlantScope();
@@ -55,7 +71,12 @@ export function StoreRequisitions() {
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [search, setSearch] = useState('');
+  const [lightbox, setLightbox] = useState<LightboxImage[] | null>(null);
   const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
+
+  const filtered = useTextFilter(items, search, r => [r.item, r.plants?.name, r.id.slice(0, 8), r.status, r.ticket_id ? r.ticket_id.slice(0, 8) : '']);
+  const { pageRows, controls } = usePagination(filtered, { resetKey: search });
 
   async function load() {
     try {
@@ -142,6 +163,9 @@ export function StoreRequisitions() {
       {/* ── Consolidated stock register (uploaded file + live usage) ────────── */}
       <StockRegister />
 
+      {/* ── Repair & scrap tracking (post-maintenance asset movement) ───────── */}
+      <RepairScrapPanel />
+
       {/* Table — green-soft */}
       <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Open Store Requirements', what: 'All active store requisitions raised by plant/store keepers across SHD, Rehla, Ganjam, and HQ. Each row shows the approval stage, decision, and photo proof status. New requests are submitted via the "+ Raise request" button.', source: 'Mock data', formLabel: 'Raise request form', formPath: '/dashboard/purchase/storereq', note: 'Currently uses STORE_REQ mock data. Future: Supabase store_reqs table.' }} />
@@ -160,39 +184,49 @@ export function StoreRequisitions() {
         ) : loading ? (
           <SkeletonRows rows={6} />
         ) : (
-        <div className="overflow-x-auto scroll-x">
-          <table className="dt">
-            <thead>
-              <tr>
-                <th>{t('storereq.col_req_no')}</th><th>{t('storereq.col_item')}</th><th>{t('storereq.col_plant')}</th><th className="num">{t('storereq.col_qty')}</th>
-                <th>{t('storereq.col_stage')}</th><th>{t('storereq.col_awaiting')}</th><th>{t('storereq.col_decision')}</th><th>{t('storereq.col_pic')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(r => {
-                const s = STATUS_STAGE[r.status] || STATUS_STAGE.pending;
-                const stageKey = STATUS_STAGE[r.status] ? r.status : 'pending';
-                return (
-                  <tr key={r.id} style={{ cursor: 'pointer' }}>
-                    <td className="font-bold text-xs text-slate-400">{r.id.slice(0, 8)}</td>
-                    <td>{r.item}</td>
-                    <td>{r.plants?.name || '—'}</td>
-                    <td className="num">{r.qty}</td>
-                    <td>
-                      <span className="badge" style={{ background: s.bg, color: s.color }}>{t('storereq.stage_' + stageKey)}</span>
-                    </td>
-                    <td className="text-slate-500">{r.status === 'pending' ? t('storereq.awaiting_unit_head') : '—'}</td>
-                    <td className="font-semibold">{r.status}</td>
-                    <td><PicBadge has={!!r.photo_url} /></td>
+        <>
+          <TableSearch value={search} onChange={setSearch} placeholder={t('storereq.search_ph', 'Search item, plant, ticket…')} />
+          {filtered.length === 0 ? (
+            <EmptyState title={t('storereq.open_req_empty')} message={search ? t('common.noMatches', 'No rows match your search.') : undefined} />
+          ) : (
+            <div className="overflow-x-auto scroll-x">
+              <table className="dt">
+                <thead>
+                  <tr>
+                    <th>{t('storereq.col_req_no')}</th><th>{t('storereq.col_ticket', 'Ticket #')}</th><th>{t('storereq.col_item')}</th><th>{t('storereq.col_plant')}</th><th className="num">{t('storereq.col_qty')}</th>
+                    <th>{t('storereq.col_stage')}</th><th>{t('storereq.col_awaiting')}</th><th>{t('storereq.col_decision')}</th><th>{t('storereq.col_pic')}</th>
                   </tr>
-                );
-              })}
-              {items.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{t('storereq.open_req_empty')}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {pageRows.map(r => {
+                    const s = STATUS_STAGE[r.status] || STATUS_STAGE.pending;
+                    const stageKey = STATUS_STAGE[r.status] ? r.status : 'pending';
+                    return (
+                      <tr key={r.id}>
+                        <td className="font-bold text-xs text-slate-400">{r.id.slice(0, 8)}</td>
+                        <td>
+                          {r.ticket_id
+                            ? <button type="button" onClick={() => navigate(`/dashboard/purchase/maint?ticket=${r.ticket_id}`)} className="num text-xs" style={{ color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }} title={t('storereq.open_ticket', 'Open maintenance ticket')}>#{r.ticket_id.slice(0, 8)}</button>
+                            : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td>{r.item}</td>
+                        <td>{r.plants?.name || '—'}</td>
+                        <td className="num">{r.qty}</td>
+                        <td>
+                          <span className="badge" style={{ background: s.bg, color: s.color }}>{t('storereq.stage_' + stageKey)}</span>
+                        </td>
+                        <td className="text-slate-500">{r.status === 'pending' ? t('storereq.awaiting_unit_head') : '—'}</td>
+                        <td className="font-semibold">{r.status}</td>
+                        <td><PicBadge url={r.photo_url} onOpen={() => r.photo_url && setLightbox([{ url: r.photo_url, label: r.item }])} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <TablePagination controls={controls} />
+            </div>
+          )}
+        </>
         )}
       </div>
 
@@ -263,6 +297,8 @@ export function StoreRequisitions() {
           requiredHint={t('storereq.required_hint')}
         />
       </SlidePanel>
+
+      <ImageLightbox images={lightbox || []} open={!!lightbox} onClose={() => setLightbox(null)} />
     </>
   );
 }

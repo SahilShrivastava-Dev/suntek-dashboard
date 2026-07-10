@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { EmptyState } from '../../components/ui/states';
+import { usePagination } from '../../components/ui/usePagination';
+import { TablePagination } from '../../components/ui/TablePagination';
 import { useTranslation } from 'react-i18next';
 import { useOverviewKPIs, useTopCustomers, useCustomerList, useAnalyticsKPIs, fmtINR } from '../../hooks/useBusyData';
 import { ConcentrationBar, MiniBarChart } from '../../components/charts/AnalyticsViz';
@@ -17,6 +20,7 @@ export function CustomerHistory() {
   const filteredList = (customerList || []).filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase())
   );
+  const custPg = usePagination(filteredList, { resetKey: search });
 
   return (
     <>
@@ -137,6 +141,9 @@ export function CustomerHistory() {
             className="px-4 py-2 bg-slate-50 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
           />
         </div>
+        {filteredList.length === 0 ? (
+          <EmptyState title={search ? t('customers.noMatches', 'No customers match your search.') : t('customers.empty', 'No customers yet.')} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
@@ -149,7 +156,7 @@ export function CustomerHistory() {
               </tr>
             </thead>
             <tbody>
-              {filteredList.map(c => (
+              {custPg.pageRows.map(c => (
                 <tr key={c.code} style={{ cursor: 'pointer' }}>
                   <td className="font-semibold">{c.name}</td>
                   <td className="num font-bold">{fmtINR(c.mtdRevenue)}</td>
@@ -162,7 +169,9 @@ export function CustomerHistory() {
               ))}
             </tbody>
           </table>
+          <TablePagination controls={custPg.controls} />
         </div>
+        )}
       </div>
 
       {/* Charts row */}

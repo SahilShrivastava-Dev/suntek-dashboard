@@ -10,8 +10,10 @@ import { CAPABILITIES } from '../../lib/profiles';
 import type { RoleRow } from '../../lib/profiles';
 import { useStepUp } from '../../lib/useStepUp';
 import { logUserAccountEvent, LANGUAGE_OPTIONS } from '../../lib/userEvents';
-import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
+import { SlidePanel, PanelField, PanelInput, PanelPasswordInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
+import { usePagination } from '../../components/ui/usePagination';
+import { TablePagination } from '../../components/ui/TablePagination';
 
 interface UserEvent {
   id: string;
@@ -318,6 +320,7 @@ export function UserManagement() {
     }
     return true;
   });
+  const usersPg = usePagination(filtered, { resetKey: `${search}|${filterRole}|${filterStatus}` });
 
   function openAdd() {
     setEditingUser(null);
@@ -666,7 +669,7 @@ export function UserManagement() {
                   {total === 0 ? t('userMgmt.emptyNoUsers') : t('userMgmt.emptyNoMatch')}
                 </td></tr>
               )}
-              {filtered.map(u => {
+              {usersPg.pageRows.map(u => {
                 const ro = roleOptions.find(r => r.id === u.role_id);
                 const lvl = ro ? LEVEL_COLOR[ro.level] : { bg: '#F1F5F9', color: '#64748B' };
                 const sc = u.is_active ? STATUS_CFG.active : STATUS_CFG.inactive;
@@ -737,6 +740,7 @@ export function UserManagement() {
               })}
             </tbody>
           </table>
+          <TablePagination controls={usersPg.controls} />
         </div>
       </div>
 
@@ -931,8 +935,7 @@ export function UserManagement() {
                 </div>
               )}
               <PanelField label={editingUser?.auth_user_id ? t('userMgmt.setNewPassword') : t('userMgmt.passwordLabel')}>
-                <PanelInput
-                  type="password"
+                <PanelPasswordInput
                   value={form.password}
                   onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
                   placeholder={editingUser?.auth_user_id ? t('userMgmt.passwordKeepPlaceholder') : t('userMgmt.passwordNewPlaceholder')}

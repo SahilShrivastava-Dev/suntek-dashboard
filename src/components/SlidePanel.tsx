@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { MentionTextarea } from './mentions/MentionTextarea';
 
 // ── Slide-in drawer ───────────────────────────────────────────────────────────
@@ -114,6 +115,26 @@ const textareaStyle: React.CSSProperties = { ...inputStyle, resize: 'vertical', 
 
 export function PanelInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} style={inputStyle} />;
+}
+
+/** Password field with a show/hide eye toggle, styled to match panel inputs. Use
+ *  wherever a panel collects a password so the affordance matches the login page. */
+export function PanelPasswordInput(props: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input {...props} type={show ? 'text' : 'password'} style={{ ...inputStyle, paddingRight: 40 }} />
+      <button
+        type="button"
+        onClick={() => setShow(v => !v)}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        tabIndex={-1}
+        style={{ position: 'absolute', top: 0, right: 0, height: '100%', display: 'flex', alignItems: 'center', padding: '0 12px', border: 'none', background: 'none', color: '#94A3B8', cursor: 'pointer' }}
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
 }
 export function PanelSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} style={selectStyle} />;

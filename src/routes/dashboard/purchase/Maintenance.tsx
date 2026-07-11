@@ -547,6 +547,9 @@ export function Maintenance() {
   const [raisePhotoBlob, setRaisePhotoBlob] = useState<Blob | null>(null); // optional defective-item photo at raise
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
+  // Distinguishes the two slow steps of a bill submit: the AI read/verify (no % yet)
+  // vs the actual file upload (real %). Only set during submitPurchaseManagerBill.
+  const [busyPhase, setBusyPhase] = useState<'verifying' | 'uploading'>('uploading');
 
   // Save states
   const [raiseSaved, setRaiseSaved] = useState(false);
@@ -639,6 +642,15 @@ export function Maintenance() {
   }, [scopeQuery]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Guard against accidentally closing the tab mid-upload — the browser shows a
+  // native "leave site?" prompt so an in-flight bill upload isn't lost.
+  useEffect(() => {
+    if (!uploading) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [uploading]);
 
   // Deep-link: a notification's "?ticket=<id>" opens that ticket directly.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1357,6 +1369,7 @@ export function Maintenance() {
     const declaredTotal = parseFloat(pmForm.billTotal.replace(/[^0-9.]/g, ''));
     if (!declaredItems || !declaredTotal) { toast.error('Enter the number of items and the total bill amount.'); return; }
     setUploading(true);
+    setBusyPhase('verifying');
     try {
       // OCR the bill (best-effort) — this never blocks submission.
       let ocrTotal: number | null = null, ocrItems: number | null = null, ocrStatus = 'unread';
@@ -1379,6 +1392,7 @@ export function Maintenance() {
         ocrStatus = ocrTotal == null ? 'unread' : (mismatch ? 'mismatch' : 'match');
       } catch { ocrStatus = 'unread'; }
 
+      setBusyPhase('uploading'); setUploadPct(0);
       const r = await uploadMaintenancePhoto(dispatchBlob, {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
         photoType: 'bill', creator: activeProfile.name, onProgress: setUploadPct,
@@ -1421,7 +1435,7 @@ export function Maintenance() {
       setDispatchBlob(null); setUploadPct(0); setPmForm({ itemsCount: '', billTotal: '' });
       await refreshAfterItemChange();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
-    finally { setUploading(false); }
+    finally { setUploading(false); setBusyPhase('uploading'); }
   }
 
   // Store manager: confirm physical handover to technician.
@@ -2123,8 +2137,8 @@ export function Maintenance() {
               <PanelField label="Total bill amount (₹) *"><PanelInput value={pmForm.billTotal} onChange={e => setPmForm(f => ({ ...f, billTotal: e.target.value }))} placeholder="e.g. 177936.50" /></PanelField>
             </PanelRow>
             <PhotoUploader onBlobReady={setDispatchBlob} label="Supplier bill photo *" hint="Clear photo of the full supplier bill" />
-            {uploading && <UploadBar pct={uploadPct} color="#A21CAF" />}
-            <button onClick={submitPurchaseManagerBill} disabled={!dispatchBlob || uploading} style={{ ...primaryBtn('#A21CAF'), width: '100%', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>{uploading ? `Uploading… ${uploadPct}%` : 'Upload bill — verify & mark en route'}</button>
+            {uploading && <UploadBar pct={uploadPct} color="#A21CAF" phase={busyPhase} />}
+            <button onClick={submitPurchaseManagerBill} disabled={!dispatchBlob || uploading} style={{ ...primaryBtn('#A21CAF'), width: '100%', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>{uploading ? (busyPhase === 'verifying' ? 'Verifying bill…' : `Uploading… ${uploadPct}%`) : 'Upload bill — verify & mark en route'}</button>
           </div>
         )}
         {procuredAwaitingBill.length > 0 && !(isPurchaseManager || isAdmin) && <div style={awaitTxt}>Purchase Manager (Anshul) to upload the bill…</div>}
@@ -2538,7 +2552,7 @@ export function Maintenance() {
       </SlidePanel>
 
       {/* ── PANEL: Complete periodic ─────────────────────────────────────── */}
-      <SlidePanel open={!!completingSchedule} onClose={() => { setCompletingSchedule(null); setCompletionBlob(null); }} title="Mark maintenance complete" subtitle={completingSchedule?.title || 'Periodic · Maintenance'}>
+      <SlidePanel open={!!completingSchedule} onClose={() => { setCompletingSchedule(null); setCompletionBlob(null); }} title="Mark maintenance complete" subtitle={completingSchedule?.title || 'Periodic · Maintenance'} locked={uploading}>
         {completingSchedule && (
           <>
             {(() => { const ra = completingSchedule.requires_approval ?? (completingSchedule.frequency !== 'daily'); const doneN = completionChecklist.filter(c => c.done).length; return (
@@ -2620,6 +2634,7 @@ export function Maintenance() {
         onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
+        locked={uploading}
       >
         {selectedTicket && (
           <>
@@ -2868,7 +2883,22 @@ function TicketDescription({ entityId, text }: { entityId: string; text: string 
 
 // ── Inline upload progress bar ────────────────────────────────────────────────
 
-function UploadBar({ pct, color }: { pct: number; color: string }) {
+function UploadBar({ pct, color, phase = 'uploading' }: { pct: number; color: string; phase?: 'verifying' | 'uploading' }) {
+  // "verifying" = the AI is reading the bill (a single call with no real streaming),
+  // so we show an indeterminate sliding bar and an explicit label instead of a stuck 0%.
+  if (phase === 'verifying') {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 11, height: 11, borderRadius: '50%', border: `2px solid ${color}55`, borderTopColor: color, display: 'inline-block', animation: 'sp-spin 0.7s linear infinite' }} />
+          Reading &amp; verifying the bill with AI… this can take up to a minute
+        </div>
+        <div style={{ position: 'relative', height: 4, background: '#E2E8F0', borderRadius: 4, overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 0, bottom: 0, background: color, borderRadius: 4, animation: 'sp-indeterminate 1.3s ease-in-out infinite' }} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4 }}>Uploading… {pct}%</div>

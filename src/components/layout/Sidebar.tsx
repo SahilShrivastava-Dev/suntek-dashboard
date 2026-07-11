@@ -16,17 +16,44 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
+/** A sidebar dropdown child. `nav` overrides the click target when it must differ
+ *  from `path` (e.g. to carry a ?ctx marker that disambiguates a shared route). */
+type NavItem = { key: string; path: string; nav?: string };
+
 /**
- * Purchase sub-tabs — order matters (first visible tab is the accordion default).
- * Each tab maps to /dashboard/purchase/{tab}. `key` is the i18n label key.
+ * Factory dropdown children — order matters (first visible item is the accordion
+ * default). Paths are explicit because the children mix the Purchase nested
+ * routes (/dashboard/purchase/*) with top-level routes (Batch Sheet, Night Manager).
+ * `key` is the i18n label key. Routing/permissions are unchanged — this only
+ * regroups how the links are presented.
  */
-const PURCHASE_TABS = [
-  { key: 'nav.far',            tab: 'far'      },
-  { key: 'nav.maintenance',    tab: 'maint'     },
-  { key: 'nav.activityLog',    tab: 'activity'  },
-  { key: 'nav.storeReq',       tab: 'storereq'  },
-  { key: 'nav.purchaseOrders', tab: 'purchase'  },
+const FACTORY_ITEMS: NavItem[] = [
+  { key: 'nav.far',            path: '/dashboard/purchase/far'      },
+  { key: 'nav.maintenance',    path: '/dashboard/purchase/maint'    },
+  { key: 'nav.activityLog',    path: '/dashboard/purchase/activity' },
+  { key: 'nav.storeReq',       path: '/dashboard/purchase/storereq' },
+  { key: 'nav.purchaseOrders', path: '/dashboard/purchase/purchase' },
+  { key: 'nav.batchSheet',     path: '/dashboard/batches'           },
+  { key: 'nav.nightManager',   path: '/dashboard/night-manager'     },
 ];
+
+/**
+ * Operations dropdown children. Purchase reuses the Purchase Orders page for now
+ * and is expected to grow its own sub-modules later. CP and Stock is the CPM Stock
+ * board (display rename only — same /dashboard/stock route).
+ */
+const OPERATIONS_ITEMS: NavItem[] = [
+  // Purchase reuses the same page as Factory's "Purchase Order". They share a
+  // route, so we tag this one with ?ctx=ops (`nav`) — the highlight logic reads
+  // that marker to light up ONLY the entry the user actually opened, not both.
+  { key: 'nav.purchase',        path: '/dashboard/purchase/purchase', nav: '/dashboard/purchase/purchase?ctx=ops' },
+  { key: 'nav.sales',           path: '/dashboard/sales'             },
+  { key: 'nav.customerHistory', path: '/dashboard/customers'         },
+  { key: 'nav.cpAndStock',      path: '/dashboard/stock'             },
+];
+
+/** The route shared by Factory→"Purchase Order" and Operations→"Purchase". */
+const SHARED_PO_ROUTE = '/dashboard/purchase/purchase';
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -55,14 +82,6 @@ function IconCart() {
     </svg>
   );
 }
-function IconStock() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-      <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22V12"/>
-    </svg>
-  );
-}
 function IconFlask() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -70,52 +89,10 @@ function IconFlask() {
     </svg>
   );
 }
-function IconUsers() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-      <circle cx="9" cy="7" r="4"/>
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
-    </svg>
-  );
-}
 function IconMoon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-    </svg>
-  );
-}
-function IconFile() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4.5 3h15"/><path d="M6 3v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V3"/>
-      <path d="M6 14h12"/>
-    </svg>
-  );
-}
-function IconAudit() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
-    </svg>
-  );
-}
-function IconUserPlus() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-      <circle cx="9" cy="7" r="4"/>
-      <line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/>
-    </svg>
-  );
-}
-function IconBan() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10"/>
-      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
     </svg>
   );
 }
@@ -167,6 +144,28 @@ function IconActivity() {
     </svg>
   );
 }
+function IconLayers() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2 2 7l10 5 10-5-10-5z"/>
+      <path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>
+    </svg>
+  );
+}
+function IconRadar() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12 19 5"/>
+    </svg>
+  );
+}
+function IconShield() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+  );
+}
 
 // ── Section header ─────────────────────────────────────────────────────────────
 
@@ -188,8 +187,23 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   const { criticalCount } = useAnomalies();
   const { openPalette } = useSearchPalette();
 
-  const [purchaseOpen, setPurchaseOpen] = useState(
-    location.pathname.startsWith('/dashboard/purchase')
+  // A dropdown defaults open when the current route is one of its children.
+  const inGroup = (paths: string[]) =>
+    paths.some((p) => location.pathname === p || location.pathname.startsWith(p + '/'));
+  // The shared Purchase route belongs to Factory unless the user arrived via
+  // Operations (marked with ?ctx=ops). This lets Factory and Operations — which
+  // share that one route — highlight/expand independently instead of together.
+  const onSharedPO = location.pathname === SHARED_PO_ROUTE;
+  const viaOps = onSharedPO && new URLSearchParams(location.search).get('ctx') === 'ops';
+  const [factoryOpen, setFactoryOpen] = useState(
+    onSharedPO ? !viaOps : inGroup(FACTORY_ITEMS.map((i) => i.path))
+  );
+  const [operationsOpen, setOperationsOpen] = useState(
+    onSharedPO ? viaOps : inGroup(OPERATIONS_ITEMS.map((i) => i.path))
+  );
+  // Reference dropdown (Daily Unit Log · Oil Ratio Table · Audit Log).
+  const [refOpen, setRefOpen] = useState(
+    inGroup(['/dashboard/daily-log', '/dashboard/oil-ratio', '/dashboard/audit'])
   );
 
   // Monitoring "Intelligence" accordion holds the analytical pages; Anomaly
@@ -205,6 +219,12 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   const [monitoringOpen, setMonitoringOpen] = useState(
     MONITORING_PATHS.some((p) => location.pathname.startsWith(p))
   );
+  // Monitoring section dropdown (wraps the Intelligence accordion + Anomaly Detection).
+  const [monSectionOpen, setMonSectionOpen] = useState(
+    inGroup([...MONITORING_PATHS, '/dashboard/anomalies'])
+  );
+  // Admin section dropdown — expanded by default per requirement.
+  const [adminOpen, setAdminOpen] = useState(true);
 
   // Technical Team (factory_operator) navigates via 3 dropdowns: Batch / Operations / Logs.
   const isOperator = activeProfile.id === 'factory_operator';
@@ -217,55 +237,44 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   /** True if the active profile can access this exact route (or its children). */
   const canSee = (route: string) => profileCanAccess(activeProfile, route);
 
-  // Purchase: only show tabs the active role is allowed to see
-  const visiblePurchaseTabs = PURCHASE_TABS.filter((pt) =>
-    canSee(`/dashboard/purchase/${pt.tab}`)
-  );
-
   // ── Section visibility ──────────────────────────────────────────────────────
   //
-  // WORKSPACE  =  Overview + Purchase accordion
-  // OPERATIONS =  Batch Sheet · Night Manager board · CPM Stock · Warehouse App
-  // FINANCE    =  Sales · Customer History
+  // WORKSPACE  =  Overview + Factory dropdown + Operations dropdown (+ role entry terminals)
   // REFERENCE  =  Oil Ratio Table · Audit Log
   //
-  // CPM Stock is OPERATIONS (physical inventory) not Finance.
-  // Marine Insurance and Labour in Purchase are Finance; they're filtered per-role.
+  // Factory groups the physical-plant modules (FAR, Maintenance, Activity, Store
+  // Req, PO, Batch Sheet, Night Manager). Operations groups the commercial modules
+  // (Purchase, Sales, Customer History, CP and Stock). Both are gated per-child by
+  // canSee(), so a role only sees the children it could already reach — no route or
+  // permission change, only presentation.
 
-  const showOverview  = canSee('/dashboard');
-  const showPurchase  = visiblePurchaseTabs.length > 0;
+  const showOverview = canSee('/dashboard');
 
-  // Workspace section header — only if at least one workspace item is visible
-  const showWorkspace = showOverview || showPurchase;
+  const visibleFactoryItems    = FACTORY_ITEMS.filter((it) => canSee(it.path));
+  const visibleOperationsItems = OPERATIONS_ITEMS.filter((it) => canSee(it.path));
+  const showFactory    = visibleFactoryItems.length > 0;
+  const showOperations = visibleOperationsItems.length > 0;
 
-  // Operations items
-  const showBatches      = canSee('/dashboard/batches');
-  const showNightMgr     = canSee('/dashboard/night-manager');
-  const showStock        = canSee('/dashboard/stock');   // CPM Stock = operational inventory
-
-  // L1 entry views — shown ONLY for the specific role that owns the task.
-  // Admin/Unit Head monitor via boards (Batch Sheet, Night Manager, CPM Stock) — not entry terminals.
-  // Accountants do not see operations — they only access Finance and Reference sections.
-  const isAccountant = activeProfile.id === 'accountant_delhi' || activeProfile.id === 'accountant_other';
+  // L1 entry views — shown ONLY for the specific role that owns the task, as flat
+  // items. Admin/Unit Head monitor via the Factory boards, not entry terminals.
   const showWarehouseEntry = activeProfile.id === 'warehouse_manager';
   const showNightEntry     = activeProfile.id === 'night_manager';
-  const showBatchEntry     = activeProfile.id === 'factory_operator';
   // Daily log upload: admin + unit_head only. The Technical Team (factory_operator)
   // is the Batch Logger — their only job is "Log Reading" (batch-entry), and
   // /dashboard/daily-log isn't in their allowed routes, so it must not appear.
   const showDailyLog = ['admin','unit_head'].includes(activeProfile.id);
 
-  const showOperations = !isAccountant && (showBatches || showNightMgr || showStock || showWarehouseEntry || showNightEntry || showBatchEntry || showDailyLog);
+  // Flat entry terminals live below the dropdowns (operators use their own branch).
+  // Daily Unit Log now lives in the Reference dropdown, not here.
+  const showEntryTerminals = showWarehouseEntry || showNightEntry;
 
-  // Finance items
-  const showSales     = canSee('/dashboard/sales');
-  const showCustomers = canSee('/dashboard/customers');
-  const showFinance   = showSales || showCustomers;
+  // Workspace section header — visible if any workspace item is visible.
+  const showWorkspace = showOverview || showFactory || showOperations || isOperator || showEntryTerminals;
 
-  // Reference items
+  // Reference dropdown — Daily Unit Log · Oil Ratio Table · Audit Log.
   const showOilRatio = canSee('/dashboard/oil-ratio');
   const showAudit    = canSee('/dashboard/audit');
-  const showReference = showOilRatio || showAudit;
+  const showReference = showDailyLog || showOilRatio || showAudit;
 
   // Monitoring items
   const showAnomalies = canSee('/dashboard/anomalies');
@@ -294,6 +303,22 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
     if (path === '/dashboard') return location.pathname === '/dashboard';
     return location.pathname.startsWith(path);
   };
+
+  // Child highlight. For the route shared by Factory→Purchase Order and
+  // Operations→Purchase, only the entry the user opened (tracked by ?ctx=ops)
+  // lights up — never both.
+  const itemActive = (it: NavItem) => {
+    if (it.path === SHARED_PO_ROUTE) {
+      if (!onSharedPO) return false;
+      const isOpsEntry = it.nav?.includes('ctx=ops') ?? false;
+      return isOpsEntry ? viaOps : !viaOps;
+    }
+    return isActive(it.path);
+  };
+
+  // Parent-dropdown highlight: active when any visible child is active.
+  const factoryActive    = visibleFactoryItems.some(itemActive);
+  const operationsActive = visibleOperationsItems.some(itemActive);
 
   // Batch logger tab (?tab=) — used to highlight the operator's Batch/Logs sub-items.
   const currentTab = new URLSearchParams(location.search).get('tab') || 'reading';
@@ -346,21 +371,21 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
           </a>
         )}
 
-        {/* Purchase accordion — only purchase tabs this role can access */}
-        {showPurchase && (
+        {/* Factory accordion — FAR · Maintenance · Activity · Store Req · PO · Batch Sheet · Night Manager */}
+        {showFactory && (
           <>
             <a
-              className={`nav-link${isActive('/dashboard/purchase') ? ' active' : ''}`}
+              className={`nav-link${factoryActive ? ' active' : ''}`}
               onClick={() => {
-                setPurchaseOpen((o) => !o);
-                if (!purchaseOpen) navTo(`/dashboard/purchase/${visiblePurchaseTabs[0].tab}`);
+                setFactoryOpen((o) => !o);
+                if (!factoryOpen) navTo(visibleFactoryItems[0].nav ?? visibleFactoryItems[0].path);
               }}
             >
               <IconBox />
-              <span>{t('nav.purchase')}</span>
+              <span>{t('nav.factory')}</span>
               <svg
                 className="ml-auto transition-transform duration-200"
-                style={{ transform: purchaseOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                style={{ transform: factoryOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
                 width="11" height="11" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" strokeWidth="2.4"
               >
@@ -368,17 +393,53 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
               </svg>
             </a>
 
-            {purchaseOpen && (
+            {factoryOpen && (
               <div className="nav-sub">
-                {visiblePurchaseTabs.map((pt) => (
+                {visibleFactoryItems.map((it) => (
                   <a
-                    key={pt.tab}
-                    className={`nav-link${
-                      location.pathname === `/dashboard/purchase/${pt.tab}` ? ' active' : ''
-                    }`}
-                    onClick={() => navTo(`/dashboard/purchase/${pt.tab}`)}
+                    key={it.path}
+                    className={`nav-link${itemActive(it) ? ' active' : ''}`}
+                    onClick={() => navTo(it.nav ?? it.path)}
                   >
-                    {t(pt.key)}
+                    {t(it.key)}
+                  </a>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Operations accordion — Purchase · Sales · Customer History · CP and Stock */}
+        {showOperations && (
+          <>
+            <a
+              className={`nav-link${operationsActive ? ' active' : ''}`}
+              onClick={() => {
+                setOperationsOpen((o) => !o);
+                if (!operationsOpen) navTo(visibleOperationsItems[0].nav ?? visibleOperationsItems[0].path);
+              }}
+            >
+              <IconCart />
+              <span>{t('section.operations')}</span>
+              <svg
+                className="ml-auto transition-transform duration-200"
+                style={{ transform: operationsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                width="11" height="11" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2.4"
+              >
+                <path d="m9 6 6 6-6 6"/>
+              </svg>
+            </a>
+
+            {operationsOpen && (
+              <div className="nav-sub">
+                {visibleOperationsItems.map((it) => (
+                  <a
+                    key={it.path}
+                    className={`nav-link${itemActive(it) ? ' active' : ''}`}
+                    onClick={() => navTo(it.nav ?? it.path)}
+                  >
+                    {t(it.key)}
                   </a>
                 ))}
               </div>
@@ -387,11 +448,8 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
         )}
       </nav>
 
-      {/* ── OPERATIONS ────────────────────────────────────────────────────── */}
-      {showOperations && <SectionHeader label={t('section.operations')} />}
-
-      {/* Technical Team: 3 dropdowns (Batch / Operations / Logs) like the Purchase accordion */}
-      {isOperator ? (
+      {/* ── Technical Team (factory_operator) special nav — Batch / Operations / Logs ── */}
+      {isOperator && (
       <nav className="flex flex-col gap-1">
 
         {/* Batch dropdown */}
@@ -417,13 +475,13 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
           onClick={() => { setOpsOpen((o) => !o); if (!opsOpen) navTo('/dashboard/batches'); }}
         >
           <IconFlask />
-          <span>{t('nav.operations')}</span>
+          <span>{t('section.operations')}</span>
           <svg className="ml-auto transition-transform duration-200" style={{ transform: opsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
         </a>
         {opsOpen && (
           <div className="nav-sub">
             <a className={`nav-link${isActive('/dashboard/batches') ? ' active' : ''}`} onClick={() => navTo('/dashboard/batches')}>{t('nav.batchSheet')}</a>
-            <a className={`nav-link${isActive('/dashboard/stock') ? ' active' : ''}`} onClick={() => navTo('/dashboard/stock')}>{t('nav.cpmStock')}</a>
+            <a className={`nav-link${isActive('/dashboard/stock') ? ' active' : ''}`} onClick={() => navTo('/dashboard/stock')}>{t('nav.cpAndStock')}</a>
           </div>
         )}
 
@@ -443,43 +501,11 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
           </div>
         )}
       </nav>
-      ) : (
-      <nav className="flex flex-col gap-1">
+      )}
 
-        {/* Batch Sheet — production tracking */}
-        {showBatches && (
-          <a
-            className={`nav-link${isActive('/dashboard/batches') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/batches')}
-          >
-            <IconFlask />
-            <span>{t('nav.batchSheet')}</span>
-            <span className="pill-count">1</span>
-          </a>
-        )}
-
-        {/* Night Manager board */}
-        {showNightMgr && (
-          <a
-            className={`nav-link${isActive('/dashboard/night-manager') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/night-manager')}
-          >
-            <IconMoon />
-            <span>{t('nav.nightManager')}</span>
-            <span className="pill-count" style={{ background: '#DBEAFE', color: '#2563EB' }}>new</span>
-          </a>
-        )}
-
-        {/* CPM Stock — physical inventory (operational, not financial) */}
-        {showStock && (
-          <a
-            className={`nav-link${isActive('/dashboard/stock') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/stock')}
-          >
-            <IconStock />
-            <span>{t('nav.cpmStock')}</span>
-          </a>
-        )}
+      {/* ── Role-scoped entry terminals — flat items for the single role that owns each ── */}
+      {!isOperator && showEntryTerminals && (
+      <nav className="flex flex-col gap-1 mt-1">
 
         {/* Warehouse Console — embedded entry view for Warehouse Manager role */}
         {showWarehouseEntry && (
@@ -505,89 +531,68 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
           </a>
         )}
 
-        {/* Batch Entry — embedded view for Factory Operator role */}
-        {showBatchEntry && (
-          <a
-            className={`nav-link${isActive('/dashboard/batch-entry') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/batch-entry')}
-          >
-            <IconBatch />
-            <span>{t('nav.logReading')}</span>
-            <span className="pill-count" style={{ background: '#FAF5FF', color: '#7C3AED' }}>entry</span>
-          </a>
-        )}
+      </nav>
+      )}
 
-        {/* Daily Unit Log — OCR upload for hourly monitoring sheets */}
-        {showDailyLog && (
-          <a
-            className={`nav-link${isActive('/dashboard/daily-log') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/daily-log')}
-          >
-            <IconClipboard />
-            <span>{t('nav.dailyUnitLog')}</span>
-            <span className="pill-count" style={{ background: '#FFFBEB', color: '#D97706' }}>OCR</span>
-          </a>
+      {/* ── REFERENCE (dropdown) — Daily Unit Log · Oil Ratio Table · Audit Log ── */}
+      {showReference && (
+      <nav className="flex flex-col gap-1">
+        <a
+          className={`nav-link${inGroup(['/dashboard/daily-log', '/dashboard/oil-ratio', '/dashboard/audit']) ? ' active' : ''}`}
+          onClick={() => {
+            setRefOpen((o) => !o);
+            if (!refOpen) {
+              const first = showDailyLog ? '/dashboard/daily-log' : showOilRatio ? '/dashboard/oil-ratio' : '/dashboard/audit';
+              navTo(first);
+            }
+          }}
+        >
+          <IconLayers />
+          <span>{t('section.reference')}</span>
+          <svg className="ml-auto transition-transform duration-200" style={{ transform: refOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        {refOpen && (
+          <div className="nav-sub">
+            {showDailyLog && (
+              <a className={`nav-link${isActive('/dashboard/daily-log') ? ' active' : ''}`} onClick={() => navTo('/dashboard/daily-log')}>
+                <span>{t('nav.dailyUnitLog')}</span>
+                <span className="pill-count" style={{ background: '#FFFBEB', color: '#D97706' }}>OCR</span>
+              </a>
+            )}
+            {showOilRatio && (
+              <a className={`nav-link${isActive('/dashboard/oil-ratio') ? ' active' : ''}`} onClick={() => navTo('/dashboard/oil-ratio')}>
+                <span>{t('nav.oilRatioTable')}</span>
+                <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>brain</span>
+              </a>
+            )}
+            {showAudit && (
+              <a className={`nav-link${isActive('/dashboard/audit') ? ' active' : ''}`} onClick={() => navTo('/dashboard/audit')}>
+                <span>{t('nav.auditLog')}</span>
+              </a>
+            )}
+          </div>
         )}
       </nav>
       )}
 
-      {/* ── FINANCE ───────────────────────────────────────────────────────── */}
-      {showFinance && <SectionHeader label={t('section.finance')} />}
-      <nav className="flex flex-col gap-1">
-
-        {/* Sales contracts & dispatch */}
-        {showSales && (
-          <a
-            className={`nav-link${isActive('/dashboard/sales') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/sales')}
-          >
-            <IconCart />
-            <span>{t('nav.sales')}</span>
-            <span className="pill-count">2</span>
-          </a>
-        )}
-
-        {/* Customer history & outstanding */}
-        {showCustomers && (
-          <a
-            className={`nav-link${isActive('/dashboard/customers') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/customers')}
-          >
-            <IconUsers />
-            <span>{t('nav.customerHistory')}</span>
-            <span className="pill-count" style={{ background: '#DBEAFE', color: '#2563EB' }}>new</span>
-          </a>
-        )}
-      </nav>
-
-      {/* ── REFERENCE ─────────────────────────────────────────────────────── */}
-      {showReference && <SectionHeader label={t('section.reference')} />}
-      <nav className="flex flex-col gap-1">
-        {showOilRatio && (
-          <a
-            className={`nav-link${isActive('/dashboard/oil-ratio') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/oil-ratio')}
-          >
-            <IconFile />
-            <span>{t('nav.oilRatioTable')}</span>
-            <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>brain</span>
-          </a>
-        )}
-        {showAudit && (
-          <a
-            className={`nav-link${isActive('/dashboard/audit') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/audit')}
-          >
-            <IconAudit />
-            <span>{t('nav.auditLog')}</span>
-          </a>
-        )}
-      </nav>
-
-      {/* ── MONITORING ────────────────────────────────────────────────────── */}
-      {(showIntelligence || showAnomalies) && <SectionHeader label={t('section.monitoring')} />}
+      {/* ── MONITORING (dropdown) — wraps the Intelligence accordion + Anomaly Detection ── */}
       {(showIntelligence || showAnomalies) && (
         <nav className="flex flex-col gap-1">
+
+          <a
+            className={`nav-link${inGroup([...MONITORING_PATHS, '/dashboard/anomalies']) ? ' active' : ''}`}
+            onClick={() => {
+              setMonSectionOpen((o) => !o);
+              if (!monSectionOpen) navTo(showIntelligence ? INTELLIGENCE_TABS[0].path : '/dashboard/anomalies');
+            }}
+          >
+            <IconRadar />
+            <span>{t('section.monitoring')}</span>
+            <svg className="ml-auto transition-transform duration-200" style={{ transform: monSectionOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
+          </a>
+
+          {monSectionOpen && (
+          <div className="nav-sub">
 
           {/* Intelligence accordion — analytical pages, collapsed like Purchase */}
           {showIntelligence && (
@@ -642,33 +647,43 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
               )}
             </a>
           )}
+          </div>
+          )}
         </nav>
       )}
 
-      {/* ── ADMIN ─────────────────────────────────────────────────────────── */}
-      {(showAdmin || showBlacklist) && <SectionHeader label={t('section.admin')} />}
+      {/* ── ADMIN (dropdown) — expanded by default ────────────────────────── */}
+      {(showAdmin || showBlacklist) && (
       <nav className="flex flex-col gap-1">
-        {showAdmin && (
-          <a
-            className={`nav-link${isActive('/dashboard/users') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/users')}
-          >
-            <IconUserPlus />
-            <span>{t('nav.userManagement')}</span>
-            <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>admin</span>
-          </a>
-        )}
-        {showBlacklist && (
-          <a
-            className={`nav-link${isActive('/dashboard/blacklist') ? ' active' : ''}`}
-            onClick={() => navTo('/dashboard/blacklist')}
-          >
-            <IconBan />
-            <span>{t('nav.blacklist')}</span>
-            <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>restrict</span>
-          </a>
+        <a
+          className={`nav-link${(isActive('/dashboard/users') || isActive('/dashboard/blacklist')) ? ' active' : ''}`}
+          onClick={() => {
+            setAdminOpen((o) => !o);
+            if (!adminOpen) navTo(showAdmin ? '/dashboard/users' : '/dashboard/blacklist');
+          }}
+        >
+          <IconShield />
+          <span>{t('section.admin')}</span>
+          <svg className="ml-auto transition-transform duration-200" style={{ transform: adminOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        {adminOpen && (
+          <div className="nav-sub">
+            {showAdmin && (
+              <a className={`nav-link${isActive('/dashboard/users') ? ' active' : ''}`} onClick={() => navTo('/dashboard/users')}>
+                <span>{t('nav.userManagement')}</span>
+                <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>admin</span>
+              </a>
+            )}
+            {showBlacklist && (
+              <a className={`nav-link${isActive('/dashboard/blacklist') ? ' active' : ''}`} onClick={() => navTo('/dashboard/blacklist')}>
+                <span>{t('nav.blacklist')}</span>
+                <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>restrict</span>
+              </a>
+            )}
+          </div>
         )}
       </nav>
+      )}
 
       {/* ── User card — shows active profile, not real auth user ──────────── */}
       <div className="mt-6 p-3 rounded-2xl bg-slate-50">

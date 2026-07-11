@@ -7,6 +7,11 @@ import { useAuth } from '../../hooks/useAuth';
 
 export function Login() {
   const { t } = useTranslation();
+  // The login page must ALWAYS render in English, even when the user picked Hindi
+  // inside the authenticated app (the choice persists in localStorage). Resolve
+  // every login label against the English resources without mutating the stored
+  // preference, so the app still opens in the user's language after sign-in.
+  const tf = (key: string, opts?: Record<string, unknown>) => t(key, { lng: 'en', ...opts });
   const { signIn, loading, error, session } = useAuth();
   const navigate = useNavigate();
 
@@ -38,7 +43,7 @@ export function Login() {
             <span className="text-white text-xl font-extrabold">S°</span>
           </div>
           <h1 className="serif text-[28px] leading-tight">Suntek Group</h1>
-          <p className="text-sm text-slate-500 mt-1">{t('login.subtitle')}</p>
+          <p className="text-sm text-slate-500 mt-1">{tf('login.subtitle')}</p>
         </div>
 
         {/* Form */}
@@ -46,7 +51,7 @@ export function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                {t('login.identifierLabel')}
+                {tf('login.identifierLabel')}
               </label>
               <input
                 type="text"
@@ -54,13 +59,13 @@ export function Login() {
                 autoComplete="username"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                placeholder={t('login.identifierPlaceholder')}
+                placeholder={tf('login.identifierPlaceholder')}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-400 bg-gray-50"
               />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                {t('login.passwordLabel')}
+                {tf('login.passwordLabel')}
               </label>
               <div className="relative">
                 <input
@@ -74,7 +79,7 @@ export function Login() {
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? t('login.hidePassword') : t('login.showPassword')}
+                  aria-label={showPassword ? tf('login.hidePassword') : tf('login.showPassword')}
                   className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600 focus:outline-none"
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -93,7 +98,7 @@ export function Login() {
               disabled={submitting || loading}
               className="w-full py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? t('login.signingIn') : t('login.signIn')}
+              {submitting ? tf('login.signingIn') : tf('login.signIn')}
             </button>
           </form>
 
@@ -101,15 +106,15 @@ export function Login() {
               a real Supabase sign-in (the dashboard auth gate enforces it). */}
           {import.meta.env.DEV && (
             <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <p className="text-xs text-amber-700 font-medium">{t('login.devMode')}</p>
+              <p className="text-xs text-amber-700 font-medium">{tf('login.devMode')}</p>
               <p className="text-xs text-amber-600 mt-0.5">
-                {t('login.devModeHint')}
+                {tf('login.devModeHint')}
               </p>
               <button
                 onClick={() => navigate('/dashboard')}
                 className="mt-2 text-xs font-semibold text-amber-700 underline hover:no-underline"
               >
-                {t('login.enterDashboard')}
+                {tf('login.enterDashboard')}
               </button>
             </div>
           )}
@@ -118,10 +123,10 @@ export function Login() {
         {/* Role guide */}
         <div className="mt-4 grid grid-cols-2 gap-2">
           {[
-            { role: 'L1', label: t('login.roleFactoryOperator'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
-            { role: 'L2', label: t('login.roleUnitHead'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
-            { role: 'L3', label: t('login.roleProcurementHead'), color: 'bg-green-50 border-green-200 text-green-700' },
-            { role: 'L4', label: t('login.roleAdmin'), color: 'bg-red-50 border-red-200 text-red-700' },
+            { role: 'L1', label: tf('login.roleFactoryOperator'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
+            { role: 'L2', label: tf('login.roleUnitHead'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
+            { role: 'L3', label: tf('login.roleProcurementHead'), color: 'bg-green-50 border-green-200 text-green-700' },
+            { role: 'L4', label: tf('login.roleAdmin'), color: 'bg-red-50 border-red-200 text-red-700' },
           ].map(({ role, label, color }) => (
             <div key={role} className={`text-center p-2 rounded-lg border text-xs font-medium ${color}`}>
               <span className="font-bold">{role}</span> · {label}

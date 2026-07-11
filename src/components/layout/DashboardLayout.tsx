@@ -64,7 +64,7 @@ function BlacklistedOverlay({ entry, onBack }: { entry: BlacklistEntry; onBack: 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Operations dashboard',
   '/dashboard/sales': 'Sales · contracts & dispatch',
-  '/dashboard/stock': 'CPM Stock · tanks, drums, items',
+  '/dashboard/stock': 'CP and Stock · tanks, drums, items',
   '/dashboard/batches': 'Batch Sheet · production',
   '/dashboard/customers': 'Customer History',
   '/dashboard/night-manager': 'Night Manager · GPS + photos',
@@ -85,17 +85,28 @@ const PAGE_TITLES: Record<string, string> = {
 
 const BREADCRUMBS: Record<string, string> = {
   '/dashboard': 'Workspace · Overview',
-  '/dashboard/sales': 'Workspace · Sales',
-  '/dashboard/stock': 'Workspace · CPM Stock',
-  '/dashboard/batches': 'Workspace · Batch Sheet',
-  '/dashboard/customers': 'Workspace · Customer History',
-  '/dashboard/night-manager': 'Workspace · Night Manager',
+  '/dashboard/sales': 'Operations · Sales',
+  '/dashboard/stock': 'Operations · CP and Stock',
+  '/dashboard/batches': 'Factory · Batch Sheet',
+  '/dashboard/customers': 'Operations · Customer History',
+  '/dashboard/night-manager': 'Factory · Night Manager',
   '/dashboard/oil-ratio': 'Reference · Oil Ratio',
-  '/dashboard/audit': 'Security · Operations',
+  '/dashboard/audit': 'Reference · Audit Log',
   '/dashboard/anomalies': 'Monitoring · Anomaly Detection',
-  '/dashboard/night-entry':     'Operations · Night Check-in',
-  '/dashboard/batch-entry':     'Operations · Batch Logger',
-  '/dashboard/warehouse-entry': 'Operations · Warehouse Console',
+  '/dashboard/night-entry':     'Workspace · Night Check-in',
+  '/dashboard/batch-entry':     'Workspace · Batch Logger',
+  '/dashboard/warehouse-entry': 'Workspace · Warehouse Console',
+};
+
+/** Per-sub-page titles/breadcrumbs for the Factory dropdown's Purchase routes. */
+const FACTORY_SUBPAGES: Record<string, { title: string; breadcrumb: string }> = {
+  '/dashboard/purchase/far':      { title: 'Fixed Asset Register (FAR)', breadcrumb: 'Factory · FAR' },
+  '/dashboard/purchase/maint':    { title: 'Maintenance',                breadcrumb: 'Factory · Maintenance' },
+  '/dashboard/purchase/activity': { title: 'Activity Log',               breadcrumb: 'Factory · Activity Log' },
+  '/dashboard/purchase/storereq': { title: 'Store Requisition',          breadcrumb: 'Factory · Store Requisition' },
+  '/dashboard/purchase/purchase': { title: 'Purchase Order',             breadcrumb: 'Factory · Purchase Order' },
+  '/dashboard/purchase/marine':   { title: 'Marine Insurance',           breadcrumb: 'Factory · Marine Insurance' },
+  '/dashboard/purchase/labour':   { title: 'Labour',                     breadcrumb: 'Factory · Labour' },
 };
 
 /** Purchase tab paths — used to check if a restricted profile has any purchase access */
@@ -167,8 +178,19 @@ export function DashboardLayout() {
   let breadcrumb = BREADCRUMBS[path] ?? 'Workspace · Overview';
 
   if (path.startsWith('/dashboard/purchase')) {
-    title = 'Purchase · FAR · Maintenance · Store Req · POs · Marine · Labour';
-    breadcrumb = 'Workspace · Purchase';
+    // The horizontal sub-tab strip is gone; show the specific Factory sub-page.
+    // The Purchase Orders page is shared with Operations→Purchase; when reached
+    // that way (?ctx=ops) show the Operations framing instead of Factory's.
+    const viaOps = path === '/dashboard/purchase/purchase'
+      && new URLSearchParams(location.search).get('ctx') === 'ops';
+    if (viaOps) {
+      title = 'Purchase';
+      breadcrumb = 'Operations · Purchase';
+    } else {
+      const sub = FACTORY_SUBPAGES[path] ?? FACTORY_SUBPAGES['/dashboard/purchase/far'];
+      title = sub.title;
+      breadcrumb = sub.breadcrumb;
+    }
   }
 
   // ── Route-level access guard ───────────────────────────────────────────────

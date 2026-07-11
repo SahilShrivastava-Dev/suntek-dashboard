@@ -39,6 +39,15 @@ function TypeIcon({ type }: { type: NType }) {
   );
 }
 
+/** Shown in place of the type icon for a notification whose workflow is done. */
+function CheckIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface TopBarProps {
@@ -53,7 +62,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
   const { t } = useTranslation();
   const { openPalette } = useSearchPalette();
   const { activeProfile } = useRoleContext();
-  const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady } = useNotifications();
+  const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady, isNotificationCompleted } = useNotifications();
   const [open, setOpen] = useState(false);
   const [photoView, setPhotoView] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -235,6 +244,11 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
                 notifications.map(n => {
                   const isRead = n.read_by?.includes(roleId);
                   const nType = (n.type as NType) || 'info';
+                  // Belongs to a finished workflow (ticket closed) → render muted +
+                  // struck-through with a ✓, so it's clearly part of the audit trail
+                  // and not something still needing action. Still clickable/searchable.
+                  const done = isNotificationCompleted(n);
+                  const restBg = done ? '#F8FAFC' : (isRead ? '#fff' : '#FAFBFF');
                   return (
                     <div
                       key={n.id}
@@ -242,32 +256,38 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
                       style={{
                         display: 'flex', alignItems: 'flex-start', gap: 12,
                         padding: '13px 18px', cursor: n.route ? 'pointer' : 'default',
-                        background: isRead ? '#fff' : '#FAFBFF',
+                        background: restBg,
+                        opacity: done ? 0.72 : 1,
                         borderBottom: '1px solid #F8FAFC',
                         transition: 'background 0.1s',
                       }}
-                      onMouseEnter={e => { if (n.route) (e.currentTarget as HTMLDivElement).style.background = '#F8FAFC'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = isRead ? '#fff' : '#FAFBFF'; }}
+                      onMouseEnter={e => { if (n.route) (e.currentTarget as HTMLDivElement).style.background = '#F1F5F9'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = restBg; }}
                     >
                       <div style={{
                         width: 32, height: 32, borderRadius: 10, flexShrink: 0,
-                        background: ICON_BG[nType], color: ICON_COLOR[nType],
+                        background: done ? '#DCFCE7' : ICON_BG[nType], color: done ? '#16A34A' : ICON_COLOR[nType],
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         marginTop: 1,
                       }}>
-                        <TypeIcon type={nType} />
+                        {done ? <CheckIcon /> : <TypeIcon type={nType} />}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: isRead ? 500 : 700, color: isRead ? '#475569' : '#0F172A', lineHeight: 1.35 }}>
+                        <div style={{ fontSize: 13, fontWeight: done ? 500 : (isRead ? 500 : 700), color: done ? '#94A3B8' : (isRead ? '#475569' : '#0F172A'), lineHeight: 1.35, textDecoration: done ? 'line-through' : 'none' }}>
                           {n.title}
                         </div>
                         {n.body && (
-                          <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3, lineHeight: 1.4 }}>{n.body}</div>
+                          <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3, lineHeight: 1.4, textDecoration: done ? 'line-through' : 'none' }}>{n.body}</div>
                         )}
                         {n.actor_name && (
                           <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>{t('topbar.by', { name: n.actor_name })}</div>
                         )}
-                        <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>{formatAge(n.created_at)}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                          <span style={{ fontSize: 10, color: '#CBD5E1' }}>{formatAge(n.created_at)}</span>
+                          {done && (
+                            <span style={{ fontSize: 9, fontWeight: 700, color: '#16A34A', background: '#DCFCE7', borderRadius: 999, padding: '1px 6px', letterSpacing: '0.02em' }}>✓ {t('topbar.completed')}</span>
+                          )}
+                        </div>
                       </div>
                       {n.photo_url && (
                         <button
@@ -278,7 +298,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
                           📷
                         </button>
                       )}
-                      {!isRead && (
+                      {!isRead && !done && (
                         <div style={{ width: 7, height: 7, borderRadius: '50%', background: DOT[nType], flexShrink: 0, marginTop: 6 }} />
                       )}
                     </div>

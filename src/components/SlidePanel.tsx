@@ -10,14 +10,17 @@ interface SlidePanelProps {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  /** When true, the panel cannot be dismissed (backdrop + close button disabled).
+   *  Use during an in-flight upload so an accidental click can't cancel it. */
+  locked?: boolean;
 }
 
-export function SlidePanel({ open, onClose, title, subtitle, children }: SlidePanelProps) {
+export function SlidePanel({ open, onClose, title, subtitle, children, locked = false }: SlidePanelProps) {
   return (
     <>
       {/* Backdrop */}
       <div
-        onClick={onClose}
+        onClick={locked ? undefined : onClose}
         style={{
           position: 'fixed', inset: 0, zIndex: 40,
           background: 'rgba(15,23,42,0.45)',
@@ -65,20 +68,26 @@ export function SlidePanel({ open, onClose, title, subtitle, children }: SlidePa
             <div style={{ fontSize: 18, fontWeight: 700, color: '#0F172A' }}>{title}</div>
           </div>
           <button
-            onClick={onClose}
+            onClick={locked ? undefined : onClose}
+            disabled={locked}
+            title={locked ? 'Please wait — upload in progress' : undefined}
             style={{
               width: 36, height: 36, borderRadius: '50%',
-              background: '#F1F5F9', border: 'none', cursor: 'pointer',
+              background: '#F1F5F9', border: 'none', cursor: locked ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               marginLeft: 16, flexShrink: 0, marginTop: 2,
               transition: 'background 0.15s',
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#E2E8F0')}
-            onMouseLeave={e => (e.currentTarget.style.background = '#F1F5F9')}
+            onMouseEnter={e => { if (!locked) e.currentTarget.style.background = '#E2E8F0'; }}
+            onMouseLeave={e => { if (!locked) e.currentTarget.style.background = '#F1F5F9'; }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5">
-              <path d="M18 6 6 18M6 6l12 12"/>
-            </svg>
+            {locked ? (
+              <span style={{ width: 15, height: 15, borderRadius: '50%', border: '2px solid #CBD5E1', borderTopColor: '#64748B', display: 'block', animation: 'sp-spin 0.7s linear infinite' }} />
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5">
+                <path d="M18 6 6 18M6 6l12 12"/>
+              </svg>
+            )}
           </button>
         </div>
 

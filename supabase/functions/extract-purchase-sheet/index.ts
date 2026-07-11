@@ -42,9 +42,21 @@ Extract the following fields:
     slNo (string or null), description (string or null), quantity (number or null),
     unit (string or null), ratePerUnit (number or null), amount (number or null),
     hsnCode (string or null)
-- subTotal: subtotal before tax (number or null)
-- taxAmount: total GST / tax amount (number or null)
-- totalAmount: grand total payable (number or null)
+    IMPORTANT column disambiguation (Indian invoices have many numeric columns):
+    * ratePerUnit = the per-unit rate from the "List Price" / "Rate" / "Price/Per"
+      column. It is a PRICE, never a percentage. Ignore "CGST Rate" / "SGST Rate"
+      columns (those are % like 2.50% or 18%).
+    * amount = the row's line total in the RIGHTMOST "Amount" column. It is the
+      PRE-TAX value, normally quantity × ratePerUnit, and is the LARGEST number in
+      that row. NEVER put a "CGST Amount", "SGST Amount", or "IGST" cell here —
+      those are small tax figures (e.g. 904.76), not the line amount (e.g. 38000).
+- subTotal: the taxable value BEFORE GST — labelled "Taxable Amt", "Total Before Tax",
+  or "Sub Total". The sum of all line amounts equals this. (number or null)
+- taxAmount: the TOTAL GST = CGST + SGST + IGST (labelled "Total Tax" / "Tax Amount").
+  This is a SMALL number and is NOT the invoice total. (number or null)
+- totalAmount: the FINAL grand total payable INCLUDING GST — labelled "Grand Total",
+  "Total Amount", "Net Payable". It equals subTotal + taxAmount and is the LARGEST
+  amount on the whole bill. Never put the tax value or a subtotal here. (number or null)
 - paymentTerms: payment terms text if visible (string or null)
 - remarks: any additional notes or remarks visible on the document (string, empty if none)
 

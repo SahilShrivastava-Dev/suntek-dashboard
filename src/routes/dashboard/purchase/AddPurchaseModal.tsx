@@ -6,6 +6,7 @@ import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { deriveEquipment, normalizeUnit } from '../../../lib/store/parseStockFile';
 import { parseBill, matchCandidates, type ParsedBill, type StockLite } from '../../../lib/store/purchaseParse';
+import { reconcileBillAmount } from '../../../lib/nvidiaOcr';
 import { ProgressBar, useFakeProgress } from '../../../components/ui/ProgressBar';
 
 type StockItem = StockLite & { plant_id: string | null };
@@ -160,9 +161,14 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
     } catch (e) { setErr(errMsg(e)); setStage('error'); }
   }
 
-  // Validation banner (bill only): compare line amounts vs invoice total.
+  // Validation banner (bill only): reconcile the sum of line amounts against the
+  // bill's totals in a TAX-AWARE way. Line amounts are pre-tax, so they add up to
+  // the sub-total, not the GST-inclusive grand total — comparing against the grand
+  // total alone flags every taxed bill falsely. reconcileBillAmount accepts any
+  // plausible base (sub-total / total−tax / tax-inclusive total).
   const amountSum = lines.reduce((s, l) => s + (l.amount || 0), 0);
-  const totalMismatch = bill?.totalAmount != null && amountSum > 0 && Math.abs(amountSum - bill.totalAmount) / bill.totalAmount > 0.02;
+  const recon = reconcileBillAmount(amountSum, { subTotal: bill?.subTotal, taxAmount: bill?.taxAmount, totalAmount: bill?.totalAmount });
+  const totalMismatch = bill != null && !recon.ok;
 
   return (
     <div style={overlay} onClick={() => { if (stage !== 'parsing' && stage !== 'saving') close(); }}>
@@ -214,7 +220,7 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
               <div style={{ fontSize: 12, color: '#475569', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
                 {bill.invoiceNumber ? <>Invoice <strong>{bill.invoiceNumber}</strong>{bill.supplierName ? ` · ${bill.supplierName}` : ''} · </> : null}
                 <strong>{lines.length}</strong> item(s) read from {bill.pages} page(s).
-                {totalMismatch && <span style={{ color: '#B45309' }}> ⚠ line amounts (₹{Math.round(amountSum).toLocaleString('en-IN')}) differ from bill total (₹{Math.round(bill.totalAmount!).toLocaleString('en-IN')}) — verify quantities.</span>}
+                {totalMismatch && <span style={{ color: '#B45309' }}> ⚠ line amounts (₹{Math.round(amountSum).toLocaleString('en-IN')}) don't reconcile with the bill's pre-tax total (₹{recon.expected != null ? Math.round(recon.expected).toLocaleString('en-IN') : '?'}) — verify quantities.</span>}
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

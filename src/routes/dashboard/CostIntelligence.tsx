@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { SkeletonRows, ErrorState, EmptyState } from '../../components/ui/states';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
+import { useSortable, Th } from '../../components/ui/useSortable';
 import { computeBatchCost, DEFAULT_COST_CONFIG, type CostConfig } from '../../lib/algorithms/costEngine';
 import type { Database } from '../../lib/database.types';
 
@@ -67,6 +68,19 @@ export function CostIntelligence() {
     return { totalLanded, avgPerMT, count: costed.length };
   }, [costed]);
 
+  const cSort = useSortable(costed, {
+    batch:     c => c.batch.batch_no,
+    plant:     c => c.batch.plants?.name ?? '',
+    output:    c => c.outputMT,
+    reactor:   c => c.reactorHours,
+    material:  c => c.cost.materialCost,
+    labour:    c => c.cost.labourCost,
+    energy:    c => c.cost.energyCost,
+    overhead:  c => c.cost.overheadCost,
+    landed:    c => c.cost.landedCost,
+    costPerMT: c => c.cost.costPerMT,
+  });
+
   function setRate(key: keyof CostConfig, value: string) {
     const n = parseFloat(value);
     setConfig(c => ({ ...c, [key]: Number.isFinite(n) ? n : 0 }));
@@ -127,13 +141,13 @@ export function CostIntelligence() {
             <table className="dt">
               <thead>
                 <tr>
-                  <th>{t('costIntel.colBatch')}</th><th>{t('costIntel.colPlant')}</th><th className="num">{t('costIntel.colOutput')}</th><th className="num">{t('costIntel.colReactorHrs')}</th>
-                  <th className="num">{t('costIntel.colMaterial')}</th><th className="num">{t('costIntel.colLabour')}</th><th className="num">{t('costIntel.colEnergy')}</th>
-                  <th className="num">{t('costIntel.colOverhead')}</th><th className="num">{t('costIntel.colLanded')}</th><th className="num">{t('costIntel.colCostPerMT')}</th>
+                  <Th sortKey="batch" s={cSort}>{t('costIntel.colBatch')}</Th><Th sortKey="plant" s={cSort}>{t('costIntel.colPlant')}</Th><Th sortKey="output" s={cSort} firstDir="desc" className="num">{t('costIntel.colOutput')}</Th><Th sortKey="reactor" s={cSort} firstDir="desc" className="num">{t('costIntel.colReactorHrs')}</Th>
+                  <Th sortKey="material" s={cSort} firstDir="desc" className="num">{t('costIntel.colMaterial')}</Th><Th sortKey="labour" s={cSort} firstDir="desc" className="num">{t('costIntel.colLabour')}</Th><Th sortKey="energy" s={cSort} firstDir="desc" className="num">{t('costIntel.colEnergy')}</Th>
+                  <Th sortKey="overhead" s={cSort} firstDir="desc" className="num">{t('costIntel.colOverhead')}</Th><Th sortKey="landed" s={cSort} firstDir="desc" className="num">{t('costIntel.colLanded')}</Th><Th sortKey="costPerMT" s={cSort} firstDir="desc" className="num">{t('costIntel.colCostPerMT')}</Th>
                 </tr>
               </thead>
               <tbody>
-                {costed.map(({ batch, outputMT, reactorHours, cost }) => (
+                {cSort.sorted.map(({ batch, outputMT, reactorHours, cost }) => (
                   <tr key={batch.id}>
                     <td className="font-semibold">{batch.batch_no}</td>
                     <td className="text-slate-500">{batch.plants?.name || '—'}</td>

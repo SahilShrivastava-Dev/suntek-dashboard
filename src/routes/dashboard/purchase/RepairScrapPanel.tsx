@@ -7,6 +7,7 @@ import { SkeletonRows, EmptyState } from '../../../components/ui/states';
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { usePagination } from '../../../components/ui/usePagination';
 import { TablePagination } from '../../../components/ui/TablePagination';
+import { useSortable, Th } from '../../../components/ui/useSortable';
 import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
 import type { Database } from '../../../lib/database.types';
 
@@ -74,7 +75,14 @@ function RepairScrapTable({ title, accent, rows, onOpenTicket, onPhoto }: {
   onOpenTicket: (id: string) => void;
   onPhoto: (imgs: LightboxImage[]) => void;
 }) {
-  const { pageRows, controls } = usePagination(rows, { initialPageSize: 10, resetKey: rows.length });
+  const s = useSortable(rows, {
+    equipment: r => r.equipment,
+    plant: r => r.plants?.name,
+    ticket: r => r.id,
+    closed: r => (r.closed_at ? new Date(r.closed_at) : null),
+    status: r => r.status,
+  }, { key: 'closed', dir: 'desc' });
+  const { pageRows, controls } = usePagination(s.sorted, { initialPageSize: 10, resetKey: `${rows.length}|${s.sort.key}|${s.sort.dir}` });
   return (
     <div>
       <div style={{ fontSize: 12, fontWeight: 800, color: accent, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>{title} · {rows.length}</div>
@@ -83,7 +91,7 @@ function RepairScrapTable({ title, accent, rows, onOpenTicket, onPhoto }: {
       ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
-            <thead><tr><th>Equipment</th><th>Plant</th><th>Ticket #</th><th>Closed</th><th>Status</th><th>Photo</th></tr></thead>
+            <thead><tr><Th sortKey="equipment" s={s}>Equipment</Th><Th sortKey="plant" s={s}>Plant</Th><Th sortKey="ticket" s={s}>Ticket #</Th><Th sortKey="closed" s={s} firstDir="desc">Closed</Th><Th sortKey="status" s={s}>Status</Th><th>Photo</th></tr></thead>
             <tbody>
               {pageRows.map(r => (
                 <tr key={r.id}>

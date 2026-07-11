@@ -8,6 +8,7 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRo
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { useSortable, Th } from '../../../components/ui/useSortable';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import type { Database } from '../../../lib/database.types';
 
@@ -92,6 +93,14 @@ export function MarineInsurance() {
     ledgerFilter === 'all' ? true : ledgerFilter === 'top-up' ? l.type === 'top_up' : l.type === 'deduction'
   );
 
+  const lSort = useSortable(ledger, {
+    date:      l => new Date(l.date),
+    type:      l => l.type,
+    reference: l => l.reference,
+    amount:    l => l.amount,
+    balance:   l => l.balance,
+  }, { key: 'date', dir: 'desc' });
+
   return (
     <>
       {/* Balance + stats */}
@@ -158,12 +167,12 @@ export function MarineInsurance() {
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('marine.colDate')}</th><th>{t('marine.colType')}</th><th>{t('marine.colReference')}</th>
-                <th className="num">{t('marine.colAmount')}</th><th className="num">{t('marine.colBalance')}</th>
+                <Th sortKey="date" s={lSort} firstDir="desc">{t('marine.colDate')}</Th><Th sortKey="type" s={lSort}>{t('marine.colType')}</Th><Th sortKey="reference" s={lSort}>{t('marine.colReference')}</Th>
+                <Th sortKey="amount" s={lSort} firstDir="desc" className="num">{t('marine.colAmount')}</Th><Th sortKey="balance" s={lSort} firstDir="desc" className="num">{t('marine.colBalance')}</Th>
               </tr>
             </thead>
             <tbody>
-              {ledger.map((l, i) => (
+              {lSort.sorted.map((l, i) => (
                 <tr key={l.id || i}>
                   <td className="text-slate-500">{l.date}</td>
                   <td>

@@ -43,6 +43,11 @@ export interface ParsedBill {
   invoiceNumber: string | null;
   supplierName: string | null;
   lineItems: PurchaseLineItem[];
+  /** Taxable value before GST (Total Before Tax). Line amounts reconcile to this. */
+  subTotal: number | null;
+  /** Total GST / tax on the bill. */
+  taxAmount: number | null;
+  /** Grand total payable, GST-inclusive. */
   totalAmount: number | null;
   pages: number;
 }
@@ -71,11 +76,18 @@ export async function parseBill(
       : 'The bill could not be read. Try a clearer photo or a different page.');
   }
   const lineItems = results.flatMap(r => r.lineItems || []).filter(li => (li.description || '').trim());
-  const totalAmount = results.reduce<number | null>((acc, r) => (r.totalAmount != null ? (acc ?? 0) + r.totalAmount : acc), null);
+  // Sum each figure across pages (a bill's totals usually print on the last page only,
+  // so this is effectively "take whichever page reported it").
+  const sumField = (pick: (r: ExtractedPurchaseSheet) => number | null): number | null =>
+    results.reduce<number | null>((acc, r) => { const v = pick(r); return v != null ? (acc ?? 0) + v : acc; }, null);
   return {
     invoiceNumber: results.find(r => r.invoiceNumber)?.invoiceNumber ?? null,
     supplierName: results.find(r => r.supplierName)?.supplierName ?? null,
-    lineItems, totalAmount, pages: images.length,
+    lineItems,
+    subTotal: sumField(r => r.subTotal),
+    taxAmount: sumField(r => r.taxAmount),
+    totalAmount: sumField(r => r.totalAmount),
+    pages: images.length,
   };
 }
 

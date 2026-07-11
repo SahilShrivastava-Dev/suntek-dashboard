@@ -14,6 +14,7 @@ import { SlidePanel, PanelField, PanelInput, PanelPasswordInput, PanelSelect, Pa
 import { useToast } from '../../components/ui/toast';
 import { usePagination } from '../../components/ui/usePagination';
 import { TablePagination } from '../../components/ui/TablePagination';
+import { useSortable, Th } from '../../components/ui/useSortable';
 
 interface UserEvent {
   id: string;
@@ -320,7 +321,19 @@ export function UserManagement() {
     }
     return true;
   });
-  const usersPg = usePagination(filtered, { resetKey: `${search}|${filterRole}|${filterStatus}` });
+  const usersSort = useSortable(filtered, {
+    name: u => u.name,
+    mobile: u => u.mobile,
+    whatsapp: u => u.whatsapp || u.mobile,
+    email: u => u.email,
+    role: u => u.role_label || roleOptions.find(r => r.id === u.role_id)?.label || u.role_id,
+    level: u => roleOptions.find(r => r.id === u.role_id)?.level,
+    plant: u => u.plants?.name || u.plant_name,
+    designation: u => u.designation,
+    status: u => (u.is_active ? 1 : 0),
+    added: u => (u.created_at ? new Date(u.created_at) : null),
+  }, { key: 'added', dir: 'desc' });
+  const usersPg = usePagination(usersSort.sorted, { resetKey: `${search}|${filterRole}|${filterStatus}|${usersSort.sort.key}|${usersSort.sort.dir}` });
 
   function openAdd() {
     setEditingUser(null);
@@ -647,16 +660,16 @@ export function UserManagement() {
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('userMgmt.colName')}</th>
-                <th>{t('userMgmt.colMobile')}</th>
-                <th>{t('userMgmt.colWhatsApp')}</th>
-                <th>{t('userMgmt.colEmail')}</th>
-                <th>{t('userMgmt.colRole')}</th>
-                <th>{t('userMgmt.colLevel')}</th>
-                <th>{t('userMgmt.colPlant')}</th>
-                <th>{t('userMgmt.colDesignation')}</th>
-                <th>{t('userMgmt.colStatus')}</th>
-                <th>{t('userMgmt.colAdded')}</th>
+                <Th sortKey="name" s={usersSort}>{t('userMgmt.colName')}</Th>
+                <Th sortKey="mobile" s={usersSort}>{t('userMgmt.colMobile')}</Th>
+                <Th sortKey="whatsapp" s={usersSort}>{t('userMgmt.colWhatsApp')}</Th>
+                <Th sortKey="email" s={usersSort}>{t('userMgmt.colEmail')}</Th>
+                <Th sortKey="role" s={usersSort}>{t('userMgmt.colRole')}</Th>
+                <Th sortKey="level" s={usersSort}>{t('userMgmt.colLevel')}</Th>
+                <Th sortKey="plant" s={usersSort}>{t('userMgmt.colPlant')}</Th>
+                <Th sortKey="designation" s={usersSort}>{t('userMgmt.colDesignation')}</Th>
+                <Th sortKey="status" s={usersSort}>{t('userMgmt.colStatus')}</Th>
+                <Th sortKey="added" s={usersSort} firstDir="desc">{t('userMgmt.colAdded')}</Th>
                 <th>{t('userMgmt.colActions')}</th>
               </tr>
             </thead>

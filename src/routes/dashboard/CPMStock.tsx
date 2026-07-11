@@ -6,6 +6,7 @@ import { useToast } from '../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../components/ui/states';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../lib/scopedList';
+import { useSortable, Th } from '../../components/ui/useSortable';
 import type { Database } from '../../lib/database.types';
 
 type StockRow = Database['public']['Tables']['stock_levels']['Row'] & { plants?: { name: string | null } | null };
@@ -71,6 +72,13 @@ export function CPMStock() {
   const filteredItems = stockItems.filter(i =>
     !storeSearch || (i.product || '').toLowerCase().includes(storeSearch.toLowerCase())
   );
+  const storeSort = useSortable(filteredItems, {
+    product: i => i.product,
+    plant: i => i.plants?.name,
+    density: i => i.density,
+    quantity: i => i.quantity,
+    date: i => (i.date ? new Date(i.date) : null),
+  }, { key: 'date', dir: 'desc' });
 
   // Pivot the normalised drum rows back into the density×location matrix.
   const densities = [...new Set(drumRows.map(r => r.density))].sort((a, b) => a - b);
@@ -281,12 +289,12 @@ export function CPMStock() {
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('cpmStock.product')}</th><th>{t('cpmStock.plant')}</th><th className="num">{t('cpmStock.density')}</th>
-                <th className="num">{t('cpmStock.qty')}</th><th>{t('cpmStock.date')}</th>
+                <Th sortKey="product" s={storeSort}>{t('cpmStock.product')}</Th><Th sortKey="plant" s={storeSort}>{t('cpmStock.plant')}</Th><Th sortKey="density" s={storeSort} firstDir="desc" className="num">{t('cpmStock.density')}</Th>
+                <Th sortKey="quantity" s={storeSort} firstDir="desc" className="num">{t('cpmStock.qty')}</Th><Th sortKey="date" s={storeSort} firstDir="desc">{t('cpmStock.date')}</Th>
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map(i => (
+              {storeSort.sorted.map(i => (
                 <tr key={i.id} style={{ cursor: 'pointer' }}>
                   <td className="font-semibold">{i.product}</td>
                   <td>{i.plants?.name || '—'}</td>

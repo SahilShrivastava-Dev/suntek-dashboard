@@ -3,6 +3,7 @@ import { EmptyState } from '../../components/ui/states';
 import { usePagination } from '../../components/ui/usePagination';
 import { TablePagination } from '../../components/ui/TablePagination';
 import { TableSearch, useTextFilter } from '../../components/ui/TableSearch';
+import { useSortable, Th } from '../../components/ui/useSortable';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { insertRows } from '../../lib/db';
@@ -36,7 +37,15 @@ export function Sales() {
   const [salesSearch, setSalesSearch] = useState('');
   const contractRows = liveContracts || [];
   const filteredContracts = useTextFilter(contractRows, salesSearch, c => [c.customer, c.status]);
-  const salesPg = usePagination(filteredContracts, { resetKey: salesSearch });
+  const salesSort = useSortable(filteredContracts, {
+    customer: c => c.customer,
+    totalSales: c => c.totalSales,
+    mtdSales: c => c.mtdSales,
+    invoiceCount: c => c.invoiceCount,
+    outstanding: c => c.outstanding,
+    status: c => c.status,
+  });
+  const salesPg = usePagination(salesSort.sorted, { resetKey: `${salesSearch}|${salesSort.sort.key}|${salesSort.sort.dir}` });
   const { data: analytics } = useAnalyticsKPIs();
 
   function handleExport() {
@@ -334,12 +343,12 @@ export function Sales() {
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('sales.colCustomer')}</th>
-                <th className="num">{t('sales.colFySales')}</th>
-                <th className="num">{t('sales.colMtdSales')}</th>
-                <th className="num">{t('sales.colInvoices')}</th>
-                <th className="num">{t('sales.colOutstanding')}</th>
-                <th>{t('sales.colStatus')}</th>
+                <Th sortKey="customer" s={salesSort}>{t('sales.colCustomer')}</Th>
+                <Th sortKey="totalSales" s={salesSort} firstDir="desc" className="num">{t('sales.colFySales')}</Th>
+                <Th sortKey="mtdSales" s={salesSort} firstDir="desc" className="num">{t('sales.colMtdSales')}</Th>
+                <Th sortKey="invoiceCount" s={salesSort} firstDir="desc" className="num">{t('sales.colInvoices')}</Th>
+                <Th sortKey="outstanding" s={salesSort} firstDir="desc" className="num">{t('sales.colOutstanding')}</Th>
+                <Th sortKey="status" s={salesSort}>{t('sales.colStatus')}</Th>
               </tr>
             </thead>
             <tbody>

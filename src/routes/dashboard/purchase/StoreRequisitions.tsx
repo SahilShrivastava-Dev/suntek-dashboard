@@ -12,6 +12,7 @@ import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/sta
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { usePagination } from '../../../components/ui/usePagination';
 import { TablePagination } from '../../../components/ui/TablePagination';
+import { useSortable, Th } from '../../../components/ui/useSortable';
 import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
@@ -76,7 +77,15 @@ export function StoreRequisitions() {
   const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
 
   const filtered = useTextFilter(items, search, r => [r.item, r.plants?.name, r.id.slice(0, 8), r.status, r.ticket_id ? r.ticket_id.slice(0, 8) : '']);
-  const { pageRows, controls } = usePagination(filtered, { resetKey: search });
+  const reqSort = useSortable(filtered, {
+    reqno: r => r.id,
+    ticket: r => r.ticket_id ?? null,
+    item: r => r.item,
+    plant: r => r.plants?.name,
+    qty: r => r.qty,
+    stage: r => r.status,
+  });
+  const { pageRows, controls } = usePagination(reqSort.sorted, { resetKey: `${search}|${reqSort.sort.key}|${reqSort.sort.dir}` });
 
   async function load() {
     try {
@@ -193,8 +202,8 @@ export function StoreRequisitions() {
               <table className="dt">
                 <thead>
                   <tr>
-                    <th>{t('storereq.col_req_no')}</th><th>{t('storereq.col_ticket', 'Ticket #')}</th><th>{t('storereq.col_item')}</th><th>{t('storereq.col_plant')}</th><th className="num">{t('storereq.col_qty')}</th>
-                    <th>{t('storereq.col_stage')}</th><th>{t('storereq.col_awaiting')}</th><th>{t('storereq.col_decision')}</th><th>{t('storereq.col_pic')}</th>
+                    <Th sortKey="reqno" s={reqSort}>{t('storereq.col_req_no')}</Th><Th sortKey="ticket" s={reqSort}>{t('storereq.col_ticket', 'Ticket #')}</Th><Th sortKey="item" s={reqSort}>{t('storereq.col_item')}</Th><Th sortKey="plant" s={reqSort}>{t('storereq.col_plant')}</Th><Th sortKey="qty" s={reqSort} firstDir="desc" className="num">{t('storereq.col_qty')}</Th>
+                    <Th sortKey="stage" s={reqSort}>{t('storereq.col_stage')}</Th><th>{t('storereq.col_awaiting')}</th><th>{t('storereq.col_decision')}</th><th>{t('storereq.col_pic')}</th>
                   </tr>
                 </thead>
                 <tbody>

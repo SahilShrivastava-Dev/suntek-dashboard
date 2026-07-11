@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelTextarea, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { useSortable, Th } from '../../../components/ui/useSortable';
 import { useMentionNotifier } from '../../../lib/mentions';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
@@ -53,6 +54,18 @@ export function Labour() {
 
   const totalCost = costs.reduce((s, c) => s + (c.computed_cost || 0), 0);
   const flaggedCount = costs.filter(c => c.is_flagged).length;
+
+  const cSort = useSortable(costs, {
+    plant:        c => c.plants?.name ?? '',
+    date:         c => new Date(c.date),
+    purchaseQty:  c => c.purchased_qty,
+    salesQty:     c => c.sales_qty,
+    computedCost: c => c.computed_cost ?? 0,
+    targetCost:   c => c.target_cost ?? 0,
+    perMt:        c => c.per_mt_cost ?? 0,
+    variance:     c => c.variance_pct ?? 0,
+    flag:         c => (c.is_flagged ? 1 : 0),
+  }, { key: 'date', dir: 'desc' });
 
   return (
     <>
@@ -108,19 +121,19 @@ export function Labour() {
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('labour.colPlant')}</th>
-                <th>{t('labour.colDate')}</th>
-                <th className="num">{t('labour.colPurchaseQty')}</th>
-                <th className="num">{t('labour.colSalesQty')}</th>
-                <th className="num">{t('labour.colComputedCost')}</th>
-                <th className="num">{t('labour.colTargetCost')}</th>
-                <th className="num">{t('labour.colPerMt')}</th>
-                <th>{t('labour.colVariance')}</th>
-                <th>{t('labour.colFlag')}</th>
+                <Th sortKey="plant" s={cSort}>{t('labour.colPlant')}</Th>
+                <Th sortKey="date" s={cSort} firstDir="desc">{t('labour.colDate')}</Th>
+                <Th sortKey="purchaseQty" s={cSort} firstDir="desc" className="num">{t('labour.colPurchaseQty')}</Th>
+                <Th sortKey="salesQty" s={cSort} firstDir="desc" className="num">{t('labour.colSalesQty')}</Th>
+                <Th sortKey="computedCost" s={cSort} firstDir="desc" className="num">{t('labour.colComputedCost')}</Th>
+                <Th sortKey="targetCost" s={cSort} firstDir="desc" className="num">{t('labour.colTargetCost')}</Th>
+                <Th sortKey="perMt" s={cSort} firstDir="desc" className="num">{t('labour.colPerMt')}</Th>
+                <Th sortKey="variance" s={cSort} firstDir="desc">{t('labour.colVariance')}</Th>
+                <Th sortKey="flag" s={cSort} firstDir="desc">{t('labour.colFlag')}</Th>
               </tr>
             </thead>
             <tbody>
-              {costs.map(c => {
+              {cSort.sorted.map(c => {
                 const vPct = c.variance_pct || 0;
                 const tColor = vPct > 0 ? '#D97706' : vPct < 0 ? '#16A34A' : '#475569';
                 const tBg    = vPct > 0 ? '#FEF3C7' : vPct < 0 ? '#DCFCE7' : '#F1F5F9';

@@ -8,6 +8,7 @@ import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { usePagination } from '../../../components/ui/usePagination';
 import { TablePagination } from '../../../components/ui/TablePagination';
+import { useSortable, Th } from '../../../components/ui/useSortable';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import * as XLSX from 'xlsx';
@@ -153,6 +154,43 @@ function PicBadge({ has }: { has: boolean }) {
   );
 }
 
+/** Per-group expanded asset list — extracted so it can own its own sort state
+ *  (hooks can't run inside the group .map()). */
+function AssetDetailTable({ assets, showPlant }: { assets: AssetRow[]; showPlant: boolean }) {
+  const s = useSortable(assets, {
+    mark: a => a.identification_mark,
+    make: a => a.make,
+    serial: a => a.serial_no,
+    model: a => a.model,
+    capacity: a => a.capacity,
+    year: a => a.year,
+    value: a => (a.value == null ? null : Number(a.value)),
+    plant: a => a.plants?.name ?? null,
+  });
+  return (
+    <div className="overflow-x-auto scroll-x">
+      <table className="dt" style={{ margin: 0 }}>
+        <thead><tr><Th sortKey="mark" s={s}>Mark</Th><Th sortKey="make" s={s}>Make</Th><Th sortKey="serial" s={s}>Serial</Th><Th sortKey="model" s={s}>Model</Th><Th sortKey="capacity" s={s} className="num">Capacity</Th><Th sortKey="year" s={s} firstDir="desc" className="num">Year</Th><Th sortKey="value" s={s} firstDir="desc" className="num">Value</Th>{showPlant && <Th sortKey="plant" s={s}>Plant</Th>}<th>Pic</th></tr></thead>
+        <tbody>
+          {s.sorted.map(a => (
+            <tr key={a.id}>
+              <td className="font-semibold text-slate-700">{a.identification_mark || '—'}</td>
+              <td className="text-slate-500 text-xs">{a.make || '—'}</td>
+              <td className="text-slate-500 text-xs">{a.serial_no || '—'}</td>
+              <td className="text-slate-500 text-xs">{a.model || '—'}</td>
+              <td className="num text-xs">{a.capacity || '—'}</td>
+              <td className="num text-xs">{a.year || '—'}</td>
+              <td className="num text-xs font-semibold">{a.value ? `₹ ${Number(a.value).toLocaleString('en-IN')}` : '—'}</td>
+              {showPlant && <td className="text-slate-500 text-xs">{a.plants?.name || '—'}</td>}
+              <td><PicBadge has={!!a.photo_url} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 const ACCOUNT_HEADS = ['Plant & Machinery', 'Electrical Equipment', 'Vehicles', 'Furniture & Fixtures', 'Computer & Peripherals', 'Office Equipment'];
 
@@ -167,7 +205,6 @@ export function FAR() {
   const [equipSearch, setEquipSearch] = useState('');
   const [equipPlantFilter, setEquipPlantFilter] = useState<string[]>([]); // empty = all plants (combined)
   const [equipOpenTable, setEquipOpenTable] = useState(false);            // the big list is hidden until asked
-  const [equipSort, setEquipSort] = useState<{ key: 'type' | 'count'; dir: 'asc' | 'desc' }>({ key: 'type', dir: 'asc' });
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
   const [importPlantIds, setImportPlantIds] = useState<string[]>([]); // factories this FAR belongs to (multi-select)
   const [loading, setLoading] = useState(true);
@@ -273,14 +310,10 @@ export function FAR() {
     if (q) filtered = filtered.filter(a => (a.name || '').toLowerCase().includes(q) || normMark(a.identification_mark).includes(normMark(q)));
     return groupAssetsByType(filtered);
   }, [assets, equipSearch, equipPlantFilter]);
-  const sortedGroups = useMemo(() => {
-    const dir = equipSort.dir === 'asc' ? 1 : -1;
-    return [...equipGroups].sort((a, b) => equipSort.key === 'count' ? (a.count - b.count) * dir : a.type.localeCompare(b.type) * dir);
-  }, [equipGroups, equipSort]);
-  function toggleEquipSort(key: 'type' | 'count') {
-    setEquipSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'count' ? 'desc' : 'asc' });
-  }
-  const eqArrow = (key: 'type' | 'count') => equipSort.key === key ? (equipSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const groupSort = useSortable(equipGroups, {
+    type: g => g.type,
+    count: g => g.count,
+  }, { key: 'type', dir: 'asc' });
   // Representative (most common non-empty) value for a group column.
   const repVal = (vals: (string | number | null)[]) => {
     const counts = new Map<string, number>();
@@ -306,8 +339,16 @@ export function FAR() {
   const fyLastUpdated = fyEntries.reduce((mx, e) => { const d = e.closed_at || e.created_at; return d > mx ? d : mx; }, '');
 
   // Pagination (default 10/page) for the FAR register + the FY maintenance table.
-  const groupPg = usePagination(sortedGroups, { resetKey: sortedGroups.length });
-  const fyPg = usePagination(fyEntries, { resetKey: activeFY ?? '' });
+  const fySort = useSortable(fyEntries, {
+    ticket: e => e.id,
+    equipment: e => e.equipment,
+    part: e => e.part,
+    status: e => e.status,
+    closed: e => new Date(e.closed_at || e.created_at),
+    cost: e => e.cost,
+  }, { key: 'closed', dir: 'desc' });
+  const groupPg = usePagination(groupSort.sorted, { resetKey: `${groupSort.sorted.length}|${groupSort.sort.key}|${groupSort.sort.dir}` });
+  const fyPg = usePagination(fySort.sorted, { resetKey: `${activeFY ?? ''}|${fySort.sort.key}|${fySort.sort.dir}` });
 
   // ── Insurance deduction math (for the displayed financial year) ───────────────
   // Deduction = capital assets bought in the FY + maintenance/repair procurement.
@@ -535,7 +576,7 @@ export function FAR() {
             <div className="overflow-x-auto scroll-x">
               <table className="dt">
                 <thead>
-                  <tr><th>{t('far.thTicket')}</th><th>{t('far.thEquipment')}</th><th>{t('far.thPartType')}</th><th>{t('far.thStatus')}</th><th>{t('far.thClosed')}</th><th className="num">{t('far.thCost')}</th></tr>
+                  <tr><Th sortKey="ticket" s={fySort}>{t('far.thTicket')}</Th><Th sortKey="equipment" s={fySort}>{t('far.thEquipment')}</Th><Th sortKey="part" s={fySort}>{t('far.thPartType')}</Th><Th sortKey="status" s={fySort}>{t('far.thStatus')}</Th><Th sortKey="closed" s={fySort} firstDir="desc">{t('far.thClosed')}</Th><Th sortKey="cost" s={fySort} firstDir="desc" className="num">{t('far.thCost')}</Th></tr>
                 </thead>
                 <tbody>
                   {fyEntries.length === 0 && (
@@ -700,13 +741,13 @@ export function FAR() {
                   <table className="dt">
                     <thead>
                       <tr>
-                        <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleEquipSort('type')}>Equipment Type{eqArrow('type')}</th>
-                        <th className="num" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleEquipSort('count')}>Count{eqArrow('count')}</th>
+                        <Th sortKey="type" s={groupSort}>Equipment Type</Th>
+                        <Th sortKey="count" s={groupSort} firstDir="desc" className="num">Count</Th>
                         <th>Make</th><th>Model</th><th>Capacity</th><th>Year</th><th>Identification Marks</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedGroups.length === 0 && <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{assets.length === 0 ? t('far.noAssetsYet') : 'No equipment matches.'}</td></tr>}
+                      {groupSort.sorted.length === 0 && <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{assets.length === 0 ? t('far.noAssetsYet') : 'No equipment matches.'}</td></tr>}
                       {groupPg.pageRows.map(g => {
                         const open = expandedType === g.type;
                         const make = repVal(g.assets.map(a => a.make));
@@ -730,26 +771,7 @@ export function FAR() {
                             {open && (
                               <tr>
                                 <td colSpan={8} style={{ background: '#FFFDF5', padding: 0 }}>
-                                  <div className="overflow-x-auto scroll-x">
-                                    <table className="dt" style={{ margin: 0 }}>
-                                      <thead><tr><th>Mark</th><th>Make</th><th>Serial</th><th>Model</th><th className="num">Capacity</th><th className="num">Year</th><th className="num">Value</th>{plantsInFar.length > 1 && <th>Plant</th>}<th>Pic</th></tr></thead>
-                                      <tbody>
-                                        {g.assets.map(a => (
-                                          <tr key={a.id}>
-                                            <td className="font-semibold text-slate-700">{a.identification_mark || '—'}</td>
-                                            <td className="text-slate-500 text-xs">{a.make || '—'}</td>
-                                            <td className="text-slate-500 text-xs">{a.serial_no || '—'}</td>
-                                            <td className="text-slate-500 text-xs">{a.model || '—'}</td>
-                                            <td className="num text-xs">{a.capacity || '—'}</td>
-                                            <td className="num text-xs">{a.year || '—'}</td>
-                                            <td className="num text-xs font-semibold">{a.value ? `₹ ${Number(a.value).toLocaleString('en-IN')}` : '—'}</td>
-                                            {plantsInFar.length > 1 && <td className="text-slate-500 text-xs">{a.plants?.name || '—'}</td>}
-                                            <td><PicBadge has={!!a.photo_url} /></td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
+                                  <AssetDetailTable assets={g.assets} showPlant={plantsInFar.length > 1} />
                                 </td>
                               </tr>
                             )}

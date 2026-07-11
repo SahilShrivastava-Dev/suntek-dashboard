@@ -9,6 +9,7 @@ import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/sta
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { usePagination } from '../../../components/ui/usePagination';
 import { TablePagination } from '../../../components/ui/TablePagination';
+import { useSortable, Th } from '../../../components/ui/useSortable';
 import { TableSearch } from '../../../components/ui/TableSearch';
 import { useDirectory, extractMentionIds, truncate } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
@@ -101,6 +102,18 @@ function deriveMaintenanceEvents(tickets: TicketRow[], srs: StoreReqRow[]): Unif
       date: tk.created_at, doneBy: tk.raised_by || tk.assigned_to || null,
       verifiedBy: null, plant, hasPhoto: raisePhotos.length > 0, photos: raisePhotos, ticketRef: ref, source: 'maintenance',
     });
+
+    // 1b) Review cycle — reviewer sent it back for correction at least once.
+    // Full per-cycle detail lives in the ticket's Notes thread; this surfaces the
+    // most recent request as a milestone so the loop is visible in the feed.
+    if ((tk.revision_count ?? 0) > 0 && tk.revision_requested_at) {
+      out.push({
+        key: `${tk.id}:revision`, equipment: tk.equipment,
+        type: `Changes requested${(tk.revision_count ?? 0) > 1 ? ` ·×${tk.revision_count}` : ''}${tk.revision_reason ? ` · ${tk.revision_reason}` : ''}`,
+        date: tk.revision_requested_at, doneBy: tk.revision_requested_by || null,
+        verifiedBy: null, plant, hasPhoto: false, photos: [], ticketRef: ref, source: 'maintenance',
+      });
+    }
 
     // Store-request driven milestones
     for (const sr of srByTicket.get(tk.id) ?? []) {
@@ -249,7 +262,16 @@ export function ActivityLog() {
       (!q || [r.equipment, r.type, r.doneBy, r.verifiedBy, r.plant, r.ticketRef].some(f => (f || '').toLowerCase().includes(q))),
     );
   }, [rows, search, plantFilter]);
-  const { pageRows, controls } = usePagination(filtered, { resetKey: `${search}|${plantFilter}|${showManualOnly}` });
+  const actSort = useSortable(filtered, {
+    equipment: r => r.equipment,
+    activity: r => r.type,
+    ticket: r => r.ticketRef,
+    date: r => new Date(r.date),
+    doneBy: r => r.doneBy,
+    verifiedBy: r => r.verifiedBy,
+    plant: r => r.plant,
+  }, { key: 'date', dir: 'desc' });
+  const { pageRows, controls } = usePagination(actSort.sorted, { resetKey: `${search}|${plantFilter}|${showManualOnly}|${actSort.sort.key}|${actSort.sort.dir}` });
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -375,8 +397,8 @@ export function ActivityLog() {
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('activity.colEquipment')}</th><th>{t('activity.colActivity')}</th><th>{t('activity.colTicket')}</th><th>{t('activity.colDate')}</th>
-                <th>{t('activity.colDoneBy')}</th><th>{t('activity.colVerifiedBy')}</th><th>{t('activity.colPlant')}</th><th>{t('activity.colPic')}</th>
+                <Th sortKey="equipment" s={actSort}>{t('activity.colEquipment')}</Th><Th sortKey="activity" s={actSort}>{t('activity.colActivity')}</Th><Th sortKey="ticket" s={actSort}>{t('activity.colTicket')}</Th><Th sortKey="date" s={actSort} firstDir="desc">{t('activity.colDate')}</Th>
+                <Th sortKey="doneBy" s={actSort}>{t('activity.colDoneBy')}</Th><Th sortKey="verifiedBy" s={actSort}>{t('activity.colVerifiedBy')}</Th><Th sortKey="plant" s={actSort}>{t('activity.colPlant')}</Th><th>{t('activity.colPic')}</th>
               </tr>
             </thead>
             <tbody>

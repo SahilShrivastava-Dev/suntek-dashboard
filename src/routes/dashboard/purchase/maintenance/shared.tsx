@@ -21,6 +21,7 @@ export const STATUS_CFG: Record<string, { label: string; bg: string; color: stri
   pending_purchase_manager: { label: 'Bill & Dispatch',   bg: '#FAE8FF', color: '#A21CAF' },
   pending_handover:         { label: 'Handover',          bg: '#F3E8FF', color: '#9333EA' },
   pending_defective_return: { label: 'Defective Return',  bg: '#FEF3C7', color: '#D97706' },
+  changes_requested:        { label: 'Changes Requested', bg: '#FEF2F2', color: '#DC2626' },
   closed:                   { label: 'Closed',            bg: '#DCFCE7', color: '#16A34A' },
 };
 

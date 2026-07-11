@@ -15,7 +15,7 @@ import { MentionText, NotesButton, ReadReceipt } from '../../../components/menti
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { useTranslation } from 'react-i18next';
-import { useDirectory, useMentionNotifier, notifyWatchers, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
+import { useDirectory, useMentionNotifier, notifyWatchers, postNote, extractMentionIds, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { similarity } from '../../../lib/blacklist/similarity';
 import { PMScheduleImport } from './PMScheduleImport';
@@ -30,6 +30,7 @@ import {
 } from './maintenance/shared';
 import { usePagination } from '../../../components/ui/usePagination';
 import { TablePagination } from '../../../components/ui/TablePagination';
+import { useSortable, Th } from '../../../components/ui/useSortable';
 
 type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
 
@@ -278,6 +279,13 @@ async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?
 // component. Name-based so the blacklist guard (which matches on person name)
 // can flag a restricted assignee.
 const ASSIGNABLE_ROLE_IDS = ['technician_shd', 'store_manager_maint', 'factory_operator', 'unit_head'];
+
+// Common deficiencies a reviewer can tick when sending a ticket back for changes.
+const CHANGE_ISSUE_TAGS = [
+  'Blurry / unclear photo', 'Missing photo', 'Incomplete description',
+  'Incorrect information', 'Missing maintenance details', 'Missing asset information',
+  'Incorrect assessment',
+];
 
 // ── Jharkhand procurement units — store requests route to the matching store manager.
 type Unit = 'chlorides' | 'plasticiser';
@@ -561,6 +569,17 @@ export function Maintenance() {
   // Admin edit + report
   const [editingTicket, setEditingTicket] = useState(false);
   const [editForm, setEditForm] = useState({ equipment: '', description: '', plant: '', status: '' });
+
+  // Request Changes (reviewer) + Revise & Resubmit (technician) — the same ticket
+  // loops back for correction instead of forcing a new one.
+  const [requestingChanges, setRequestingChanges] = useState(false);
+  const [changeReason, setChangeReason] = useState('');
+  const [changeTags, setChangeTags] = useState<string[]>([]);
+  const [resubmitting, setResubmitting] = useState(false);
+  const [resubmitForm, setResubmitForm] = useState({ equipment: '', description: '', plant: '', assessment: 'repairable' });
+  const [resubmitPhotoBlob, setResubmitPhotoBlob] = useState<Blob | null>(null);
+  const [savingRevision, setSavingRevision] = useState(false); // shared submit guard
+  const [rejectReason, setRejectReason] = useState(''); // optional reason on a part-level reject
   const [viewStage, setViewStage] = useState<string | null>(null); // clicked stage in the timeline
   const [showReport, setShowReport] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -746,10 +765,38 @@ export function Maintenance() {
   const shownSchedules = schedPlantFilter.length ? schedules.filter(s => s.plant_id && schedPlantFilter.includes(s.plant_id)) : schedules;
   const emergencyTickets = tickets.filter(t => t.type === 'emergency');
 
+  // Click-to-sort for the three maintenance tables (sorts feed pagination below).
+  const periodicSort = useSortable(schedules, {
+    task: s => s.title,
+    equipment: s => s.equipment,
+    plant: s => s.plants?.name,
+    frequency: s => s.frequency,
+    lastDone: s => (s.last_completed_at ? new Date(s.last_completed_at) : null),
+    due: s => (s.next_due_at ? new Date(s.next_due_at) : null),
+  }, { key: 'due', dir: 'asc' });
+  const emergencySort = useSortable(emergencyTickets, {
+    ticket: t => t.id,
+    equipment: t => t.equipment,
+    plant: t => t.plants?.name,
+    issue: t => t.description || t.title,
+    status: t => t.status,
+    raisedBy: t => t.raised_by,
+    created: t => (t.created_at ? new Date(t.created_at) : null),
+  }, { key: 'created', dir: 'desc' });
+  const scheduleSort = useSortable(shownSchedules, {
+    task: s => s.title,
+    equipment: s => s.equipment,
+    plant: s => s.plants?.name,
+    frequency: s => s.frequency,
+    assignedTo: s => s.assigned_to,
+    due: s => (s.next_due_at ? new Date(s.next_due_at) : null),
+    status: s => (s.is_active ? 1 : 0),
+  }, { key: 'due', dir: 'asc' });
+
   // Pagination for the three long maintenance tables (default 10/page).
-  const periodicPg = usePagination(schedules, { resetKey: schedules.length });
-  const emergencyPg = usePagination(emergencyTickets, { resetKey: emergencyTickets.length });
-  const schedulePg = usePagination(shownSchedules, { resetKey: schedPlantFilter.join(',') });
+  const periodicPg = usePagination(periodicSort.sorted, { resetKey: `${schedules.length}|${periodicSort.sort.key}|${periodicSort.sort.dir}` });
+  const emergencyPg = usePagination(emergencySort.sorted, { resetKey: `${emergencyTickets.length}|${emergencySort.sort.key}|${emergencySort.sort.dir}` });
+  const schedulePg = usePagination(scheduleSort.sorted, { resetKey: `${schedPlantFilter.join(',')}|${scheduleSort.sort.key}|${scheduleSort.sort.dir}` });
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
@@ -887,6 +934,93 @@ export function Maintenance() {
     setTickets((prev) => prev.filter((x) => x.id !== t.id));
     if (selectedTicket?.id === t.id) { setSelectedTicket(null); setEditingTicket(false); }
     toast.success('Ticket deleted');
+  }
+
+  // ── Request Changes / Resubmit loop ─────────────────────────────────────────
+  // Append-only audit entry on a ticket's Notes thread (also delivers @-mentions
+  // + watcher notifications). This is the durable per-cycle history.
+  async function auditNote(t: TicketRow, body: string) {
+    const mentionIds = extractMentionIds(body, people);
+    await postNote({ ref: ticketRef(t), actor: actorObj(), body, mentionIds, people, addNotification: addNote });
+  }
+
+  // Reviewer (unit head / admin): send the ticket back to the technician for
+  // correction. The SAME record moves to 'changes_requested'; revision_prev_status
+  // remembers the stage so Resubmit re-enters the exact review point.
+  async function submitRequestChanges() {
+    if (!selectedTicket || savingRevision) return;
+    const reason = [changeTags.join(', '), changeReason.trim()].filter(Boolean).join(' — ');
+    if (!reason) { toast.error('Add a note on what needs fixing'); return; }
+    setSavingRevision(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const prevStatus = selectedTicket.status;
+      await updateRows('maintenance_tickets', {
+        status: 'changes_requested',
+        revision_prev_status: prevStatus,
+        revision_reason: reason,
+        revision_requested_by: activeProfile.name,
+        revision_requested_at: nowIso,
+        revision_count: (selectedTicket.revision_count ?? 0) + 1,
+      }).eq('id', selectedTicket.id);
+      await auditNote(selectedTicket, `🔁 Changes requested by ${activeProfile.name}: ${reason}`);
+      notify({ target_roles: ['technician_shd', 'admin'], title: `Changes requested: ${selectedTicket.equipment}`, body: reason, type: 'warning', route: maintRoute(selectedTicket.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id ?? null, unit_id: selectedTicket.unit_id ?? null });
+      await notifyTicketWatchers(selectedTicket, `Changes requested: ${selectedTicket.equipment}`, reason, 'warning');
+      setSelectedTicket((t) => t ? { ...t, status: 'changes_requested', revision_prev_status: prevStatus, revision_reason: reason, revision_requested_by: activeProfile.name, revision_requested_at: nowIso, revision_count: (t.revision_count ?? 0) + 1 } : t);
+      setRequestingChanges(false); setChangeReason(''); setChangeTags([]);
+      toast.success('Sent back to technician for changes');
+      await loadData();
+    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); }
+    finally { setSavingRevision(false); }
+  }
+
+  // Technician: open the revise form seeded from the current ticket.
+  function startResubmit(t: TicketRow) {
+    const assessment = /needs part/i.test(t.title || '') ? 'needs_part' : 'repairable';
+    setResubmitForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plants?.name || '', assessment });
+    setResubmitPhotoBlob(null);
+    setResubmitting(true);
+  }
+
+  // Technician: apply the corrections and resubmit — status returns to the stage
+  // it paused at so the reviewer picks up right where they left off.
+  async function submitResubmit() {
+    if (!selectedTicket || savingRevision) return;
+    if (!resubmitForm.equipment.trim()) { toast.error('Equipment is required'); return; }
+    setSavingRevision(true);
+    try {
+      let newPhotoUrl: string | null = null;
+      const priorPhoto = selectedTicket.defective_raise_photo_url;
+      if (resubmitPhotoBlob) {
+        setUploading(true);
+        const r = await uploadMaintenancePhoto(resubmitPhotoBlob, { ticketId: selectedTicket.id, plantName: resubmitForm.plant || selectedTicket.plants?.name || '', photoType: 'completion', creator: activeProfile.name });
+        newPhotoUrl = r.secure_url;
+        setUploading(false);
+      }
+      const plant = dbPlants.find((p) => p.name === resubmitForm.plant);
+      const restoreStatus = (selectedTicket.revision_prev_status as TicketStatus) || 'open';
+      const title = `${resubmitForm.equipment} — ${resubmitForm.assessment === 'repairable' ? 'Repairable' : 'Needs part'}`;
+      const patch: TicketUpdate = {
+        equipment: resubmitForm.equipment,
+        title,
+        description: resubmitForm.description || null,
+        plant_id: plant?.id ?? selectedTicket.plant_id ?? null,
+        status: restoreStatus,
+        revision_reason: null,
+      };
+      if (newPhotoUrl) patch.defective_raise_photo_url = newPhotoUrl;
+      await updateRows('maintenance_tickets', patch).eq('id', selectedTicket.id);
+      const photoNote = newPhotoUrl ? ` · replaced photo${priorPhoto ? ` (prev: ${priorPhoto})` : ''}` : '';
+      await auditNote(selectedTicket, `✅ Resubmitted by ${activeProfile.name} after revision${photoNote}`);
+      await notifyMentions(resubmitForm.description, ticketRef(selectedTicket));
+      notify({ target_roles: ['unit_head', 'admin'], title: `Ticket resubmitted: ${resubmitForm.equipment}`, body: `${activeProfile.name} updated the ticket and resubmitted it for review.`, type: 'info', route: maintRoute(selectedTicket.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id ?? null, unit_id: selectedTicket.unit_id ?? null });
+      await notifyTicketWatchers(selectedTicket, `Ticket resubmitted: ${resubmitForm.equipment}`, 'Updated and resubmitted for review', 'info');
+      setSelectedTicket((t) => t ? { ...t, equipment: resubmitForm.equipment, title, description: resubmitForm.description || null, status: restoreStatus, revision_reason: null, plants: plant ? { name: plant.name } : t.plants, defective_raise_photo_url: newPhotoUrl ?? t.defective_raise_photo_url } : t);
+      setResubmitting(false); setResubmitPhotoBlob(null);
+      toast.success('Resubmitted for review');
+      await loadData();
+    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); setUploading(false); }
+    finally { setSavingRevision(false); }
   }
 
   // Bulk-delete every emergency ticket currently shown (admin cleanup tool).
@@ -1329,6 +1463,7 @@ export function Maintenance() {
   async function unitHeadApprove(req: StoreReqRow, approved: boolean) {
     if (!selectedTicket) return;
     const partAvailable = req.store_decision === 'available';
+    const reason = rejectReason.trim(); // optional note when rejecting this part
     await updateRows('maintenance_store_requests', { unit_head_approval: approved ? 'approved' : 'rejected' })
       .eq('id', req.id);
     if (approved && partAvailable) {
@@ -1336,10 +1471,13 @@ export function Maintenance() {
     } else if (approved && !partAvailable) {
       notify({ target_roles: ['admin', 'unit_head'], title: `Procurement approved: ${req.part_name}`, body: `${selectedTicket.equipment} — procure from market. Enter BUSY ref when done.`, type: 'warning', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else {
-      notify({ target_roles: ['technician_shd', 'admin'], title: `Item rejected: ${req.part_name}`, body: `Unit head rejected this item.`, type: 'warning', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+      notify({ target_roles: ['technician_shd', 'admin'], title: `Item rejected: ${req.part_name}`, body: reason ? `Unit head rejected this item: ${reason}` : `Unit head rejected this item.`, type: 'warning', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+      // Keep the reason on the ticket's audit thread.
+      await auditNote(selectedTicket, `⛔ Part rejected by ${activeProfile.name}: "${req.part_name}"${reason ? ` — ${reason}` : ''}`);
     }
     await notifyTicketWatchers(selectedTicket, approved ? `Approved: ${selectedTicket.equipment}` : `Item rejected: ${selectedTicket.equipment}`, `${activeProfile.name} ${approved ? 'approved' : 'rejected'} "${req.part_name}".`);
     setActingReqId(null);
+    setRejectReason('');
     await refreshAfterItemChange();
   }
 
@@ -2025,6 +2163,12 @@ export function Maintenance() {
                   <div style={{ fontSize: 12, color: req.store_decision === 'available' ? '#16A34A' : '#DC2626', marginBottom: 8 }}>
                     Store says: <strong>{req.store_decision === 'available' ? 'In stock' : 'Not in stock'}</strong>{req.store_decision === 'available' && req.qty_in_store ? ` · Qty ${req.qty_in_store}` : ''}
                   </div>
+                  <input
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="Reason if rejecting (optional)"
+                    style={{ width: '100%', padding: '7px 10px', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', marginBottom: 8 }}
+                  />
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => unitHeadApprove(req, true)} style={{ ...primaryBtn('#16A34A'), flex: 2 }}>{req.store_decision === 'available' ? 'Approve handover' : 'Approve procurement'}</button>
                     <button onClick={() => unitHeadApprove(req, false)} style={{ ...primaryBtn('#DC2626'), flex: 1 }}>Reject</button>
@@ -2277,8 +2421,8 @@ export function Maintenance() {
               <table className="dt">
                 <thead>
                   <tr>
-                    <th>{t('maint.colTask')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
-                    <th>{t('maint.colLastDone')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
+                    <Th sortKey="task" s={periodicSort}>{t('maint.colTask')}</Th><Th sortKey="equipment" s={periodicSort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={periodicSort}>{t('common.plant')}</Th><Th sortKey="frequency" s={periodicSort}>{t('maint.colFrequency')}</Th>
+                    <Th sortKey="lastDone" s={periodicSort} firstDir="desc">{t('maint.colLastDone')}</Th><Th sortKey="due" s={periodicSort} firstDir="desc">{t('maint.colNextDue')}</Th><th>{t('maint.colStatus')}</th>
                     {(isTechnician || isAdmin || isUnitHead) && <th>{t('maint.colAction')}</th>}
                   </tr>
                 </thead>
@@ -2385,8 +2529,8 @@ export function Maintenance() {
               <table className="dt">
                 <thead>
                   <tr>
-                    <th>{t('maint.colTicketNo')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colIssue')}</th>
-                    <th>{t('maint.colStatus')}</th><th>{t('maint.colRaisedBy')}</th><th>{t('maint.colCreated')}</th>
+                    <Th sortKey="ticket" s={emergencySort}>{t('maint.colTicketNo')}</Th><Th sortKey="equipment" s={emergencySort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={emergencySort}>{t('common.plant')}</Th><Th sortKey="issue" s={emergencySort}>{t('maint.colIssue')}</Th>
+                    <Th sortKey="status" s={emergencySort}>{t('maint.colStatus')}</Th><Th sortKey="raisedBy" s={emergencySort}>{t('maint.colRaisedBy')}</Th><Th sortKey="created" s={emergencySort} firstDir="desc">{t('maint.colCreated')}</Th>
                     {isAdmin && <th></th>}
                   </tr>
                 </thead>
@@ -2453,8 +2597,8 @@ export function Maintenance() {
             <table className="dt">
               <thead>
                 <tr>
-                  <th>{t('maint.colTaskTitle')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
-                  <th>{t('maint.colAssignedTo')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
+                  <Th sortKey="task" s={scheduleSort}>{t('maint.colTaskTitle')}</Th><Th sortKey="equipment" s={scheduleSort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={scheduleSort}>{t('common.plant')}</Th><Th sortKey="frequency" s={scheduleSort}>{t('maint.colFrequency')}</Th>
+                  <Th sortKey="assignedTo" s={scheduleSort}>{t('maint.colAssignedTo')}</Th><Th sortKey="due" s={scheduleSort} firstDir="desc">{t('maint.colNextDue')}</Th><Th sortKey="status" s={scheduleSort}>{t('maint.colStatus')}</Th>
                   {(isAdmin || isUnitHead) && <th>{t('maint.colActions')}</th>}
                 </tr>
               </thead>
@@ -2631,14 +2775,14 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); setRequestingChanges(false); setResubmitting(false); setChangeReason(''); setChangeTags([]); setResubmitPhotoBlob(null); setRejectReason(''); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
         locked={uploading}
       >
         {selectedTicket && (
           <>
-            <StageStrip status={selectedTicket.status} stages={wfStages} labels={wfLabels} onStageClick={(s) => setViewStage((cur) => cur === s ? null : s)} activeStage={viewStage} />
+            <StageStrip status={selectedTicket.status === 'changes_requested' ? (selectedTicket.revision_prev_status || 'open') : selectedTicket.status} stages={wfStages} labels={wfLabels} onStageClick={(s) => setViewStage((cur) => cur === s ? null : s)} activeStage={viewStage} />
             {viewStage && renderStageDetail(viewStage)}
             {blacklistHit && (
               <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
@@ -2661,10 +2805,14 @@ export function Maintenance() {
               {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><TicketDescription entityId={selectedTicket.id} text={selectedTicket.description} /></div>}
             </div>
 
-            {/* Notes are visible to everyone on the ticket; edit/delete are admin-only. */}
-            {!editingTicket && (
+            {/* Notes are visible to everyone on the ticket; edit/delete are admin-only.
+                Request Changes lets a reviewer send the ticket back for correction. */}
+            {!editingTicket && !requestingChanges && !resubmitting && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                 <NotesButton entityType="maintenance_ticket" entityId={selectedTicket.id} entityLabel={selectedTicket.equipment || selectedTicket.title || 'Ticket'} route={`/dashboard/purchase/maint?ticket=${selectedTicket.id}`} />
+                {(isUnitHead || isAdmin) && !['closed', 'changes_requested'].includes(selectedTicket.status) && (
+                  <button onClick={() => { setChangeTags([]); setChangeReason(''); setRequestingChanges(true); }} className="chip" style={{ color: '#DC2626' }}>↩ Request Changes</button>
+                )}
                 {isAdmin && <button onClick={() => startEdit(selectedTicket)} className="chip">✎ Edit</button>}
                 {isAdmin && <button onClick={() => handleDeleteTicket(selectedTicket)} className="chip" style={{ color: '#DC2626' }}>🗑 Delete</button>}
               </div>
@@ -2696,6 +2844,70 @@ export function Maintenance() {
                   <button onClick={() => setEditingTicket(false)} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
                   <button onClick={saveEdit} disabled={!editForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !editForm.equipment.trim() ? 0.5 : 1 }}>Save changes</button>
                 </div>
+              </div>
+            ) : requestingChanges ? (
+              /* Reviewer: send back for correction */
+              <div style={{ border: '1px solid #FCA5A5', borderRadius: 14, padding: 16, background: '#FFF7F7' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>↩ Request changes</div>
+                <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Send this ticket back to the technician to correct. They edit the same ticket and resubmit for another review.</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>What needs fixing?</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {CHANGE_ISSUE_TAGS.map(tag => {
+                    const on = changeTags.includes(tag);
+                    return <button key={tag} onClick={() => setChangeTags(s => on ? s.filter(x => x !== tag) : [...s, tag])} style={{ padding: '5px 10px', borderRadius: 999, border: '1px solid ' + (on ? '#DC2626' : '#E2E8F0'), background: on ? '#DC2626' : '#fff', color: on ? '#fff' : '#475569', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>{tag}</button>;
+                  })}
+                </div>
+                <PanelField label="Comment (required)">
+                  <PanelTextarea value={changeReason} onChange={e => setChangeReason(e.target.value)} placeholder="Explain what to correct. Type @ to tag someone." />
+                </PanelField>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={() => { setRequestingChanges(false); setChangeTags([]); setChangeReason(''); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
+                  <button onClick={submitRequestChanges} disabled={savingRevision || (!changeTags.length && !changeReason.trim())} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#DC2626', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: (savingRevision || (!changeTags.length && !changeReason.trim())) ? 0.5 : 1 }}>{savingRevision ? 'Sending…' : 'Send back to technician'}</button>
+                </div>
+              </div>
+            ) : resubmitting ? (
+              /* Technician: revise & resubmit the same ticket */
+              <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>✎ Revise &amp; resubmit</div>
+                <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Fix what the reviewer flagged, then resubmit the same ticket for another review.</div>
+                {selectedTicket.revision_reason && <div style={{ fontSize: 12, color: '#7F1D1D', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '8px 10px', marginBottom: 12 }}><strong>Reviewer asked:</strong> {selectedTicket.revision_reason}</div>}
+                <PanelField label="Equipment / asset">
+                  <PanelInput value={resubmitForm.equipment} onChange={e => setResubmitForm(f => ({ ...f, equipment: e.target.value }))} />
+                </PanelField>
+                <PanelRow>
+                  <PanelField label="Plant">
+                    <PanelSelect value={resubmitForm.plant} onChange={e => setResubmitForm(f => ({ ...f, plant: e.target.value }))}>
+                      <option value="">— Select plant —</option>
+                      {plantNames.map(p => <option key={p}>{p}</option>)}
+                    </PanelSelect>
+                  </PanelField>
+                  <PanelField label="Assessment">
+                    <PanelSelect value={resubmitForm.assessment} onChange={e => setResubmitForm(f => ({ ...f, assessment: e.target.value }))}>
+                      <option value="repairable">Can repair in-house</option>
+                      <option value="needs_part">Need a part</option>
+                    </PanelSelect>
+                  </PanelField>
+                </PanelRow>
+                <PanelField label="Issue description">
+                  <PanelTextarea value={resubmitForm.description} onChange={e => setResubmitForm(f => ({ ...f, description: e.target.value }))} placeholder="Describe the issue. Type @ to tag someone." />
+                </PanelField>
+                <PhotoUploader label="Replace photo (optional)" hint="Upload a clearer photo of the item" onBlobReady={setResubmitPhotoBlob} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={() => { setResubmitting(false); setResubmitPhotoBlob(null); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
+                  <button onClick={submitResubmit} disabled={savingRevision || uploading || !resubmitForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: (savingRevision || uploading || !resubmitForm.equipment.trim()) ? 0.5 : 1 }}>{(savingRevision || uploading) ? 'Resubmitting…' : 'Resubmit for review'}</button>
+                </div>
+              </div>
+            ) : selectedTicket.status === 'changes_requested' ? (
+              /* Paused for correction — show the reviewer's request + resubmit CTA */
+              <div style={{ border: '1px solid #FCA5A5', background: '#FEF2F2', borderRadius: 14, padding: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>↩ Changes requested{selectedTicket.revision_count ? ` · cycle ${selectedTicket.revision_count}` : ''}</div>
+                {selectedTicket.revision_reason && <div style={{ fontSize: 12.5, color: '#7F1D1D', marginTop: 6, lineHeight: 1.5 }}>{selectedTicket.revision_reason}</div>}
+                <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 6 }}>Requested by {selectedTicket.revision_requested_by || '—'}{selectedTicket.revision_requested_at ? ` · ${formatDate(selectedTicket.revision_requested_at)}` : ''}</div>
+                {(isTechnician || isAdmin) ? (
+                  <button onClick={() => startResubmit(selectedTicket)} style={{ marginTop: 12, width: '100%', padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit' }}>✎ Revise &amp; Resubmit</button>
+                ) : (
+                  <div style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 10 }}>Waiting for the technician to correct &amp; resubmit.</div>
+                )}
               </div>
             ) : (
               renderTicketActions()

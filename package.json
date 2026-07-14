@@ -29,6 +29,7 @@
     "lucide-react": "^1.16.0",
     "mssql": "^12.5.5",
     "pdfjs-dist": "^4.10.38",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-i18next": "^17.0.8",

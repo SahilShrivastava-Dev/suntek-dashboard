@@ -75,6 +75,7 @@ const ALL_DASHBOARD_SECTIONS: { route: string; label: string }[] = [
   { route: '/dashboard/audit',            label: 'Audit Trail' },
   { route: '/dashboard/blacklist',        label: 'Blacklist Registry' },
   { route: '/dashboard/purchase/far',     label: 'Fixed Asset Register' },
+  { route: '/dashboard/purchase/qr',      label: 'Asset QR Codes' },
   { route: '/dashboard/purchase/maint',   label: 'Maintenance' },
   { route: '/dashboard/purchase/activity',label: 'Plant Activity Log' },
   { route: '/dashboard/purchase/storereq',label: 'Store Requisitions' },

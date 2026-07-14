@@ -45,6 +45,10 @@ const ActivityLog     = lazy(() => import('./routes/dashboard/purchase/ActivityL
 const PurchaseOrders  = lazy(() => import('./routes/dashboard/purchase/PurchaseOrders').then(m => ({ default: m.PurchaseOrders })));
 const MarineInsurance = lazy(() => import('./routes/dashboard/purchase/MarineInsurance').then(m => ({ default: m.MarineInsurance })));
 const Labour          = lazy(() => import('./routes/dashboard/purchase/Labour').then(m => ({ default: m.Labour })));
+const QRManagement    = lazy(() => import('./routes/dashboard/purchase/QRManagement').then(m => ({ default: m.QRManagement })));
+
+// Standalone asset profile (QR landing) — full page, no sidebar.
+const AssetProfile    = lazy(() => import('./routes/asset/AssetProfile').then(m => ({ default: m.AssetProfile })));
 
 // L1 Operator apps (standalone — no DashboardLayout)
 const CheckIn     = lazy(() => import('./routes/night-manager/CheckIn').then(m => ({ default: m.CheckIn })));
@@ -90,6 +94,7 @@ function App() {
               <Route path="purchase" element={<PurchaseOrders />} />
               <Route path="marine"   element={<MarineInsurance />} />
               <Route path="labour"   element={<Labour />} />
+              <Route path="qr"       element={<QRManagement />} />
             </Route>
 
             {/* Main tabs */}
@@ -123,6 +128,10 @@ function App() {
           <Route path="/warehouse/stock-entry"  element={<RequireLogin><Warehouse /></RequireLogin>} />
           <Route path="/warehouse/requisition"  element={<RequireLogin><Warehouse /></RequireLogin>} />
           <Route path="/operator/batch-logger"  element={<RequireLogin><BatchLogger /></RequireLogin>} />
+
+          {/* Asset profile — QR landing page. Standalone + login-gated; the QR
+              encodes /asset/<token>. Must be above the catch-all. */}
+          <Route path="/asset/:key" element={<RequireLogin><AssetProfile /></RequireLogin>} />
 
           {/* Default redirect */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />

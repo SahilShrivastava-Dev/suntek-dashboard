@@ -677,6 +677,11 @@ export interface Database {
           purchase_date: string | null;
           account_head: string | null;
           photo_url: string | null;
+          // QR asset management (49_asset_qr_and_far_link.sql). Opt-in per asset:
+          // NULL until a user generates one; rotates on regenerate.
+          qr_token: string | null;
+          qr_generated_at: string | null;
+          qr_generated_by: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['fixed_assets']['Row'], 'id' | 'created_at'>>;
@@ -757,6 +762,9 @@ export interface Database {
           raised_by: string | null;
           raised_role: string | null;
           assigned_to: string | null;
+          // Reliable link to the fixed asset (49_asset_qr_and_far_link.sql). Wired
+          // from the raise form + copied from the schedule on periodic spawn.
+          far_asset_id: string | null;
           completion_photo_url: string | null;
           defective_part_photo_url: string | null;
           defective_part_decision: 'repair' | 'scrap' | null;

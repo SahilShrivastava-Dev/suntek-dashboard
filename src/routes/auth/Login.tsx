@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
+/**
+ * Where to send the user after login. Honors a `?redirect=` set by the auth gate
+ * (e.g. after scanning a QR while logged out), but ONLY same-origin relative
+ * paths — must start with a single "/" (not "//" or a scheme) to prevent an
+ * open-redirect. Falls back to the dashboard.
+ */
+function safeRedirect(raw: string | null): string {
+  if (!raw) return '/dashboard';
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/dashboard';
+  return raw;
+}
 
 export function Login() {
   const { t } = useTranslation();
@@ -14,11 +25,13 @@ export function Login() {
   const tf = (key: string, opts?: Record<string, unknown>) => t(key, { lng: 'en', ...opts });
   const { signIn, loading, error, session } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const dest = safeRedirect(params.get('redirect'));
 
-  // Already signed in → go straight to the dashboard.
+  // Already signed in → go to the intended destination (or dashboard).
   useEffect(() => {
-    if (session) navigate('/dashboard', { replace: true });
-  }, [session, navigate]);
+    if (session) navigate(dest, { replace: true });
+  }, [session, navigate, dest]);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -30,7 +43,7 @@ export function Login() {
     const ok = await signIn(identifier, password);
     setSubmitting(false);
     if (ok) {
-      navigate('/dashboard');
+      navigate(dest);
     }
   }
 
@@ -111,7 +124,7 @@ export function Login() {
                 {tf('login.devModeHint')}
               </p>
               <button
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate(dest)}
                 className="mt-2 text-xs font-semibold text-amber-700 underline hover:no-underline"
               >
                 {tf('login.enterDashboard')}

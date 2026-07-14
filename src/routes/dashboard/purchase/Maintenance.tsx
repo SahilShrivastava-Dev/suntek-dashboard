@@ -635,6 +635,7 @@ export function Maintenance() {
             type: 'periodic', status: 'open', title: s.title,
             equipment: s.equipment, plant_id: s.plant_id || null,
             schedule_id: s.id, description: s.description || null,
+            far_asset_id: s.far_asset_id || null, // inherit the schedule's asset link
             assigned_to: s.assigned_to || null,
             due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
             checklist: (s.checklist || []).map(c => ({ component: c.component, activity: c.activity, done: false })),
@@ -830,6 +831,9 @@ export function Maintenance() {
       unit: raiseForm.unit || null,
       unit_id: unitRow?.id || null,
       description: raiseForm.description || null,
+      // Reliable FAR link when the equipment was picked from the type-ahead — powers
+      // the asset QR profile's history (was previously captured but dropped).
+      far_asset_id: raiseForm.farAssetId || null,
       raised_by: activeProfile.name, raised_role: role,
       // A technician raising their own job is implicitly assigned to themselves.
       assigned_to: isTechnician ? activeProfile.name : null,
@@ -1197,6 +1201,7 @@ export function Maintenance() {
           type: 'periodic', status: 'open', title: completingSchedule.title,
           equipment: completingSchedule.equipment, plant_id: completingSchedule.plant_id || null,
           schedule_id: completingSchedule.id,
+          far_asset_id: completingSchedule.far_asset_id || null, // inherit the schedule's asset link
           due_date: completingSchedule.next_due_at ? completingSchedule.next_due_at.split('T')[0] : null,
           raised_by: activeProfile.name, raised_role: role,
           assigned_to: completingSchedule.assigned_to || null,

@@ -17,8 +17,9 @@ interface SidebarProps {
 }
 
 /** A sidebar dropdown child. `nav` overrides the click target when it must differ
- *  from `path` (e.g. to carry a ?ctx marker that disambiguates a shared route). */
-type NavItem = { key: string; path: string; nav?: string };
+ *  from `path` (e.g. to carry a ?ctx marker that disambiguates a shared route).
+ *  `children` turns the item into a nested sub-accordion (e.g. FAR → Fixed Assets / QR). */
+type NavItem = { key: string; path: string; nav?: string; children?: NavItem[] };
 
 /**
  * Factory dropdown children — order matters (first visible item is the accordion
@@ -28,7 +29,10 @@ type NavItem = { key: string; path: string; nav?: string };
  * regroups how the links are presented.
  */
 const FACTORY_ITEMS: NavItem[] = [
-  { key: 'nav.far',            path: '/dashboard/purchase/far'      },
+  { key: 'nav.far', path: '/dashboard/purchase/far', children: [
+    { key: 'nav.fixedAssets', path: '/dashboard/purchase/far' },
+    { key: 'nav.qrCode',      path: '/dashboard/purchase/qr'  },
+  ] },
   { key: 'nav.maintenance',    path: '/dashboard/purchase/maint'    },
   { key: 'nav.activityLog',    path: '/dashboard/purchase/activity' },
   { key: 'nav.storeReq',       path: '/dashboard/purchase/storereq' },
@@ -201,6 +205,10 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   const [operationsOpen, setOperationsOpen] = useState(
     onSharedPO ? viaOps : inGroup(OPERATIONS_ITEMS.map((i) => i.path))
   );
+  // FAR nested sub-accordion inside Factory (Fixed Assets · QR Code).
+  const [farOpen, setFarOpen] = useState(
+    inGroup(['/dashboard/purchase/far', '/dashboard/purchase/qr'])
+  );
   // Reference dropdown (Daily Unit Log · Oil Ratio Table · Audit Log).
   const [refOpen, setRefOpen] = useState(
     inGroup(['/dashboard/daily-log', '/dashboard/oil-ratio', '/dashboard/audit'])
@@ -250,7 +258,10 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
 
   const showOverview = canSee('/dashboard');
 
-  const visibleFactoryItems    = FACTORY_ITEMS.filter((it) => canSee(it.path));
+  // A Factory item is visible if the role can reach it (or, for a nested group like
+  // FAR, any of its children).
+  const factoryVisible = (it: NavItem) => it.children ? it.children.some((c) => canSee(c.path)) : canSee(it.path);
+  const visibleFactoryItems    = FACTORY_ITEMS.filter(factoryVisible);
   const visibleOperationsItems = OPERATIONS_ITEMS.filter((it) => canSee(it.path));
   const showFactory    = visibleFactoryItems.length > 0;
   const showOperations = visibleOperationsItems.length > 0;
@@ -316,8 +327,10 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
     return isActive(it.path);
   };
 
+  // A Factory item is active if it (or, for a nested group, any child) is active.
+  const factoryItemActive = (it: NavItem) => it.children ? it.children.some((c) => isActive(c.path)) : itemActive(it);
   // Parent-dropdown highlight: active when any visible child is active.
-  const factoryActive    = visibleFactoryItems.some(itemActive);
+  const factoryActive    = visibleFactoryItems.some(factoryItemActive);
   const operationsActive = visibleOperationsItems.some(itemActive);
 
   // Batch logger tab (?tab=) — used to highlight the operator's Batch/Logs sub-items.
@@ -395,15 +408,41 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
 
             {factoryOpen && (
               <div className="nav-sub">
-                {visibleFactoryItems.map((it) => (
-                  <a
-                    key={it.path}
-                    className={`nav-link${itemActive(it) ? ' active' : ''}`}
-                    onClick={() => navTo(it.nav ?? it.path)}
-                  >
-                    {t(it.key)}
-                  </a>
-                ))}
+                {visibleFactoryItems.map((it) => {
+                  // Nested sub-accordion (FAR → Fixed Assets / QR Code).
+                  if (it.children) {
+                    const kids = it.children.filter((c) => canSee(c.path));
+                    return (
+                      <React.Fragment key={it.path}>
+                        <a
+                          className={`nav-link${factoryItemActive(it) ? ' active' : ''}`}
+                          onClick={() => { setFarOpen((o) => !o); if (!farOpen) navTo(kids[0].path); }}
+                        >
+                          <span>{t(it.key)}</span>
+                          <svg className="ml-auto transition-transform duration-200" style={{ transform: farOpen ? 'rotate(90deg)' : 'rotate(0deg)' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m9 6 6 6-6 6"/></svg>
+                        </a>
+                        {farOpen && (
+                          <div className="nav-sub">
+                            {kids.map((c) => (
+                              <a key={c.path} className={`nav-link${isActive(c.path) ? ' active' : ''}`} onClick={() => navTo(c.path)}>
+                                {t(c.key)}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  }
+                  return (
+                    <a
+                      key={it.path}
+                      className={`nav-link${itemActive(it) ? ' active' : ''}`}
+                      onClick={() => navTo(it.nav ?? it.path)}
+                    >
+                      {t(it.key)}
+                    </a>
+                  );
+                })}
               </div>
             )}
           </>

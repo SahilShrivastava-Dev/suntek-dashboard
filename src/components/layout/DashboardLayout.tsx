@@ -100,7 +100,8 @@ const BREADCRUMBS: Record<string, string> = {
 
 /** Per-sub-page titles/breadcrumbs for the Factory dropdown's Purchase routes. */
 const FACTORY_SUBPAGES: Record<string, { title: string; breadcrumb: string }> = {
-  '/dashboard/purchase/far':      { title: 'Fixed Asset Register (FAR)', breadcrumb: 'Factory · FAR' },
+  '/dashboard/purchase/far':      { title: 'Fixed Asset Register (FAR)', breadcrumb: 'Factory · FAR · Fixed Assets' },
+  '/dashboard/purchase/qr':       { title: 'Asset QR Codes',             breadcrumb: 'Factory · FAR · QR Codes' },
   '/dashboard/purchase/maint':    { title: 'Maintenance',                breadcrumb: 'Factory · Maintenance' },
   '/dashboard/purchase/activity': { title: 'Activity Log',               breadcrumb: 'Factory · Activity Log' },
   '/dashboard/purchase/storereq': { title: 'Store Requisition',          breadcrumb: 'Factory · Store Requisition' },
@@ -155,7 +156,9 @@ export function DashboardLayout() {
   // (Minified React error #300). All hooks are unconditional; only the render
   // output below is gated.
   if (import.meta.env.PROD && !authLoading && !session) {
-    return <Navigate to="/login" replace />;
+    // Preserve the intended destination (e.g. a deep-linked ticket) for post-login return.
+    const to = `/login?redirect=${encodeURIComponent(location.pathname + location.search)}`;
+    return <Navigate to={to} replace />;
   }
 
   // While the session / profile is still resolving, show a loader instead of the

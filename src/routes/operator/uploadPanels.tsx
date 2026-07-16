@@ -1,8 +1,16 @@
 import React from 'react';
 import type { ExtractedSalesSheet, ExtractedPurchaseSheet } from '../../lib/nvidiaOcr';
+import { ProgressBar, useFakeProgress } from '../../components/ui/ProgressBar';
 
 // Pure presentational panels for the BatchLogger Sales/Purchase OCR upload flow.
 // All saving happens in the parent via the onSaved/onClose callbacks.
+
+/** Determinate-looking progress for the OCR call (no real streamed %). Mounted only
+ *  while extracting, so `active` is simply true for its lifetime. */
+function OcrLoadingBar({ color }: { color: string }) {
+  const p = useFakeProgress(true, { ceiling: 92 });
+  return <div className="w-full max-w-xs"><ProgressBar pct={p.pct} color={color} /></div>;
+}
 
 export function UploadDropzone({ onFile, accentColor, label }: { onFile: (f: File) => void; accentColor: string; label: string }) {
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -44,6 +52,7 @@ export function SalesUploadPanel({ state, onFileSelect, onReset }: {
           <path d="M12 2 A10 10 0 0 1 22 12" stroke="#16a34a" strokeWidth="3" strokeLinecap="round" />
         </svg>
         <div className="text-sm font-bold text-slate-700">Analyzing sales sheet…</div>
+        <OcrLoadingBar color="#16a34a" />
       </div>
     );
   }
@@ -84,6 +93,7 @@ export function PurchaseUploadPanel({ state, onFileSelect, onReset }: {
           <path d="M12 2 A10 10 0 0 1 22 12" stroke="#dc2626" strokeWidth="3" strokeLinecap="round" />
         </svg>
         <div className="text-sm font-bold text-slate-700">Analyzing purchase sheet…</div>
+        <OcrLoadingBar color="#dc2626" />
         <div className="text-xs text-red-500 font-bold">Data will be locked after extraction</div>
       </div>
     );

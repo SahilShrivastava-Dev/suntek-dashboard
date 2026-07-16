@@ -15,6 +15,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { nvidiaChat } from '../_shared/nvidiaVision.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -28,16 +29,25 @@ const SYSTEM_PROMPT =
   'No prose, no markdown, no code fences. Start with { and end with }.';
 
 const BILL_PROMPT =
-  'Read this supplier bill / tax invoice and return ONLY this JSON, filled from the image:\n' +
-  '{"totalAmount": 0, "lineItemCount": 0, "currency": "INR"}\n' +
-  'Rules:\n' +
-  '- totalAmount = the FINAL grand total payable shown on the bill, INCLUDING GST ' +
-  '(look for "Grand Total", "Total", "Net Payable", "Bill Amount", "Invoice Total"). ' +
-  'Return it as a plain number with no commas or currency symbol (e.g. 32800000 for ₹3,28,00,000).\n' +
-  '- lineItemCount = the number of distinct product/item ROWS in the items table ' +
-  '(count each line item once; do NOT count header, tax, or total rows).\n' +
-  '- currency = the currency code if visible, else "INR".\n' +
-  '- If a value is unreadable, use null for that field.';
+  'Read this Indian supplier tax invoice and return ONLY this JSON, filled from the image:\n' +
+  '{"subTotal": 0, "taxAmount": 0, "totalAmount": 0, "grandTotalQty": 0, "lineItemCount": 0, "currency": "INR", ' +
+  '"lineItems": [{"description": "", "quantity": 0, "unit": "", "unitPrice": 0, "amount": 0}]}\n' +
+  'All amounts are plain numbers — no commas, no currency symbol.\n' +
+  '- subTotal = the taxable value BEFORE GST (labelled "Taxable Amt", "Total before tax", "Sub Total").\n' +
+  '- taxAmount = the TOTAL GST = CGST + SGST + IGST (labelled "Total Tax", "Tax Amount"). ' +
+  'This is a SMALL number; it is NOT the invoice total.\n' +
+  '- totalAmount = the FINAL grand total payable INCLUDING GST (labelled "Grand Total", "Total Amount", ' +
+  '"Net Payable", "Invoice Total"). It equals subTotal + taxAmount and is the LARGEST amount on the bill. ' +
+  'NEVER put the tax value or a subtotal here (e.g. for a bill with subTotal 169463.34 and tax 8473.16, ' +
+  'totalAmount is 177936.50, NOT 8473.16).\n' +
+  '- grandTotalQty = the total quantity across all rows (the number in the Grand Total quantity cell, ' +
+  'e.g. 466 for "466.000 Box").\n' +
+  '- lineItemCount = number of distinct product rows (exclude header/tax/subtotal/total rows).\n' +
+  '- lineItems = one object per product row, in order: description (product name exactly as printed), ' +
+  'quantity, unit (Box/Kg/Pcs/…), unitPrice (per-unit rate / list price), amount (that row line total ' +
+  'before tax, usually quantity × unitPrice).\n' +
+  '- currency = code if visible else "INR".\n' +
+  'Use null for any single value you cannot read. Return raw JSON only.';
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -68,11 +78,13 @@ serve(async (req: Request) => {
 
     // 90B reads printed invoice amounts more reliably; a bill is a small doc so
     // it stays well within the Edge Function timeout.
-    const nvidiaRes = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: 'meta/llama-3.2-90b-vision-instruct',
+    let content: string;
+    try {
+      const r = await nvidiaChat({
+        apiKey,
+        fallbackModel: 'meta/llama-3.2-90b-vision-instruct',
+        maxTokens: 2048,
+        jsonMode: true,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: [
@@ -80,31 +92,35 @@ serve(async (req: Request) => {
             { type: 'text', text: BILL_PROMPT },
           ] },
         ],
-        max_tokens: 512,
-        temperature: 0.05,
-      }),
-    });
-
-    if (!nvidiaRes.ok) {
-      const t = await nvidiaRes.text().catch(() => '(no body)');
-      return json({ error: `NVIDIA API ${nvidiaRes.status}: ${t.slice(0, 400)}` }, 502);
+      });
+      content = r.content;
+    } catch (e) {
+      return json({ error: e instanceof Error ? e.message : String(e) }, 502);
     }
-
-    const nvidiaJson = await nvidiaRes.json();
-    const content: string = nvidiaJson?.choices?.[0]?.message?.content ?? '';
     const first = content.indexOf('{');
     const last = content.lastIndexOf('}');
     if (first === -1 || last <= first) {
-      return json({ totalAmount: null, lineItemCount: null, currency: null, raw: content.slice(0, 300) });
+      return json({ totalAmount: null, subTotal: null, taxAmount: null, grandTotalQty: null, lineItemCount: null, currency: null, lineItems: [], raw: content.slice(0, 300) });
     }
 
     let parsed: Record<string, unknown> = {};
     try { parsed = JSON.parse(content.slice(first, last + 1)); } catch { /* fall through to nulls */ }
 
+    const toArr = (v: unknown) => (Array.isArray(v) ? v : []);
     return json({
       totalAmount: toNum(parsed.totalAmount),
+      subTotal: toNum(parsed.subTotal),
+      taxAmount: toNum(parsed.taxAmount),
+      grandTotalQty: toNum(parsed.grandTotalQty),
       lineItemCount: toNum(parsed.lineItemCount),
       currency: typeof parsed.currency === 'string' ? parsed.currency : 'INR',
+      lineItems: toArr(parsed.lineItems).map((it: Record<string, unknown>) => ({
+        description: typeof it?.description === 'string' ? it.description : '',
+        quantity: toNum(it?.quantity),
+        unit: typeof it?.unit === 'string' ? it.unit : null,
+        unitPrice: toNum(it?.unitPrice),
+        amount: toNum(it?.amount),
+      })),
       raw: content.slice(0, 600),
     });
   } catch (e) {

@@ -25,7 +25,9 @@ export async function billToImages(file: File, maxPages = 5): Promise<string[]> 
   const n = Math.min(pdf.numPages, maxPages);
   for (let i = 1; i <= n; i++) {
     const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 2 });
+    // scale 1.5 (was 2): full-page JPEGs at scale 2 produce large base64 payloads that
+    // can trip NVIDIA request-size limits / the edge-function timeout → intermittent 502s.
+    const viewport = page.getViewport({ scale: 1.5 });
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
@@ -41,26 +43,51 @@ export interface ParsedBill {
   invoiceNumber: string | null;
   supplierName: string | null;
   lineItems: PurchaseLineItem[];
+  /** Taxable value before GST (Total Before Tax). Line amounts reconcile to this. */
+  subTotal: number | null;
+  /** Total GST / tax on the bill. */
+  taxAmount: number | null;
+  /** Grand total payable, GST-inclusive. */
   totalAmount: number | null;
   pages: number;
 }
 
-/** OCR every page and merge the line items into one bill. */
-export async function parseBill(file: File): Promise<ParsedBill> {
+/** OCR every page and merge the line items into one bill.
+ *  `onProgress` reports which page is being read (1-indexed) out of the total. */
+export async function parseBill(
+  file: File,
+  onProgress?: (info: { page: number; pages: number }) => void,
+): Promise<ParsedBill> {
   const images = await billToImages(file);
   if (!images.length) throw new Error('Could not read any page from this file.');
   const results: ExtractedPurchaseSheet[] = [];
-  for (const img of images) {
-    try { results.push(await extractPurchaseSheet(img)); }
-    catch { /* skip a page that fails to OCR; others may still succeed */ }
+  let lastErr: unknown = null;
+  for (let i = 0; i < images.length; i++) {
+    onProgress?.({ page: i + 1, pages: images.length });
+    try { results.push(await extractPurchaseSheet(images[i])); }
+    catch (e) { lastErr = e; /* skip a page that fails to OCR; others may still succeed */ }
   }
-  if (!results.length) throw new Error('The bill could not be read. Try a clearer photo or a different page.');
+  if (!results.length) {
+    // Surface the real upstream cause (model retired, 429, timeout…) instead of a
+    // generic message — the per-page loop used to swallow it entirely.
+    const detail = lastErr instanceof Error ? lastErr.message : lastErr ? String(lastErr) : '';
+    throw new Error(detail
+      ? `The bill could not be read — ${detail}`
+      : 'The bill could not be read. Try a clearer photo or a different page.');
+  }
   const lineItems = results.flatMap(r => r.lineItems || []).filter(li => (li.description || '').trim());
-  const totalAmount = results.reduce<number | null>((acc, r) => (r.totalAmount != null ? (acc ?? 0) + r.totalAmount : acc), null);
+  // Sum each figure across pages (a bill's totals usually print on the last page only,
+  // so this is effectively "take whichever page reported it").
+  const sumField = (pick: (r: ExtractedPurchaseSheet) => number | null): number | null =>
+    results.reduce<number | null>((acc, r) => { const v = pick(r); return v != null ? (acc ?? 0) + v : acc; }, null);
   return {
     invoiceNumber: results.find(r => r.invoiceNumber)?.invoiceNumber ?? null,
     supplierName: results.find(r => r.supplierName)?.supplierName ?? null,
-    lineItems, totalAmount, pages: images.length,
+    lineItems,
+    subTotal: sumField(r => r.subTotal),
+    taxAmount: sumField(r => r.taxAmount),
+    totalAmount: sumField(r => r.totalAmount),
+    pages: images.length,
   };
 }
 

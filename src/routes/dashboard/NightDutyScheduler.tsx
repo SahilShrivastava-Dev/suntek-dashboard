@@ -49,6 +49,8 @@ export function NightDutyScheduler() {
   const [saving, setSaving] = useState(false);
   const [techSearch, setTechSearch] = useState('');
   const [expandedTech, setExpandedTech] = useState<Set<string>>(new Set());
+  // The scheduling form lives in a modal so the page shows only the report by default.
+  const [schedulerOpen, setSchedulerOpen] = useState(false);
 
   const roleTier = useMemo(() => {
     const m: Record<string, string> = {};
@@ -163,6 +165,7 @@ export function NightDutyScheduler() {
       if (error) { toast.error(`Schedule failed: ${error.message}`); return; }
       toast.success(`Scheduled ${rows.length} duty slot${rows.length === 1 ? '' : 's'}`);
       setSelectedDates([]); setSelectedTechIds([]); setRepeatDays([]); setRepeatUntil('');
+      setSchedulerOpen(false); // close the modal on success — back to the report
       await load();
     } finally { setSaving(false); }
   }
@@ -200,8 +203,104 @@ export function NightDutyScheduler() {
 
   return (
     <div className="card p-5 mb-5">
-      <div className="text-base font-bold mb-1">🌙 Schedule night duty</div>
-      <div className="text-xs text-slate-500 mb-4">Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights.</div>
+      {/* Header + top-right action — the scheduling form opens in a modal */}
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <div className="text-base font-bold mb-1">🌙 Night duty</div>
+          <div className="text-xs text-slate-500">Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights.</div>
+        </div>
+        <button
+          onClick={() => setSchedulerOpen(true)}
+          className="btn-accent pill"
+          style={{ padding: '9px 16px', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer', flexShrink: 0 }}
+        >
+          + Schedule Duty
+        </button>
+      </div>
+
+      {/* Report — always visible, even when empty */}
+      <div>
+        <div className="text-sm font-bold mb-2">Night duty report</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+          {[
+            { label: 'On duty tonight', value: report.tonight, color: '#2563EB', bg: '#EFF6FF' },
+            { label: 'Scheduled ahead', value: report.scheduled, color: '#64748B', bg: '#F8FAFC' },
+            { label: 'Checked in', value: report.checkedIn, color: '#16A34A', bg: '#DCFCE7' },
+            { label: 'Missed', value: report.missed, color: '#DC2626', bg: '#FEF2F2' },
+          ].map(s => (
+            <div key={s.label} style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: '12px 14px', background: s.bg }}>
+              <div style={{ fontSize: 26, fontWeight: 800, color: s.color, lineHeight: 1 }}>{s.value}</div>
+              <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Upcoming assignments — one collapsible row per person. */}
+      <div style={{ marginTop: 18 }}>
+        <div className="text-sm font-bold mb-2">Upcoming assignments</div>
+        {Object.keys(dutiesByTech).length === 0 && <div style={{ fontSize: 12, color: '#94A3B8' }}>No upcoming night duty scheduled.</div>}
+        <div className="flex flex-col gap-2">
+          {Object.entries(dutiesByTech).map(([techId, ds]) => {
+            const open = expandedTech.has(techId);
+            const checkedIn = ds.filter(d => d.status === 'checked_in').length;
+            const nextDate = ds.find(d => d.status !== 'checked_in')?.duty_date ?? ds[0].duty_date;
+            return (
+              <div key={techId} style={{ border: '1px solid #E2E8F0', borderRadius: 10, overflow: 'hidden' }}>
+                <button
+                  onClick={() => toggleTechRow(techId)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: open ? '#F8FAFC' : '#fff', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', flex: 1 }}>{acctName[techId] || 'Unknown'}</span>
+                  <span className="badge" style={{ background: '#EEF2FF', color: '#4338CA', fontSize: 11 }}>{ds.length} night{ds.length === 1 ? '' : 's'}</span>
+                  {checkedIn > 0 && <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A', fontSize: 11 }}>{checkedIn} checked in</span>}
+                  <span style={{ fontSize: 11, color: '#94A3B8' }}>next {new Date(nextDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
+                  <span style={{ fontSize: 11, color: '#94A3B8', width: 14, textAlign: 'center' }}>{open ? '▾' : '▸'}</span>
+                </button>
+                {open && (
+                  <div style={{ padding: '4px 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 6, borderTop: '1px solid #F1F5F9' }}>
+                    {ds.map(d => {
+                      const cfg = STATUS_CFG[d.status] || STATUS_CFG.scheduled;
+                      return (
+                        <span key={d.id} className="badge" style={{ background: cfg.bg, color: cfg.color, fontSize: 11, marginTop: 6 }}>
+                          {new Date(d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })} · {cfg.label}
+                          {d.checked_in_at && ` · ${new Date(d.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Scheduling modal ─────────────────────────────────────────────── */}
+      {schedulerOpen && (
+      <div
+        className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+        style={{ animation: 'fadein 200ms ease' }}
+        onClick={() => setSchedulerOpen(false)}
+      >
+      <div
+        className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-100 max-h-[88vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+      <div className="p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="text-base font-bold mb-1">🌙 Schedule night duty</div>
+            <div className="text-xs text-slate-500">Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights.</div>
+          </div>
+          <button
+            onClick={() => setSchedulerOpen(false)}
+            aria-label="Close"
+            style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer', fontSize: 16, color: '#64748B', flexShrink: 0, lineHeight: 1 }}
+          >
+            ✕
+          </button>
+        </div>
 
       <div className="grid grid-cols-12 gap-5">
         {/* Calendar */}
@@ -293,64 +392,10 @@ export function NightDutyScheduler() {
           <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4, textAlign: 'center' }}>{selectedTechIds.length} people × {selectedDates.length} dates</div>
         </div>
       </div>
-
-      {/* Report — always visible, even when empty */}
-      <div style={{ marginTop: 18 }}>
-        <div className="text-sm font-bold mb-2">Night duty report</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-          {[
-            { label: 'On duty tonight', value: report.tonight, color: '#2563EB', bg: '#EFF6FF' },
-            { label: 'Scheduled ahead', value: report.scheduled, color: '#64748B', bg: '#F8FAFC' },
-            { label: 'Checked in', value: report.checkedIn, color: '#16A34A', bg: '#DCFCE7' },
-            { label: 'Missed', value: report.missed, color: '#DC2626', bg: '#FEF2F2' },
-          ].map(s => (
-            <div key={s.label} style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: '12px 14px', background: s.bg }}>
-              <div style={{ fontSize: 26, fontWeight: 800, color: s.color, lineHeight: 1 }}>{s.value}</div>
-              <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
       </div>
-
-      {/* Upcoming assignments — one collapsible row per person. */}
-      <div style={{ marginTop: 18 }}>
-        <div className="text-sm font-bold mb-2">Upcoming assignments</div>
-        {Object.keys(dutiesByTech).length === 0 && <div style={{ fontSize: 12, color: '#94A3B8' }}>No upcoming night duty scheduled.</div>}
-        <div className="flex flex-col gap-2">
-          {Object.entries(dutiesByTech).map(([techId, ds]) => {
-            const open = expandedTech.has(techId);
-            const checkedIn = ds.filter(d => d.status === 'checked_in').length;
-            const nextDate = ds.find(d => d.status !== 'checked_in')?.duty_date ?? ds[0].duty_date;
-            return (
-              <div key={techId} style={{ border: '1px solid #E2E8F0', borderRadius: 10, overflow: 'hidden' }}>
-                <button
-                  onClick={() => toggleTechRow(techId)}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: open ? '#F8FAFC' : '#fff', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-                >
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', flex: 1 }}>{acctName[techId] || 'Unknown'}</span>
-                  <span className="badge" style={{ background: '#EEF2FF', color: '#4338CA', fontSize: 11 }}>{ds.length} night{ds.length === 1 ? '' : 's'}</span>
-                  {checkedIn > 0 && <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A', fontSize: 11 }}>{checkedIn} checked in</span>}
-                  <span style={{ fontSize: 11, color: '#94A3B8' }}>next {new Date(nextDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
-                  <span style={{ fontSize: 11, color: '#94A3B8', width: 14, textAlign: 'center' }}>{open ? '▾' : '▸'}</span>
-                </button>
-                {open && (
-                  <div style={{ padding: '4px 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 6, borderTop: '1px solid #F1F5F9' }}>
-                    {ds.map(d => {
-                      const cfg = STATUS_CFG[d.status] || STATUS_CFG.scheduled;
-                      return (
-                        <span key={d.id} className="badge" style={{ background: cfg.bg, color: cfg.color, fontSize: 11, marginTop: 6 }}>
-                          {new Date(d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })} · {cfg.label}
-                          {d.checked_in_at && ` · ${new Date(d.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
       </div>
+      </div>
+      )}
     </div>
   );
 }

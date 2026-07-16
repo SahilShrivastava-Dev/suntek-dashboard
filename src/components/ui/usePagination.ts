@@ -1,0 +1,88 @@
+import { useEffect, useMemo, useState } from 'react';
+
+/**
+ * Client-side pagination for the app's many bespoke `<table className="dt">` lists.
+ *
+ * Every table already builds a filtered/sorted array before `.map()`, so adoption is:
+ *   const { pageRows, controls } = usePagination(sortedRows, { resetKey: search });
+ *   {pageRows.map(...)}
+ *   <TablePagination controls={controls} />
+ *
+ * `resetKey` should be whatever drives the row set (search text, active filter…) so the
+ * view snaps back to page 1 when the underlying list changes rather than stranding the
+ * user on an empty high page.
+ */
+
+export interface PaginationControls {
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  total: number;
+  /** 1-indexed first row on the current page (0 when empty). */
+  from: number;
+  /** 1-indexed last row on the current page (0 when empty). */
+  to: number;
+  canPrev: boolean;
+  canNext: boolean;
+  setPage: (p: number) => void;
+  setPageSize: (n: number) => void;
+  prev: () => void;
+  next: () => void;
+  /** Windowed page numbers with '…' gaps for the numbered buttons. */
+  pageNumbers: (number | 'gap')[];
+}
+
+export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+function windowedPages(page: number, pageCount: number): (number | 'gap')[] {
+  if (pageCount <= 7) return Array.from({ length: pageCount }, (_, i) => i + 1);
+  const out: (number | 'gap')[] = [1];
+  const lo = Math.max(2, page - 1);
+  const hi = Math.min(pageCount - 1, page + 1);
+  if (lo > 2) out.push('gap');
+  for (let i = lo; i <= hi; i++) out.push(i);
+  if (hi < pageCount - 1) out.push('gap');
+  out.push(pageCount);
+  return out;
+}
+
+export function usePagination<T>(
+  rows: T[],
+  opts?: { initialPageSize?: number; resetKey?: unknown },
+): { pageRows: T[]; controls: PaginationControls } {
+  const [pageSize, setPageSizeRaw] = useState(opts?.initialPageSize ?? 10);
+  const [page, setPage] = useState(1);
+
+  const total = rows.length;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  // Snap to page 1 when the row set changes (new filter/search) or page size changes.
+  useEffect(() => { setPage(1); }, [opts?.resetKey, pageSize]);
+  // Keep the page in range if the list shrinks underneath us.
+  useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
+
+  const current = Math.min(page, pageCount);
+  const start = (current - 1) * pageSize;
+  const pageRows = useMemo(() => rows.slice(start, start + pageSize), [rows, start, pageSize]);
+
+  const from = total === 0 ? 0 : start + 1;
+  const to = Math.min(start + pageSize, total);
+
+  const controls: PaginationControls = {
+    page: current,
+    pageSize,
+    pageCount,
+    total,
+    from,
+    to,
+    canPrev: current > 1,
+    canNext: current < pageCount,
+    setPage: (p: number) => setPage(Math.min(Math.max(1, p), pageCount)),
+    setPageSize: (n: number) => setPageSizeRaw(n),
+    prev: () => setPage(p => Math.max(1, p - 1)),
+    next: () => setPage(p => Math.min(pageCount, p + 1)),
+    pageNumbers: windowedPages(current, pageCount),
+  };
+
+  return { pageRows, controls };
+}

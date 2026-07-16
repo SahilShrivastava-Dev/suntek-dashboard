@@ -10,6 +10,7 @@ import { useBlacklist } from '../../contexts/BlacklistContext';
 import { NotesButton } from '../../components/mentions';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
+import { useSortable, Th } from '../../components/ui/useSortable';
 import type { BlacklistEntry } from '../../contexts/BlacklistContext';
 import type { Database } from '../../lib/database.types';
 
@@ -171,6 +172,16 @@ export function Blacklist() {
     }
     return true;
   });
+
+  const fSort = useSortable(filtered, {
+    type:     e => TYPE_CFG[e.type]?.label ?? e.type,
+    name:     e => e.name,
+    reason:   e => e.reason,
+    severity: e => SEV_RANK[e.severity] ?? -1,
+    addedBy:  e => e.added_by,
+    date:     e => new Date(e.created_at),
+    status:   e => (e.is_active ? 1 : 0),
+  }, { key: 'date', dir: 'desc' });
 
   // ── Save new entry ──────────────────────────────────────────────────────────
   async function handleSave() {
@@ -499,13 +510,13 @@ export function Blacklist() {
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('blacklist.colType')}</th>
-                <th>{t('blacklist.colNameId')}</th>
-                <th>{t('blacklist.colReason')}</th>
-                <th>{t('blacklist.colSeverity')}</th>
-                <th>{t('blacklist.colAddedBy')}</th>
-                <th>{t('blacklist.colDate')}</th>
-                <th>{t('blacklist.colStatus')}</th>
+                <Th sortKey="type" s={fSort}>{t('blacklist.colType')}</Th>
+                <Th sortKey="name" s={fSort}>{t('blacklist.colNameId')}</Th>
+                <Th sortKey="reason" s={fSort}>{t('blacklist.colReason')}</Th>
+                <Th sortKey="severity" s={fSort} firstDir="desc">{t('blacklist.colSeverity')}</Th>
+                <Th sortKey="addedBy" s={fSort}>{t('blacklist.colAddedBy')}</Th>
+                <Th sortKey="date" s={fSort} firstDir="desc">{t('blacklist.colDate')}</Th>
+                <Th sortKey="status" s={fSort} firstDir="desc">{t('blacklist.colStatus')}</Th>
                 <th>{t('blacklist.colActions')}</th>
               </tr>
             </thead>
@@ -520,7 +531,7 @@ export function Blacklist() {
                     : t('blacklist.emptyNoMatch')}
                 </td></tr>
               )}
-              {filtered.map(e => {
+              {fSort.sorted.map(e => {
                 const tc = TYPE_CFG[e.type] || TYPE_CFG.other;
                 const sc = SEV_CFG[e.severity] || SEV_CFG.high;
                 return (

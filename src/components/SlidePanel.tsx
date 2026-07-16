@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { MentionTextarea } from './mentions/MentionTextarea';
 
 // ── Slide-in drawer ───────────────────────────────────────────────────────────
@@ -9,14 +10,17 @@ interface SlidePanelProps {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  /** When true, the panel cannot be dismissed (backdrop + close button disabled).
+   *  Use during an in-flight upload so an accidental click can't cancel it. */
+  locked?: boolean;
 }
 
-export function SlidePanel({ open, onClose, title, subtitle, children }: SlidePanelProps) {
+export function SlidePanel({ open, onClose, title, subtitle, children, locked = false }: SlidePanelProps) {
   return (
     <>
       {/* Backdrop */}
       <div
-        onClick={onClose}
+        onClick={locked ? undefined : onClose}
         style={{
           position: 'fixed', inset: 0, zIndex: 40,
           background: 'rgba(15,23,42,0.45)',
@@ -64,20 +68,26 @@ export function SlidePanel({ open, onClose, title, subtitle, children }: SlidePa
             <div style={{ fontSize: 18, fontWeight: 700, color: '#0F172A' }}>{title}</div>
           </div>
           <button
-            onClick={onClose}
+            onClick={locked ? undefined : onClose}
+            disabled={locked}
+            title={locked ? 'Please wait — upload in progress' : undefined}
             style={{
               width: 36, height: 36, borderRadius: '50%',
-              background: '#F1F5F9', border: 'none', cursor: 'pointer',
+              background: '#F1F5F9', border: 'none', cursor: locked ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               marginLeft: 16, flexShrink: 0, marginTop: 2,
               transition: 'background 0.15s',
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#E2E8F0')}
-            onMouseLeave={e => (e.currentTarget.style.background = '#F1F5F9')}
+            onMouseEnter={e => { if (!locked) e.currentTarget.style.background = '#E2E8F0'; }}
+            onMouseLeave={e => { if (!locked) e.currentTarget.style.background = '#F1F5F9'; }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5">
-              <path d="M18 6 6 18M6 6l12 12"/>
-            </svg>
+            {locked ? (
+              <span style={{ width: 15, height: 15, borderRadius: '50%', border: '2px solid #CBD5E1', borderTopColor: '#64748B', display: 'block', animation: 'sp-spin 0.7s linear infinite' }} />
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5">
+                <path d="M18 6 6 18M6 6l12 12"/>
+              </svg>
+            )}
           </button>
         </div>
 
@@ -114,6 +124,26 @@ const textareaStyle: React.CSSProperties = { ...inputStyle, resize: 'vertical', 
 
 export function PanelInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} style={inputStyle} />;
+}
+
+/** Password field with a show/hide eye toggle, styled to match panel inputs. Use
+ *  wherever a panel collects a password so the affordance matches the login page. */
+export function PanelPasswordInput(props: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input {...props} type={show ? 'text' : 'password'} style={{ ...inputStyle, paddingRight: 40 }} />
+      <button
+        type="button"
+        onClick={() => setShow(v => !v)}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        tabIndex={-1}
+        style={{ position: 'absolute', top: 0, right: 0, height: '100%', display: 'flex', alignItems: 'center', padding: '0 12px', border: 'none', background: 'none', color: '#94A3B8', cursor: 'pointer' }}
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
 }
 export function PanelSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} style={selectStyle} />;

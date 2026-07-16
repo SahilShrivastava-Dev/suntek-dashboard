@@ -61,6 +61,9 @@ export const CAPABILITIES: { key: string; label: string; description: string }[]
   { key: 'manage_users', label: 'Manage users', description: 'Create, edit, deactivate users and assign their roles' },
   { key: 'manage_roles', label: 'Manage roles & permissions', description: 'Create/edit roles, levels and dashboard access' },
   { key: 'allocate_night_duty', label: 'Allocate night duty', description: 'Schedule technicians beneath them onto night-duty shifts' },
+  { key: 'view_asset_profile', label: 'View asset QR profile', description: 'Open an asset’s digital profile (details + maintenance history) by scanning its QR code' },
+  { key: 'generate_asset_qr', label: 'Generate & print asset QR', description: 'Generate, regenerate, download and print QR codes for fixed assets' },
+  { key: 'view_asset_analytics', label: 'View asset analytics', description: 'See repair statistics and trend charts on an asset profile' },
 ];
 
 /**

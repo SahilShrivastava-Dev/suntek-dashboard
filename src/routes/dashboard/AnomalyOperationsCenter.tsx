@@ -112,7 +112,7 @@ export function AnomalyOperationsCenter() {
     await setStatus(reasonFor.id, action, text);
 
     // Tagged / CC'd people watch this flag and get notified of the change.
-    const ref = { entityType: 'anomaly', entityId: reasonFor.id, entityLabel: flag?.title ?? 'Anomaly flag', route: '/anomaly-center' };
+    const ref = { entityType: 'anomaly', entityId: reasonFor.id, entityLabel: flag?.title ?? 'Anomaly flag', route: '/dashboard/anomaly-center' };
     const actor = { id: activeProfile.id, name: activeProfile.name, role: activeProfile.roleLabel };
     const ccPeople = people.filter((p) => reasonCc.includes(p.id));
     const mPeople = people.filter((p) => reasonMentions.includes(p.id));

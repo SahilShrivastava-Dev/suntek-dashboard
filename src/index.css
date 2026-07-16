@@ -368,3 +368,14 @@
     animation: fadein 320ms ease both;
   }
 }
+
+/* ── Global (layer-free) animations ── */
+/* Small button spinner (SlidePanel locked-close state) */
+@keyframes sp-spin { to { transform: rotate(360deg); } }
+/* Indeterminate progress bar — used while the AI reads/verifies a bill,
+   where there is no real percentage to report yet. */
+@keyframes sp-indeterminate {
+  0%   { left: -35%; right: 100%; }
+  60%  { left: 100%; right: -90%; }
+  100% { left: 100%; right: -90%; }
+}

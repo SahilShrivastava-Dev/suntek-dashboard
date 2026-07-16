@@ -677,6 +677,11 @@ export interface Database {
           purchase_date: string | null;
           account_head: string | null;
           photo_url: string | null;
+          // QR asset management (49_asset_qr_and_far_link.sql). Opt-in per asset:
+          // NULL until a user generates one; rotates on regenerate.
+          qr_token: string | null;
+          qr_generated_at: string | null;
+          qr_generated_by: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['fixed_assets']['Row'], 'id' | 'created_at'>>;
@@ -744,6 +749,7 @@ export interface Database {
             | 'pending_purchase_manager'
             | 'pending_handover'
             | 'pending_defective_return'
+            | 'changes_requested' // reviewer sent it back for correction (48_ticket_request_changes.sql)
             | 'closed';
           title: string;
           equipment: string;
@@ -756,6 +762,9 @@ export interface Database {
           raised_by: string | null;
           raised_role: string | null;
           assigned_to: string | null;
+          // Reliable link to the fixed asset (49_asset_qr_and_far_link.sql). Wired
+          // from the raise form + copied from the schedule on periodic spawn.
+          far_asset_id: string | null;
           completion_photo_url: string | null;
           defective_part_photo_url: string | null;
           defective_part_decision: 'repair' | 'scrap' | null;
@@ -772,6 +781,14 @@ export interface Database {
           pm_ocr_status: string | null;             // 'match' | 'mismatch' | 'unread' | null
           pm_ocr_raw: unknown | null;               // raw OCR payload
           pm_mismatch: boolean | null;              // declared vs OCR disagree (advisory, never blocks)
+          // Request-Changes / resubmit loop (48_ticket_request_changes.sql). The
+          // full per-cycle history lives in entity_notes; these hold the CURRENT
+          // request for display + a cycle counter.
+          revision_reason: string | null;           // what the reviewer asked to fix
+          revision_requested_by: string | null;     // reviewer name
+          revision_requested_at: string | null;     // when changes were requested
+          revision_count: number | null;            // how many review cycles so far
+          revision_prev_status: string | null;      // stage to restore on resubmit
           closed_at: string | null;
           created_at: string;
         };

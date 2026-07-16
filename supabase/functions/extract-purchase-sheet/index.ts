@@ -14,6 +14,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { nvidiaChat } from '../_shared/nvidiaVision.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -24,7 +25,9 @@ const CORS = {
 const EXTRACTION_PROMPT = `You are a precise OCR assistant for a CP (Chlorinated Paraffin) manufacturing company in India.
 
 Carefully read and extract ALL data from this purchase invoice or delivery challan image.
-Return ONLY a valid JSON object — no markdown fences, no explanation, just raw JSON.
+Return ONLY a valid JSON object. Do NOT use markdown, asterisks, bold, headings, or bullet
+points anywhere. Your ENTIRE response must be a single JSON object that begins with { and ends
+with } — nothing before or after it.
 
 Extract the following fields:
 - invoiceNumber: the invoice / bill / challan number (string)
@@ -39,9 +42,21 @@ Extract the following fields:
     slNo (string or null), description (string or null), quantity (number or null),
     unit (string or null), ratePerUnit (number or null), amount (number or null),
     hsnCode (string or null)
-- subTotal: subtotal before tax (number or null)
-- taxAmount: total GST / tax amount (number or null)
-- totalAmount: grand total payable (number or null)
+    IMPORTANT column disambiguation (Indian invoices have many numeric columns):
+    * ratePerUnit = the per-unit rate from the "List Price" / "Rate" / "Price/Per"
+      column. It is a PRICE, never a percentage. Ignore "CGST Rate" / "SGST Rate"
+      columns (those are % like 2.50% or 18%).
+    * amount = the row's line total in the RIGHTMOST "Amount" column. It is the
+      PRE-TAX value, normally quantity × ratePerUnit, and is the LARGEST number in
+      that row. NEVER put a "CGST Amount", "SGST Amount", or "IGST" cell here —
+      those are small tax figures (e.g. 904.76), not the line amount (e.g. 38000).
+- subTotal: the taxable value BEFORE GST — labelled "Taxable Amt", "Total Before Tax",
+  or "Sub Total". The sum of all line amounts equals this. (number or null)
+- taxAmount: the TOTAL GST = CGST + SGST + IGST (labelled "Total Tax" / "Tax Amount").
+  This is a SMALL number and is NOT the invoice total. (number or null)
+- totalAmount: the FINAL grand total payable INCLUDING GST — labelled "Grand Total",
+  "Total Amount", "Net Payable". It equals subTotal + taxAmount and is the LARGEST
+  amount on the whole bill. Never put the tax value or a subtotal here. (number or null)
 - paymentTerms: payment terms text if visible (string or null)
 - remarks: any additional notes or remarks visible on the document (string, empty if none)
 
@@ -105,14 +120,14 @@ serve(async (req: Request) => {
       );
     }
 
-    const nvidiaRes = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'meta/llama-3.2-90b-vision-instruct',
+    let content: string;
+    let usedModel: string;
+    try {
+      const r = await nvidiaChat({
+        apiKey,
+        fallbackModel: 'meta/llama-3.2-90b-vision-instruct',
+        maxTokens: 4096,
+        jsonMode: true,
         messages: [
           {
             role: 'user',
@@ -122,25 +137,19 @@ serve(async (req: Request) => {
             ],
           },
         ],
-        max_tokens: 2048,
-        temperature: 0.05,
-      }),
-    });
-
-    if (!nvidiaRes.ok) {
-      const errText = await nvidiaRes.text().catch(() => '');
+      });
+      content = r.content;
+      usedModel = r.model;
+    } catch (e) {
       return new Response(
-        JSON.stringify({ error: `NVIDIA API returned ${nvidiaRes.status}: ${errText.slice(0, 400)}` }),
+        JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
         { status: 502, headers: { ...CORS, 'Content-Type': 'application/json' } },
       );
     }
 
-    const nvidiaJson = await nvidiaRes.json();
-    const content: string = nvidiaJson?.choices?.[0]?.message?.content ?? '';
-
     if (!content) {
       return new Response(
-        JSON.stringify({ error: 'NVIDIA API returned an empty response.' }),
+        JSON.stringify({ error: `NVIDIA API returned an empty response (model ${usedModel}).` }),
         { status: 502, headers: { ...CORS, 'Content-Type': 'application/json' } },
       );
     }

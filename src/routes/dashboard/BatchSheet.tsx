@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useSortable, Th } from '../../components/ui/useSortable';
 
 const QC_BADGE: Record<string, { bg: string; color: string }> = {
   pending:  { bg: '#FEF3C7', color: '#D97706' },
@@ -46,6 +47,16 @@ export function BatchSheet() {
   const { t } = useTranslation();
   const [liveBatches, setLiveBatches] = useState<BatchDisplay[]>([]);
   const [updateFlash, setUpdateFlash] = useState<string | null>(null);
+  const batchSort = useSortable(liveBatches, {
+    num: b => b.num,
+    plant: b => b.plant,
+    recipe: b => b.recipe,
+    target: b => b.target,
+    current: b => b.current,
+    drums: b => b.drums,
+    op: b => b.op,
+    qc: b => b.qc,
+  });
 
   useEffect(() => {
     async function load() {
@@ -161,14 +172,14 @@ export function BatchSheet() {
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('batch.colBatchNo')}</th><th>{t('common.plant')}</th><th>{t('batch.colRecipe')}</th>
-                <th className="num">{t('batch.colTarget')}</th><th className="num">{t('batch.colCurrent')}</th>
-                <th className="num">{t('batch.colDrums')}</th><th className="num">{t('batch.colElapsed')}</th>
-                <th>{t('batch.colOperator')}</th><th>{t('batch.colQc')}</th>
+                <Th sortKey="num" s={batchSort}>{t('batch.colBatchNo')}</Th><Th sortKey="plant" s={batchSort}>{t('common.plant')}</Th><Th sortKey="recipe" s={batchSort}>{t('batch.colRecipe')}</Th>
+                <Th sortKey="target" s={batchSort} firstDir="desc" className="num">{t('batch.colTarget')}</Th><Th sortKey="current" s={batchSort} firstDir="desc" className="num">{t('batch.colCurrent')}</Th>
+                <Th sortKey="drums" s={batchSort} firstDir="desc" className="num">{t('batch.colDrums')}</Th><th className="num">{t('batch.colElapsed')}</th>
+                <Th sortKey="op" s={batchSort}>{t('batch.colOperator')}</Th><Th sortKey="qc" s={batchSort}>{t('batch.colQc')}</Th>
               </tr>
             </thead>
             <tbody>
-              {liveBatches.map(b => {
+              {batchSort.sorted.map(b => {
                 const qc = QC_BADGE[b.qc] || QC_BADGE.awaiting;
                 const isFlashing = updateFlash === b.id;
                 return (

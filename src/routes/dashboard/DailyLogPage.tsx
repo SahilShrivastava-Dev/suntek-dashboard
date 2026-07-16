@@ -207,7 +207,7 @@ export function DailyLogPage() {
       }
 
       await notifyMentions(remarks, {
-        entityLabel: `Daily log · ${unitName || 'Unit'} · ${date}`, route: '/daily-log',
+        entityLabel: `Daily log · ${unitName || 'Unit'} · ${date}`, route: '/dashboard/daily-log',
       });
 
       // Screen OCR/entered operator + helper names against the blacklist.

@@ -10,6 +10,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { nvidiaChat } from '../_shared/nvidiaVision.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -77,11 +78,14 @@ serve(async (req: Request) => {
     // Use 11B model for daily logs — the document has ~260 numerical cells which
     // causes the 90B model to exceed the 150s Edge Function timeout.
     // 11B is ~10× faster and fully accurate for structured numeric tables.
-    const nvidiaRes = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: 'meta/llama-3.2-11b-vision-instruct',
+    // 11B by default — daily logs have ~260 numeric cells and the 90B model can
+    // exceed the Edge Function timeout. Override globally with NVIDIA_OCR_MODEL.
+    let content: string;
+    try {
+      const r = await nvidiaChat({
+        apiKey,
+        fallbackModel: 'meta/llama-3.2-11b-vision-instruct',
+        maxTokens: 4096,
         messages: [
           // System message forces JSON-only output from the 11B model
           { role: 'system', content: SYSTEM_PROMPT },
@@ -93,22 +97,15 @@ serve(async (req: Request) => {
             ],
           },
         ],
-        max_tokens: 2048,
-        temperature: 0.05,
-      }),
-    });
-
-    if (!nvidiaRes.ok) {
-      const t = await nvidiaRes.text().catch(() => '(no body)');
-      console.error(`[extract-daily-log] NVIDIA error ${nvidiaRes.status}:`, t.slice(0, 500));
+      });
+      content = r.content;
+    } catch (e) {
+      console.error('[extract-daily-log] NVIDIA error:', e instanceof Error ? e.message : String(e));
       return new Response(
-        JSON.stringify({ error: `NVIDIA API ${nvidiaRes.status}: ${t.slice(0, 400)}` }),
+        JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
         { status: 502, headers: { ...CORS, 'Content-Type': 'application/json' } },
       );
     }
-
-    const nvidiaJson = await nvidiaRes.json();
-    const content: string = nvidiaJson?.choices?.[0]?.message?.content ?? '';
     console.log('[extract-daily-log] Content length:', content.length, '| Preview:', content.slice(0, 150));
 
     // Robust extraction: find outermost { ... }

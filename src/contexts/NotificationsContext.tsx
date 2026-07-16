@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { insertRows, updateRows } from '../lib/db';
 import { useRoleContext } from './RoleContext';
@@ -45,6 +45,13 @@ interface NotificationsContextValue {
   /** Insert a notification; resolves true when the row was created (delivered). */
   addNotification: (n: Omit<AppNotification, 'id' | 'created_at' | 'read_by'>) => Promise<boolean>;
   tableReady: boolean;
+  /**
+   * True when this notification belongs to a workflow that has already finished
+   * (its ticket is closed). Computed DYNAMICALLY from live ticket state — the
+   * stored row is never modified — so the UI can show completed steps in a muted
+   * "done" style while preserving the full audit trail.
+   */
+  isNotificationCompleted: (n: AppNotification) => boolean;
 }
 
 const NotificationsContext = createContext<NotificationsContextValue>({
@@ -55,7 +62,18 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   clearAll: () => {},
   addNotification: async () => false,
   tableReady: false,
+  isNotificationCompleted: () => false,
 });
+
+/** A maintenance notification deep-links to its ticket via `?ticket=<id>`; pull
+ *  that id out so we can look up whether the workflow has completed. */
+function ticketIdFromRoute(route: string | null | undefined): string | null {
+  if (!route) return null;
+  const q = route.indexOf('?');
+  if (q === -1) return null;
+  try { return new URLSearchParams(route.slice(q + 1)).get('ticket'); }
+  catch { return null; }
+}
 
 export function useNotifications() {
   return useContext(NotificationsContext);
@@ -94,6 +112,9 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [tableReady, setTableReady] = useState(false);
+  // Ticket ids (from notification routes) whose workflow has completed (ticket
+  // closed). Derived from live DB state, never persisted onto the notifications.
+  const [completedTicketIds, setCompletedTicketIds] = useState<Set<string>>(new Set());
 
   // Does this notification belong to the active person?
   //  • 'personal' (an @-mention / CC) → matched STRICTLY by personal id, so it
@@ -168,6 +189,39 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   const unreadCount = notifications.filter(n => !n.read_by?.includes(selfKey)).length;
 
+  // ── Dynamic completed-workflow detection ────────────────────────────────────
+  // Distinct ticket ids referenced by the currently loaded notifications. Stable
+  // string key so the lookup effect only re-runs when the set actually changes.
+  const ticketIdsKey = useMemo(() => {
+    const ids = new Set<string>();
+    for (const n of notifications) { const id = ticketIdFromRoute(n.route); if (id) ids.add(id); }
+    return [...ids].sort().join(',');
+  }, [notifications]);
+
+  // Look up which of those tickets are closed. Read-only — we never write the
+  // completion state back to the notification rows (audit trail stays intact).
+  useEffect(() => {
+    const ids = ticketIdsKey ? ticketIdsKey.split(',') : [];
+    if (!ids.length) { setCompletedTicketIds(new Set()); return; }
+    let cancelled = false;
+    supabase
+      .from('maintenance_tickets')
+      .select('id')
+      .in('id', ids)
+      .eq('status', 'closed')
+      .returns<{ id: string }[]>()
+      .then(({ data }) => { if (!cancelled) setCompletedTicketIds(new Set((data || []).map(r => r.id))); }, () => {});
+    return () => { cancelled = true; };
+    // notifications.length is an extra trigger: a workflow closing always adds a
+    // notification, so re-checking on count changes catches an in-session close
+    // even when the ticket id was already present (ticketIdsKey unchanged).
+  }, [ticketIdsKey, notifications.length]);
+
+  const isNotificationCompleted = useCallback((n: AppNotification): boolean => {
+    const id = ticketIdFromRoute(n.route);
+    return !!id && completedTicketIds.has(id);
+  }, [completedTicketIds]);
+
   function markRead(id: string) {
     setNotifications(prev =>
       prev.map(n => n.id === id && !n.read_by.includes(selfKey)
@@ -225,7 +279,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }
 
   return (
-    <NotificationsContext.Provider value={{ notifications, unreadCount, markRead, markAllRead, clearAll, addNotification, tableReady }}>
+    <NotificationsContext.Provider value={{ notifications, unreadCount, markRead, markAllRead, clearAll, addNotification, tableReady, isNotificationCompleted }}>
       {children}
     </NotificationsContext.Provider>
   );

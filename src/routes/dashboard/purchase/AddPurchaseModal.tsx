@@ -6,6 +6,8 @@ import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { deriveEquipment, normalizeUnit } from '../../../lib/store/parseStockFile';
 import { parseBill, matchCandidates, type ParsedBill, type StockLite } from '../../../lib/store/purchaseParse';
+import { reconcileBillAmount } from '../../../lib/nvidiaOcr';
+import { ProgressBar, useFakeProgress } from '../../../components/ui/ProgressBar';
 
 type StockItem = StockLite & { plant_id: string | null };
 type Plant = { id: string; name: string };
@@ -52,7 +54,13 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
   const [fileName, setFileName] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);
+  const [parseProg, setParseProg] = useState<{ page: number; pages: number }>({ page: 0, pages: 0 });
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Reading a bill is a single vision-model call with no streamed %; ease a bar
+  // toward 85% while it runs and let per-page progress pull it forward.
+  const parseFloor = parseProg.pages > 0 ? Math.round(((parseProg.page - 1) / parseProg.pages) * 85) : 0;
+  const billProgress = useFakeProgress(stage === 'parsing', { floor: parseFloor });
 
   // Load plants + current stock (plant-scoped) whenever the modal opens.
   useEffect(() => {
@@ -84,13 +92,13 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
   const bestChoice = (name: string) => { const c = candidatesFor(name); return c[0] && c[0].score >= 0.6 ? c[0].id : 'new'; };
 
   async function handleBill(file: File) {
-    setFileName(file.name); setErr(null); setStage('parsing');
+    setFileName(file.name); setErr(null); setParseProg({ page: 0, pages: 0 }); billProgress.reset(); setStage('parsing');
     try {
       try {
         const up = await uploadWorkflowFile(file, { workflow: 'store-req', subfolder: 'purchase-bills', kind: 'bill', creator: actorName });
         setCloudUrl(up.secure_url);
       } catch { /* archive is best-effort */ }
-      const parsed = await parseBill(file);
+      const parsed = await parseBill(file, info => setParseProg(info));
       if (!parsed.lineItems.length) throw new Error('No line items could be read from this bill. Try a clearer scan, or add them manually.');
       setBill(parsed);
       setLines(parsed.lineItems.map(li => {
@@ -153,9 +161,14 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
     } catch (e) { setErr(errMsg(e)); setStage('error'); }
   }
 
-  // Validation banner (bill only): compare line amounts vs invoice total.
+  // Validation banner (bill only): reconcile the sum of line amounts against the
+  // bill's totals in a TAX-AWARE way. Line amounts are pre-tax, so they add up to
+  // the sub-total, not the GST-inclusive grand total — comparing against the grand
+  // total alone flags every taxed bill falsely. reconcileBillAmount accepts any
+  // plausible base (sub-total / total−tax / tax-inclusive total).
   const amountSum = lines.reduce((s, l) => s + (l.amount || 0), 0);
-  const totalMismatch = bill?.totalAmount != null && amountSum > 0 && Math.abs(amountSum - bill.totalAmount) / bill.totalAmount > 0.02;
+  const recon = reconcileBillAmount(amountSum, { subTotal: bill?.subTotal, taxAmount: bill?.taxAmount, totalAmount: bill?.totalAmount });
+  const totalMismatch = bill != null && !recon.ok;
 
   return (
     <div style={overlay} onClick={() => { if (stage !== 'parsing' && stage !== 'saving') close(); }}>
@@ -191,7 +204,15 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
           </div>
         )}
 
-        {stage === 'parsing' && <div style={{ fontSize: 13, color: '#475569', padding: '20px 0' }}>Reading the bill… ({fileName})</div>}
+        {stage === 'parsing' && (
+          <div style={{ padding: '16px 0 8px' }}>
+            <ProgressBar
+              pct={billProgress.pct}
+              label={parseProg.pages > 1 ? `Reading the bill… page ${parseProg.page} of ${parseProg.pages}` : `Reading the bill… (${fileName})`}
+            />
+            <div style={{ fontSize: 11, color: '#94A3B8' }}>AI is extracting items &amp; quantities — this can take a few seconds.</div>
+          </div>
+        )}
 
         {stage === 'edit' && (
           <div>
@@ -199,10 +220,10 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
               <div style={{ fontSize: 12, color: '#475569', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
                 {bill.invoiceNumber ? <>Invoice <strong>{bill.invoiceNumber}</strong>{bill.supplierName ? ` · ${bill.supplierName}` : ''} · </> : null}
                 <strong>{lines.length}</strong> item(s) read from {bill.pages} page(s).
-                {totalMismatch && <span style={{ color: '#B45309' }}> ⚠ line amounts (₹{Math.round(amountSum).toLocaleString('en-IN')}) differ from bill total (₹{Math.round(bill.totalAmount!).toLocaleString('en-IN')}) — verify quantities.</span>}
+                {totalMismatch && <span style={{ color: '#B45309' }}> ⚠ line amounts (₹{Math.round(amountSum).toLocaleString('en-IN')}) don't reconcile with the bill's pre-tax total (₹{recon.expected != null ? Math.round(recon.expected).toLocaleString('en-IN') : '?'}) — verify quantities.</span>}
               </div>
             )}
-            <div style={{ maxHeight: 380, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {lines.map(ln => {
                 const cands = candidatesFor(ln.name);
                 const chosen = ln.choice !== 'new' ? stockForPlant.find(s => s.id === ln.choice) : null;

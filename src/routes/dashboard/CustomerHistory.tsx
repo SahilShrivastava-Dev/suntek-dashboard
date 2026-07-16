@@ -1,4 +1,8 @@
 import React, { useState } from 'react';
+import { EmptyState } from '../../components/ui/states';
+import { usePagination } from '../../components/ui/usePagination';
+import { TablePagination } from '../../components/ui/TablePagination';
+import { useSortable, Th } from '../../components/ui/useSortable';
 import { useTranslation } from 'react-i18next';
 import { useOverviewKPIs, useTopCustomers, useCustomerList, useAnalyticsKPIs, fmtINR } from '../../hooks/useBusyData';
 import { ConcentrationBar, MiniBarChart } from '../../components/charts/AnalyticsViz';
@@ -17,6 +21,14 @@ export function CustomerHistory() {
   const filteredList = (customerList || []).filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase())
   );
+  const custSort = useSortable(filteredList, {
+    name: c => c.name,
+    mtdRevenue: c => c.mtdRevenue,
+    fyRevenue: c => c.fyRevenue,
+    fyInvoices: c => c.fyInvoices,
+    outstanding: c => c.outstanding,
+  });
+  const custPg = usePagination(custSort.sorted, { resetKey: `${search}|${custSort.sort.key}|${custSort.sort.dir}` });
 
   return (
     <>
@@ -137,19 +149,22 @@ export function CustomerHistory() {
             className="px-4 py-2 bg-slate-50 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
           />
         </div>
+        {filteredList.length === 0 ? (
+          <EmptyState title={search ? t('customers.noMatches', 'No customers match your search.') : t('customers.empty', 'No customers yet.')} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('customers.colCustomerBusy')}</th>
-                <th className="num">{t('customers.colMtdSales')}</th>
-                <th className="num">{t('customers.colFySales')}</th>
-                <th className="num">{t('customers.colFyInvoices')}</th>
-                <th className="num">{t('customers.colOutstanding')}</th>
+                <Th sortKey="name" s={custSort}>{t('customers.colCustomerBusy')}</Th>
+                <Th sortKey="mtdRevenue" s={custSort} firstDir="desc" className="num">{t('customers.colMtdSales')}</Th>
+                <Th sortKey="fyRevenue" s={custSort} firstDir="desc" className="num">{t('customers.colFySales')}</Th>
+                <Th sortKey="fyInvoices" s={custSort} firstDir="desc" className="num">{t('customers.colFyInvoices')}</Th>
+                <Th sortKey="outstanding" s={custSort} firstDir="desc" className="num">{t('customers.colOutstanding')}</Th>
               </tr>
             </thead>
             <tbody>
-              {filteredList.map(c => (
+              {custPg.pageRows.map(c => (
                 <tr key={c.code} style={{ cursor: 'pointer' }}>
                   <td className="font-semibold">{c.name}</td>
                   <td className="num font-bold">{fmtINR(c.mtdRevenue)}</td>
@@ -162,7 +177,9 @@ export function CustomerHistory() {
               ))}
             </tbody>
           </table>
+          <TablePagination controls={custPg.controls} />
         </div>
+        )}
       </div>
 
       {/* Charts row */}

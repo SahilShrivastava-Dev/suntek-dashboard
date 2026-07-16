@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { insertRows, updateRows } from '../../../lib/db';
-import { resizeImageToDataUrl, extractSupplierBill } from '../../../lib/nvidiaOcr';
+import { resizeImageToDataUrl, extractSupplierBill, type SupplierBillLine } from '../../../lib/nvidiaOcr';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
@@ -15,7 +15,7 @@ import { MentionText, NotesButton, ReadReceipt } from '../../../components/menti
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { useTranslation } from 'react-i18next';
-import { useDirectory, useMentionNotifier, notifyWatchers, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
+import { useDirectory, useMentionNotifier, notifyWatchers, postNote, extractMentionIds, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { similarity } from '../../../lib/blacklist/similarity';
 import { PMScheduleImport } from './PMScheduleImport';
@@ -26,8 +26,11 @@ import type { Database } from '../../../lib/database.types';
 import {
   FREQ_OPTIONS, FREQ_LABEL, STATUS_CFG, STAGE_LABELS,
   statusBadge, formatDate, daysFromNow, dueDateLabel, calculateNextDue,
-  PhotoUploader, StageStrip,
+  PhotoUploader, StageStrip, EMERGENCY_STAGES, INHOUSE_STAGES, INHOUSE_STAGE_LABELS, AVAILABLE_STAGES,
 } from './maintenance/shared';
+import { usePagination } from '../../../components/ui/usePagination';
+import { TablePagination } from '../../../components/ui/TablePagination';
+import { useSortable, Th } from '../../../components/ui/useSortable';
 
 type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
 
@@ -60,21 +63,33 @@ function FarEquipField({ value, assets, onChange, onPick }: {
   onPick: (asset: FarAssetLite | null) => void;
 }) {
   const [focus, setFocus] = React.useState(false);
+  const [active, setActive] = React.useState(0);
   const suggestions = React.useMemo(() => suggestAssets(value, assets), [value, assets]);
+  React.useEffect(() => { setActive(0); }, [value]);
+  const choose = (a: FarAssetLite) => { onChange(`${a.name}${a.identification_mark ? ` (${a.identification_mark})` : ''}`); onPick(a); setFocus(false); };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!focus || suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(i + 1, suggestions.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter' && active < suggestions.length) { e.preventDefault(); choose(suggestions[active].asset); }
+    else if (e.key === 'Escape') { setFocus(false); }
+  };
   return (
     <div style={{ position: 'relative' }}>
       <input value={value}
         onChange={e => { onChange(e.target.value); onPick(null); }}
         onFocus={() => setFocus(true)}
         onBlur={() => window.setTimeout(() => setFocus(false), 150)}
+        onKeyDown={onKeyDown}
         placeholder="Search the FAR — e.g. Cooling Tower CT-1, Melter M1"
         style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
       {focus && suggestions.length > 0 && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10, marginTop: 4, boxShadow: '0 10px 30px rgba(0,0,0,0.15)', maxHeight: 240, overflowY: 'auto' }}>
-          {suggestions.map(s => (
+          {suggestions.map((s, i) => (
             <button key={s.asset.id} type="button"
-              onMouseDown={e => { e.preventDefault(); onChange(`${s.asset.name}${s.asset.identification_mark ? ` (${s.asset.identification_mark})` : ''}`); onPick(s.asset); setFocus(false); }}
-              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
+              onMouseEnter={() => setActive(i)}
+              onMouseDown={e => { e.preventDefault(); choose(s.asset); }}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: i === active ? '#F1F5F9' : '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
               <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.asset.name}</span>
               <span style={{ color: '#16A34A', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.asset.identification_mark || '—'}</span>
             </button>
@@ -93,7 +108,17 @@ function PartNameField({ value, stock, onChange, onPick }: {
   onPick: (item: StoreStockItem | null) => void;
 }) {
   const [focus, setFocus] = React.useState(false);
+  const [active, setActive] = React.useState(0);
   const suggestions = React.useMemo(() => suggestParts(value, stock), [value, stock]);
+  React.useEffect(() => { setActive(0); }, [value]);
+  const choose = (it: StoreStockItem) => { onChange(it.item_name); onPick(it); setFocus(false); };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!focus || suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(i + 1, suggestions.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter' && active < suggestions.length) { e.preventDefault(); choose(suggestions[active]); }
+    else if (e.key === 'Escape') { setFocus(false); }
+  };
   return (
     <div style={{ position: 'relative' }}>
       <input
@@ -101,15 +126,17 @@ function PartNameField({ value, stock, onChange, onPick }: {
         onChange={e => { onChange(e.target.value); onPick(null); }}
         onFocus={() => setFocus(true)}
         onBlur={() => window.setTimeout(() => setFocus(false), 150)}
+        onKeyDown={onKeyDown}
         placeholder={stock.length ? 'Type to search store — e.g. Acid Pump seal' : 'e.g. Mechanical seal, O-ring kit'}
         style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
       />
       {focus && suggestions.length > 0 && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10, marginTop: 4, boxShadow: '0 10px 30px rgba(0,0,0,0.15)', maxHeight: 240, overflowY: 'auto' }}>
-          {suggestions.map(s => (
+          {suggestions.map((s, i) => (
             <button key={s.id} type="button"
-              onMouseDown={e => { e.preventDefault(); onChange(s.item_name); onPick(s); setFocus(false); }}
-              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
+              onMouseEnter={() => setActive(i)}
+              onMouseDown={e => { e.preventDefault(); choose(s); }}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: i === active ? '#F1F5F9' : '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
               <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.item_name}</span>
               <span style={{ color: s.on_hand > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.on_hand > 0 ? `${s.on_hand} in stock` : 'out of stock'}</span>
             </button>
@@ -233,6 +260,15 @@ function notify(payload: NotificationInsert) {
   insertRows('notifications', payload).then(() => {}, () => {});
 }
 
+/** Deep-link a maintenance notification to the exact ticket so clicking the bell
+ *  opens that ticket (and the right Periodic/Emergency tab) instead of the default
+ *  Periodic list. Falls back to the plain page when no ticket applies (e.g. the
+ *  periodic-due summary and schedule notifications). */
+const MAINT_ROUTE = '/dashboard/purchase/maint';
+function maintRoute(ticketId?: string | null) {
+  return ticketId ? `${MAINT_ROUTE}?ticket=${ticketId}` : MAINT_ROUTE;
+}
+
 async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?: TicketUpdate) {
   await updateRows('maintenance_tickets', { status, ...extra })
     .eq('id', ticketId);
@@ -243,6 +279,13 @@ async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?
 // component. Name-based so the blacklist guard (which matches on person name)
 // can flag a restricted assignee.
 const ASSIGNABLE_ROLE_IDS = ['technician_shd', 'store_manager_maint', 'factory_operator', 'unit_head'];
+
+// Common deficiencies a reviewer can tick when sending a ticket back for changes.
+const CHANGE_ISSUE_TAGS = [
+  'Blurry / unclear photo', 'Missing photo', 'Incomplete description',
+  'Incorrect information', 'Missing maintenance details', 'Missing asset information',
+  'Incorrect assessment',
+];
 
 // ── Jharkhand procurement units — store requests route to the matching store manager.
 type Unit = 'chlorides' | 'plasticiser';
@@ -255,6 +298,33 @@ function unitOf(plant?: string | null): Unit | null {
   if (p.includes('chlorid')) return 'chlorides';
   if (p.includes('plastic')) return 'plasticiser';
   return null;
+}
+
+/** The technician's persisted first decision for an emergency ticket — the single
+ *  source of truth for both the stage strip and the action body, so a reopened ticket
+ *  never re-asks "in-house vs store". Derived from the title suffix set at raise
+ *  ("— Repairable" / "— Needs part") plus any store request already created.
+ *  'undecided' only for legacy tickets with neither signal (they still see the chooser). */
+function ticketDecision(title: string | null | undefined, hasStoreReqs: boolean): 'inhouse' | 'store' | 'undecided' {
+  if (hasStoreReqs || /Needs part\s*$/i.test(title || '')) return 'store';
+  if (/Repairable\s*$/i.test(title || '')) return 'inhouse';
+  return 'undecided';
+}
+
+/** Fuzzy-match a requested part name to a line on a bulk supplier bill, so the bill's
+ *  per-item unit price + line total can be attributed to that specific maintenance
+ *  request (the full invoice total still lives on the ticket for FAR). */
+function matchBillLine(partName: string, lines: SupplierBillLine[]): SupplierBillLine | null {
+  const q = (partName || '').toLowerCase().trim();
+  if (!q || !lines.length) return null;
+  let best: { line: SupplierBillLine; score: number } | null = null;
+  for (const ln of lines) {
+    const d = (ln.description || '').toLowerCase().trim();
+    if (!d) continue;
+    const score = d.includes(q) || q.includes(d) ? 1 : similarity(q, d);
+    if (!best || score > best.score) best = { line: ln, score };
+  }
+  return best && best.score >= 0.5 ? best.line : null;
 }
 
 // ── Row actions menu (gear → dropdown) ─────────────────────────────────────────
@@ -435,7 +505,10 @@ export function Maintenance() {
 
   // Form state
   const today = new Date().toISOString().split('T')[0];
-  const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
+  // unit is NOT seeded from the legacy plant_name (that mis-tagged non-Jharkhand users
+  // with Plasticiser/Chlorides). Plant defaults from the real data scope; unit only
+  // applies when the chosen plant is a Jharkhand plant.
+  const [raiseForm, setRaiseForm] = useState({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: '', farAssetId: '', equipmentMark: '' });
   const [scheduleForm, setScheduleForm] = useState({ title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '', farAssetId: '', equipmentMark: '', until: '', unmatchedReason: '' });
   const [farAssets, setFarAssets] = useState<{ id: string; name: string; identification_mark: string | null; plant_id: string | null }[]>([]);
   // Multi-item store request: a list of parts entered together (+ Add item).
@@ -482,6 +555,9 @@ export function Maintenance() {
   const [raisePhotoBlob, setRaisePhotoBlob] = useState<Blob | null>(null); // optional defective-item photo at raise
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
+  // Distinguishes the two slow steps of a bill submit: the AI read/verify (no % yet)
+  // vs the actual file upload (real %). Only set during submitPurchaseManagerBill.
+  const [busyPhase, setBusyPhase] = useState<'verifying' | 'uploading'>('uploading');
 
   // Save states
   const [raiseSaved, setRaiseSaved] = useState(false);
@@ -493,6 +569,17 @@ export function Maintenance() {
   // Admin edit + report
   const [editingTicket, setEditingTicket] = useState(false);
   const [editForm, setEditForm] = useState({ equipment: '', description: '', plant: '', status: '' });
+
+  // Request Changes (reviewer) + Revise & Resubmit (technician) — the same ticket
+  // loops back for correction instead of forcing a new one.
+  const [requestingChanges, setRequestingChanges] = useState(false);
+  const [changeReason, setChangeReason] = useState('');
+  const [changeTags, setChangeTags] = useState<string[]>([]);
+  const [resubmitting, setResubmitting] = useState(false);
+  const [resubmitForm, setResubmitForm] = useState({ equipment: '', description: '', plant: '', assessment: 'repairable' });
+  const [resubmitPhotoBlob, setResubmitPhotoBlob] = useState<Blob | null>(null);
+  const [savingRevision, setSavingRevision] = useState(false); // shared submit guard
+  const [rejectReason, setRejectReason] = useState(''); // optional reason on a part-level reject
   const [viewStage, setViewStage] = useState<string | null>(null); // clicked stage in the timeline
   const [showReport, setShowReport] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -548,6 +635,7 @@ export function Maintenance() {
             type: 'periodic', status: 'open', title: s.title,
             equipment: s.equipment, plant_id: s.plant_id || null,
             schedule_id: s.id, description: s.description || null,
+            far_asset_id: s.far_asset_id || null, // inherit the schedule's asset link
             assigned_to: s.assigned_to || null,
             due_date: s.next_due_at ? s.next_due_at.split('T')[0] : null,
             checklist: (s.checklist || []).map(c => ({ component: c.component, activity: c.activity, done: false })),
@@ -574,6 +662,15 @@ export function Maintenance() {
   }, [scopeQuery]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Guard against accidentally closing the tab mid-upload — the browser shows a
+  // native "leave site?" prompt so an in-flight bill upload isn't lost.
+  useEffect(() => {
+    if (!uploading) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [uploading]);
 
   // Deep-link: a notification's "?ticket=<id>" opens that ticket directly.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -635,6 +732,28 @@ export function Maintenance() {
     ? allowedPlants.map(p => p.name)
     : (dbPlants.length > 0 ? dbPlants.map(p => p.name) : ['SHD', 'Rehla', 'Ganjam', 'HQ']);
 
+  // Emergency raise: plant defaults to the user's assigned plant (alphabetically first
+  // when several); the equipment picker + Jharkhand-unit selector both derive from it.
+  const sortedPlantNames = useMemo(() => [...plantNames].sort((a, b) => a.localeCompare(b)), [plantNames]);
+  const defaultRaisePlant = sortedPlantNames[0] || '';
+  // Only plants that actually have chlorides/plasticiser units are "Jharkhand" plants —
+  // the sole place the procurement-unit selector should appear.
+  const jharkhandPlantIds = useMemo(
+    () => new Set(scopeUnits.filter(u => /chlorid|plastic/i.test(u.code || '') || /chlorid|plastic/i.test(u.name)).map(u => u.plant_id)),
+    [scopeUnits],
+  );
+  const raisePlant = dbPlants.find(p => p.name === raiseForm.plant);
+  const raisePlantIsJharkhand = !!raisePlant && jharkhandPlantIds.has(raisePlant.id);
+  const raiseFarAssets = useMemo(
+    () => (raisePlant ? farAssets.filter(a => a.plant_id === raisePlant.id) : farAssets),
+    [farAssets, raisePlant?.id], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Default the raise form's plant to the user's assigned plant when the panel opens.
+  useEffect(() => {
+    if (showRaisePanel) setRaiseForm(f => (f.plant ? f : { ...f, plant: defaultRaisePlant }));
+  }, [showRaisePanel, defaultRaisePlant]);
+
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
   const periodicTickets = tickets.filter(t => t.type === 'periodic');
@@ -646,6 +765,39 @@ export function Maintenance() {
   })();
   const shownSchedules = schedPlantFilter.length ? schedules.filter(s => s.plant_id && schedPlantFilter.includes(s.plant_id)) : schedules;
   const emergencyTickets = tickets.filter(t => t.type === 'emergency');
+
+  // Click-to-sort for the three maintenance tables (sorts feed pagination below).
+  const periodicSort = useSortable(schedules, {
+    task: s => s.title,
+    equipment: s => s.equipment,
+    plant: s => s.plants?.name,
+    frequency: s => s.frequency,
+    lastDone: s => (s.last_completed_at ? new Date(s.last_completed_at) : null),
+    due: s => (s.next_due_at ? new Date(s.next_due_at) : null),
+  }, { key: 'due', dir: 'asc' });
+  const emergencySort = useSortable(emergencyTickets, {
+    ticket: t => t.id,
+    equipment: t => t.equipment,
+    plant: t => t.plants?.name,
+    issue: t => t.description || t.title,
+    status: t => t.status,
+    raisedBy: t => t.raised_by,
+    created: t => (t.created_at ? new Date(t.created_at) : null),
+  }, { key: 'created', dir: 'desc' });
+  const scheduleSort = useSortable(shownSchedules, {
+    task: s => s.title,
+    equipment: s => s.equipment,
+    plant: s => s.plants?.name,
+    frequency: s => s.frequency,
+    assignedTo: s => s.assigned_to,
+    due: s => (s.next_due_at ? new Date(s.next_due_at) : null),
+    status: s => (s.is_active ? 1 : 0),
+  }, { key: 'due', dir: 'asc' });
+
+  // Pagination for the three long maintenance tables (default 10/page).
+  const periodicPg = usePagination(periodicSort.sorted, { resetKey: `${schedules.length}|${periodicSort.sort.key}|${periodicSort.sort.dir}` });
+  const emergencyPg = usePagination(emergencySort.sorted, { resetKey: `${emergencyTickets.length}|${emergencySort.sort.key}|${emergencySort.sort.dir}` });
+  const schedulePg = usePagination(scheduleSort.sorted, { resetKey: `${schedPlantFilter.join(',')}|${scheduleSort.sort.key}|${scheduleSort.sort.dir}` });
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
@@ -679,6 +831,9 @@ export function Maintenance() {
       unit: raiseForm.unit || null,
       unit_id: unitRow?.id || null,
       description: raiseForm.description || null,
+      // Reliable FAR link when the equipment was picked from the type-ahead — powers
+      // the asset QR profile's history (was previously captured but dropped).
+      far_asset_id: raiseForm.farAssetId || null,
       raised_by: activeProfile.name, raised_role: role,
       // A technician raising their own job is implicitly assigned to themselves.
       assigned_to: isTechnician ? activeProfile.name : null,
@@ -702,8 +857,8 @@ export function Maintenance() {
     notify({
       target_roles: ['admin', 'unit_head', 'store_manager_maint'],
       title: `Maintenance ticket raised: ${raiseForm.equipment}`,
-      body: `${activeProfile.name} · ${raiseForm.assessment === 'repairable' ? 'Repairable in-house' : 'Needs store part'}`,
-      type: 'urgent', route: '/dashboard/purchase/maint',
+      body: `${activeProfile.name} · ${raiseForm.assessment === 'repairable' ? 'Repairable in-house' : 'Needs store part'}${raiseForm.farAssetId ? '' : ' · ⚠ Equipment not in FAR (entered manually)'}`,
+      type: 'urgent', route: maintRoute(newTicket?.id),
       actor_name: activeProfile.name, actor_role: role, read_by: [],
       // Scope the ticket to its plant/unit so only that plant's unit head +
       // store manager are notified (never another plant's).
@@ -737,7 +892,7 @@ export function Maintenance() {
     await loadData();
     setTimeout(() => {
       setShowRaisePanel(false); setRaiseSaved(false); setRaisePhotoBlob(null);
-      setRaiseForm({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: unitOf(activeProfile.plant) || '' });
+      setRaiseForm({ equipment: '', plant: '', description: '', assessment: 'repairable', unit: '', farAssetId: '', equipmentMark: '' });
       if (newTicket && raiseForm.assessment === 'needs_part') {
         setSelectedTicket(newTicket); setShowStoreForm(true);
       }
@@ -783,6 +938,93 @@ export function Maintenance() {
     setTickets((prev) => prev.filter((x) => x.id !== t.id));
     if (selectedTicket?.id === t.id) { setSelectedTicket(null); setEditingTicket(false); }
     toast.success('Ticket deleted');
+  }
+
+  // ── Request Changes / Resubmit loop ─────────────────────────────────────────
+  // Append-only audit entry on a ticket's Notes thread (also delivers @-mentions
+  // + watcher notifications). This is the durable per-cycle history.
+  async function auditNote(t: TicketRow, body: string) {
+    const mentionIds = extractMentionIds(body, people);
+    await postNote({ ref: ticketRef(t), actor: actorObj(), body, mentionIds, people, addNotification: addNote });
+  }
+
+  // Reviewer (unit head / admin): send the ticket back to the technician for
+  // correction. The SAME record moves to 'changes_requested'; revision_prev_status
+  // remembers the stage so Resubmit re-enters the exact review point.
+  async function submitRequestChanges() {
+    if (!selectedTicket || savingRevision) return;
+    const reason = [changeTags.join(', '), changeReason.trim()].filter(Boolean).join(' — ');
+    if (!reason) { toast.error('Add a note on what needs fixing'); return; }
+    setSavingRevision(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const prevStatus = selectedTicket.status;
+      await updateRows('maintenance_tickets', {
+        status: 'changes_requested',
+        revision_prev_status: prevStatus,
+        revision_reason: reason,
+        revision_requested_by: activeProfile.name,
+        revision_requested_at: nowIso,
+        revision_count: (selectedTicket.revision_count ?? 0) + 1,
+      }).eq('id', selectedTicket.id);
+      await auditNote(selectedTicket, `🔁 Changes requested by ${activeProfile.name}: ${reason}`);
+      notify({ target_roles: ['technician_shd', 'admin'], title: `Changes requested: ${selectedTicket.equipment}`, body: reason, type: 'warning', route: maintRoute(selectedTicket.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id ?? null, unit_id: selectedTicket.unit_id ?? null });
+      await notifyTicketWatchers(selectedTicket, `Changes requested: ${selectedTicket.equipment}`, reason, 'warning');
+      setSelectedTicket((t) => t ? { ...t, status: 'changes_requested', revision_prev_status: prevStatus, revision_reason: reason, revision_requested_by: activeProfile.name, revision_requested_at: nowIso, revision_count: (t.revision_count ?? 0) + 1 } : t);
+      setRequestingChanges(false); setChangeReason(''); setChangeTags([]);
+      toast.success('Sent back to technician for changes');
+      await loadData();
+    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); }
+    finally { setSavingRevision(false); }
+  }
+
+  // Technician: open the revise form seeded from the current ticket.
+  function startResubmit(t: TicketRow) {
+    const assessment = /needs part/i.test(t.title || '') ? 'needs_part' : 'repairable';
+    setResubmitForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plants?.name || '', assessment });
+    setResubmitPhotoBlob(null);
+    setResubmitting(true);
+  }
+
+  // Technician: apply the corrections and resubmit — status returns to the stage
+  // it paused at so the reviewer picks up right where they left off.
+  async function submitResubmit() {
+    if (!selectedTicket || savingRevision) return;
+    if (!resubmitForm.equipment.trim()) { toast.error('Equipment is required'); return; }
+    setSavingRevision(true);
+    try {
+      let newPhotoUrl: string | null = null;
+      const priorPhoto = selectedTicket.defective_raise_photo_url;
+      if (resubmitPhotoBlob) {
+        setUploading(true);
+        const r = await uploadMaintenancePhoto(resubmitPhotoBlob, { ticketId: selectedTicket.id, plantName: resubmitForm.plant || selectedTicket.plants?.name || '', photoType: 'completion', creator: activeProfile.name });
+        newPhotoUrl = r.secure_url;
+        setUploading(false);
+      }
+      const plant = dbPlants.find((p) => p.name === resubmitForm.plant);
+      const restoreStatus = (selectedTicket.revision_prev_status as TicketStatus) || 'open';
+      const title = `${resubmitForm.equipment} — ${resubmitForm.assessment === 'repairable' ? 'Repairable' : 'Needs part'}`;
+      const patch: TicketUpdate = {
+        equipment: resubmitForm.equipment,
+        title,
+        description: resubmitForm.description || null,
+        plant_id: plant?.id ?? selectedTicket.plant_id ?? null,
+        status: restoreStatus,
+        revision_reason: null,
+      };
+      if (newPhotoUrl) patch.defective_raise_photo_url = newPhotoUrl;
+      await updateRows('maintenance_tickets', patch).eq('id', selectedTicket.id);
+      const photoNote = newPhotoUrl ? ` · replaced photo${priorPhoto ? ` (prev: ${priorPhoto})` : ''}` : '';
+      await auditNote(selectedTicket, `✅ Resubmitted by ${activeProfile.name} after revision${photoNote}`);
+      await notifyMentions(resubmitForm.description, ticketRef(selectedTicket));
+      notify({ target_roles: ['unit_head', 'admin'], title: `Ticket resubmitted: ${resubmitForm.equipment}`, body: `${activeProfile.name} updated the ticket and resubmitted it for review.`, type: 'info', route: maintRoute(selectedTicket.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id ?? null, unit_id: selectedTicket.unit_id ?? null });
+      await notifyTicketWatchers(selectedTicket, `Ticket resubmitted: ${resubmitForm.equipment}`, 'Updated and resubmitted for review', 'info');
+      setSelectedTicket((t) => t ? { ...t, equipment: resubmitForm.equipment, title, description: resubmitForm.description || null, status: restoreStatus, revision_reason: null, plants: plant ? { name: plant.name } : t.plants, defective_raise_photo_url: newPhotoUrl ?? t.defective_raise_photo_url } : t);
+      setResubmitting(false); setResubmitPhotoBlob(null);
+      toast.success('Resubmitted for review');
+      await loadData();
+    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); setUploading(false); }
+    finally { setSavingRevision(false); }
   }
 
   // Bulk-delete every emergency ticket currently shown (admin cleanup tool).
@@ -959,6 +1201,7 @@ export function Maintenance() {
           type: 'periodic', status: 'open', title: completingSchedule.title,
           equipment: completingSchedule.equipment, plant_id: completingSchedule.plant_id || null,
           schedule_id: completingSchedule.id,
+          far_asset_id: completingSchedule.far_asset_id || null, // inherit the schedule's asset link
           due_date: completingSchedule.next_due_at ? completingSchedule.next_due_at.split('T')[0] : null,
           raised_by: activeProfile.name, raised_role: role,
           assigned_to: completingSchedule.assigned_to || null,
@@ -991,7 +1234,7 @@ export function Maintenance() {
           target_roles: ['admin', 'unit_head'],
           title: `Periodic done: ${completingSchedule.title}`,
           body: `${completingSchedule.equipment} · By ${activeProfile.name}`,
-          type: 'info', route: '/dashboard/purchase/maint',
+          type: 'info', route: maintRoute(ticket?.id),
           actor_name: activeProfile.name, actor_role: role, read_by: [],
           plant_id: completingSchedule.plant_id ?? null, unit_id: null,
         });
@@ -1009,11 +1252,11 @@ export function Maintenance() {
       if (approve) {
         await updateRows('maintenance_tickets', { status: 'closed', closed_at: new Date().toISOString() }).eq('id', ticket.id);
         if (sched) await advanceSchedule(sched);
-        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance verified: ${ticket.title}`, body: `${ticket.equipment} · verified by ${activeProfile.name}`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
+        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance verified: ${ticket.title}`, body: `${ticket.equipment} · verified by ${activeProfile.name}`, type: 'info', route: maintRoute(ticket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
         toast.success('Verified & closed');
       } else {
         await updateRows('maintenance_tickets', { status: 'open' }).eq('id', ticket.id);
-        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance sent back: ${ticket.title}`, body: `${ticket.equipment} · ${activeProfile.name} asked for rework`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
+        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance sent back: ${ticket.title}`, body: `${ticket.equipment} · ${activeProfile.name} asked for rework`, type: 'warning', route: maintRoute(ticket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
         toast.success('Sent back for rework');
       }
       setVerifyingTicket(null);
@@ -1052,7 +1295,7 @@ export function Maintenance() {
       target_roles: storeTargets,
       title: `Store parts needed${unit ? ` · ${UNIT_LABELS[unit]}` : ''}: ${items.length} item${items.length > 1 ? 's' : ''}`,
       body: `${selectedTicket.equipment} · ${names} · Check availability`,
-      type: 'warning', route: '/dashboard/purchase/maint',
+      type: 'warning', route: maintRoute(selectedTicket?.id),
       actor_name: activeProfile.name, actor_role: role, read_by: [],
       plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
     });
@@ -1079,7 +1322,7 @@ export function Maintenance() {
       target_roles: [UNIT_STORE_MANAGER[other], 'admin'],
       title: `Rerouted to ${UNIT_LABELS[other]} store`,
       body: `${activeProfile.name} rerouted "${selectedTicket.equipment}" to the ${UNIT_LABELS[other]} store manager.`,
-      type: 'warning', route: '/dashboard/purchase/maint',
+      type: 'warning', route: maintRoute(selectedTicket?.id),
       actor_name: activeProfile.name, actor_role: role, read_by: [],
       plant_id: selectedTicket.plant_id, unit_id: otherUnitId,
     });
@@ -1109,7 +1352,7 @@ export function Maintenance() {
         target_roles: ['admin', 'unit_head'],
         title: `Ticket closed: ${selectedTicket.equipment}`,
         body: `Fixed in-house by ${activeProfile.name}`,
-        type: 'info', route: '/dashboard/purchase/maint',
+        type: 'info', route: maintRoute(selectedTicket?.id),
         actor_name: activeProfile.name, actor_role: role, read_by: [],
         plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
       });
@@ -1184,7 +1427,7 @@ export function Maintenance() {
         target_roles: ['admin', 'unit_head'],
         title: `Partial stock — procure ${shortfall}× ${req.part_name}`,
         body: `${fulfilledQty} issued from store, ${shortfall} short → procurement. Awaiting unit head approval.`,
-        type: 'warning', route: '/dashboard/purchase/maint',
+        type: 'warning', route: maintRoute(selectedTicket?.id),
         actor_name: activeProfile.name, actor_role: role, read_by: [],
         plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
       });
@@ -1212,7 +1455,7 @@ export function Maintenance() {
       body: available
         ? `Issuing ${fulfilledQty} from store${shortfall > 0 ? ` (${shortfall} short → procurement)` : ''}${overrode ? ` · register ${regQty}: ${storeDecisionForm.qtyJustification.trim()}` : ''} · Shelf: ${storeDecisionForm.shelfLocation || '—'} · Awaiting unit head approval`
         : `${selectedTicket.equipment} — external procurement needed. Awaiting unit head approval.`,
-      type: available ? 'info' : 'warning', route: '/dashboard/purchase/maint',
+      type: available ? 'info' : 'warning', route: maintRoute(selectedTicket?.id),
       actor_name: activeProfile.name, actor_role: role, read_by: [],
       plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
     });
@@ -1225,17 +1468,21 @@ export function Maintenance() {
   async function unitHeadApprove(req: StoreReqRow, approved: boolean) {
     if (!selectedTicket) return;
     const partAvailable = req.store_decision === 'available';
+    const reason = rejectReason.trim(); // optional note when rejecting this part
     await updateRows('maintenance_store_requests', { unit_head_approval: approved ? 'approved' : 'rejected' })
       .eq('id', req.id);
     if (approved && partAvailable) {
-      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else if (approved && !partAvailable) {
-      notify({ target_roles: ['admin', 'unit_head'], title: `Procurement approved: ${req.part_name}`, body: `${selectedTicket.equipment} — procure from market. Enter BUSY ref when done.`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+      notify({ target_roles: ['admin', 'unit_head'], title: `Procurement approved: ${req.part_name}`, body: `${selectedTicket.equipment} — procure from market. Enter BUSY ref when done.`, type: 'warning', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else {
-      notify({ target_roles: ['technician_shd', 'admin'], title: `Item rejected: ${req.part_name}`, body: `Unit head rejected this item.`, type: 'warning', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+      notify({ target_roles: ['technician_shd', 'admin'], title: `Item rejected: ${req.part_name}`, body: reason ? `Unit head rejected this item: ${reason}` : `Unit head rejected this item.`, type: 'warning', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+      // Keep the reason on the ticket's audit thread.
+      await auditNote(selectedTicket, `⛔ Part rejected by ${activeProfile.name}: "${req.part_name}"${reason ? ` — ${reason}` : ''}`);
     }
     await notifyTicketWatchers(selectedTicket, approved ? `Approved: ${selectedTicket.equipment}` : `Item rejected: ${selectedTicket.equipment}`, `${activeProfile.name} ${approved ? 'approved' : 'rejected'} "${req.part_name}".`);
     setActingReqId(null);
+    setRejectReason('');
     await refreshAfterItemChange();
   }
 
@@ -1247,7 +1494,7 @@ export function Maintenance() {
     const bought = Math.max(need, parseFloat(purchaseQty) || need);
     await updateRows('maintenance_store_requests', { busy_transaction_ref: busyRef, supplier_name: supplier || null, purchased_qty: bought })
       .eq('id', req.id);
-    notify({ target_roles: ['purchase_manager', 'admin'], title: `Procured — Purchase Manager to bill: ${req.part_name}`, body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to upload the bill.`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
+    notify({ target_roles: ['purchase_manager', 'admin'], title: `Procured — Purchase Manager to bill: ${req.part_name}`, body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to upload the bill.`, type: 'info', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
     if (supplier) {
       const hits = await screenBlacklist([{ value: supplier, label: 'Supplier' }], { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment });
       if (hits.length) { const h = hits[0]; toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`); }
@@ -1265,21 +1512,30 @@ export function Maintenance() {
     const declaredTotal = parseFloat(pmForm.billTotal.replace(/[^0-9.]/g, ''));
     if (!declaredItems || !declaredTotal) { toast.error('Enter the number of items and the total bill amount.'); return; }
     setUploading(true);
+    setBusyPhase('verifying');
     try {
       // OCR the bill (best-effort) — this never blocks submission.
       let ocrTotal: number | null = null, ocrItems: number | null = null, ocrStatus = 'unread';
       let ocrRaw: unknown = null, mismatch = false;
+      let ocrLines: SupplierBillLine[] = [];
       try {
         const file = new File([dispatchBlob], 'bill.jpg', { type: dispatchBlob.type || 'image/jpeg' });
         const dataUrl = await resizeImageToDataUrl(file, 1600);
         const ocr = await extractSupplierBill(dataUrl);
-        ocrTotal = ocr.totalAmount; ocrItems = ocr.lineItemCount; ocrRaw = ocr;
-        const totalOff = ocrTotal != null && Math.abs(ocrTotal - declaredTotal) > Math.max(1, declaredTotal * 0.02);
-        const itemsOff = ocrItems != null && ocrItems !== declaredItems;
-        mismatch = !!(totalOff || itemsOff);
-        ocrStatus = (ocrTotal == null && ocrItems == null) ? 'unread' : (mismatch ? 'mismatch' : 'match');
+        // Robust grand total: prefer subTotal + tax so the model can't report the tax
+        // figure (or a subtotal) as the invoice total; fall back to its totalAmount.
+        const ocrGrand = (ocr.subTotal != null && ocr.taxAmount != null) ? ocr.subTotal + ocr.taxAmount : ocr.totalAmount;
+        ocrTotal = ocrGrand; ocrItems = ocr.lineItemCount; ocrRaw = ocr;
+        ocrLines = ocr.lineItems || [];
+        // Verify against the bill's DECLARED TOTAL (the reliable summary), NOT the count
+        // of detected rows. "Number of items" is ambiguous (line rows vs total quantity),
+        // so the line-item count is recorded for info only and never fails the check.
+        const totalOff = ocrTotal != null && Math.abs(ocrTotal - declaredTotal) > Math.max(1, declaredTotal * 0.05);
+        mismatch = !!totalOff;
+        ocrStatus = ocrTotal == null ? 'unread' : (mismatch ? 'mismatch' : 'match');
       } catch { ocrStatus = 'unread'; }
 
+      setBusyPhase('uploading'); setUploadPct(0);
       const r = await uploadMaintenancePhoto(dispatchBlob, {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
         photoType: 'bill', creator: activeProfile.name, onProgress: setUploadPct,
@@ -1296,21 +1552,33 @@ export function Maintenance() {
       // Mark all procured-but-unbilled items as billed → they move to handover.
       const procured = storeReqs.filter(sr => itemStage(sr) === 'purchase_manager');
       for (const sr of procured) {
-        await updateRows('maintenance_store_requests', { bill_verified: true, handover_invoice_url: r.secure_url }).eq('id', sr.id);
+        // Attribute this requested part's cost from the bill's matching line item, so the
+        // Maintenance Purchase record shows the item-specific unit price + total. The full
+        // invoice total stays on the ticket (pm_bill_total) for FAR — unchanged.
+        const line = ocrLines.length ? matchBillLine(sr.part_name, ocrLines) : null;
+        const patch: Record<string, unknown> = { bill_verified: true, handover_invoice_url: r.secure_url };
+        if (line?.unitPrice != null) {
+          patch.unit_price = line.unitPrice;
+          // Cost for the actually-procured quantity (not the full invoice line, which may
+          // cover more units than this ticket needed).
+          patch.total_price = sr.quantity != null ? line.unitPrice * Number(sr.quantity) : (line.amount ?? null);
+        } else if (line?.amount != null) {
+          patch.total_price = line.amount;
+        }
+        await updateRows('maintenance_store_requests', patch).eq('id', sr.id);
       }
-      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'], title: `Bill uploaded — ${procured.length} item(s) en route`, body: `${activeProfile.name} billed ₹${declaredTotal.toLocaleString('en-IN')} for ${declaredItems} item(s).`, type: 'info', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
+      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'admin'], title: `Bill uploaded — ${procured.length} item(s) en route`, body: `${activeProfile.name} billed ₹${declaredTotal.toLocaleString('en-IN')} for ${declaredItems} item(s).`, type: 'info', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
 
       if (mismatch) {
-        const ocrItemsTxt = ocrItems ?? '?';
         const ocrTotalTxt = ocrTotal != null ? `₹${ocrTotal.toLocaleString('en-IN')}` : '₹?';
-        toast.error(`⚠ Bill mismatch — you entered ${declaredItems} items / ₹${declaredTotal.toLocaleString('en-IN')}, OCR read ${ocrItemsTxt} items / ${ocrTotalTxt}. Submitted, but admin has been notified to verify.`);
-        notify({ target_roles: ['admin', 'unit_head'], title: `⚠ Bill mismatch flagged: ${selectedTicket.equipment}`, body: `${activeProfile.name} declared ${declaredItems} items / ₹${declaredTotal.toLocaleString('en-IN')}; OCR read ${ocrItemsTxt} items / ${ocrTotalTxt}. Please verify the bill.`, type: 'urgent', route: '/dashboard/purchase/maint', actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+        toast.error(`⚠ Bill total mismatch — you entered ₹${declaredTotal.toLocaleString('en-IN')}, OCR read ${ocrTotalTxt}. Submitted, but admin has been notified to verify.`);
+        notify({ target_roles: ['admin', 'unit_head'], title: `⚠ Bill total mismatch flagged: ${selectedTicket.equipment}`, body: `${activeProfile.name} declared ₹${declaredTotal.toLocaleString('en-IN')} (${declaredItems} line item${declaredItems === 1 ? '' : 's'}); OCR read ${ocrTotalTxt}. Please verify the bill.`, type: 'urgent', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
       }
       await notifyTicketWatchers(selectedTicket, `Bill uploaded: ${selectedTicket.equipment}`, `${activeProfile.name} uploaded the supplier bill — items en route to store.`);
       setDispatchBlob(null); setUploadPct(0); setPmForm({ itemsCount: '', billTotal: '' });
       await refreshAfterItemChange();
     } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
-    finally { setUploading(false); }
+    finally { setUploading(false); setBusyPhase('uploading'); }
   }
 
   // Store manager: confirm physical handover to technician.
@@ -1397,7 +1665,7 @@ export function Maintenance() {
         target_roles: ['technician_shd', 'admin', 'unit_head'],
         title: `Part handed over: ${req.part_name}`,
         body: `${activeProfile.name} confirmed handover of "${req.part_name}".`,
-        type: 'info', route: '/dashboard/purchase/maint',
+        type: 'info', route: maintRoute(selectedTicket?.id),
         actor_name: activeProfile.name, actor_role: role, read_by: [],
         plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null,
       });
@@ -1429,7 +1697,7 @@ export function Maintenance() {
         target_roles: ['admin', 'unit_head', 'store_manager_maint'],
         title: `Ticket closed: ${selectedTicket.equipment}`,
         body: `Defective part → ${defectiveDecision} · By ${activeProfile.name}`,
-        type: 'info', route: '/dashboard/purchase/maint',
+        type: 'info', route: maintRoute(selectedTicket?.id),
         actor_name: activeProfile.name, actor_role: role, read_by: [],
         plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
       });
@@ -1661,6 +1929,8 @@ export function Maintenance() {
     if (!selectedTicket) return null;
     const t = selectedTicket;
     const status = selectedTicket.status;
+    // Persisted first decision — drives the body so an open ticket is never re-asked.
+    const decision = ticketDecision(t.title, storeReqs.length > 0);
 
     if (status === 'closed') {
       return (
@@ -1682,9 +1952,9 @@ export function Maintenance() {
       );
     }
 
-    // ── open: technician decides in-house vs store ──
+    // ── open: resume the persisted path (never re-ask a decided ticket) ──
     if (status === 'open' && (isTechnician || isAdmin || isUnitHead)) {
-      if (showStoreForm) {
+      if (decision === 'store' || (decision === 'undecided' && showStoreForm)) {
         const validItems = storeItems.filter(it => it.partName.trim()).length;
         return (
           <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
@@ -1734,6 +2004,18 @@ export function Maintenance() {
           </div>
         );
       }
+      // Decided in-house at raise → just proceed to the completion step (no re-ask).
+      if (decision === 'inhouse') {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>In-house repair — start when you begin work.</div>
+            <button onClick={startRepair} style={{ padding: '12px 16px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', textAlign: 'center', fontFamily: 'inherit' }}>
+              ✓ Start in-house repair
+            </button>
+          </div>
+        );
+      }
+      // Legacy/undecided ticket only (no persisted path) → let them choose once.
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 4 }}>What needs to happen?</div>
@@ -1886,6 +2168,12 @@ export function Maintenance() {
                   <div style={{ fontSize: 12, color: req.store_decision === 'available' ? '#16A34A' : '#DC2626', marginBottom: 8 }}>
                     Store says: <strong>{req.store_decision === 'available' ? 'In stock' : 'Not in stock'}</strong>{req.store_decision === 'available' && req.qty_in_store ? ` · Qty ${req.qty_in_store}` : ''}
                   </div>
+                  <input
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="Reason if rejecting (optional)"
+                    style={{ width: '100%', padding: '7px 10px', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', marginBottom: 8 }}
+                  />
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => unitHeadApprove(req, true)} style={{ ...primaryBtn('#16A34A'), flex: 2 }}>{req.store_decision === 'available' ? 'Approve handover' : 'Approve procurement'}</button>
                     <button onClick={() => unitHeadApprove(req, false)} style={{ ...primaryBtn('#DC2626'), flex: 1 }}>Reject</button>
@@ -1992,14 +2280,14 @@ export function Maintenance() {
         {procuredAwaitingBill.length > 0 && (isPurchaseManager || isAdmin) && (
           <div style={{ border: '1px solid #F5D0FE', borderRadius: 14, padding: 14, background: '#FDF4FF' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#A21CAF', textTransform: 'uppercase', marginBottom: 4 }}>Purchase Manager — bill {procuredAwaitingBill.length} procured item(s)</div>
-            <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>One supplier bill covers all procured items (incl. GST). Enter the count + total; OCR will cross-check the photo.</div>
+            <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>One supplier bill covers all procured items (incl. GST). OCR verifies the <strong>total amount</strong> against the photo; the line-item count is recorded for reference.</div>
             <PanelRow>
-              <PanelField label="Number of items *"><PanelInput type="number" value={pmForm.itemsCount} onChange={e => setPmForm(f => ({ ...f, itemsCount: e.target.value }))} placeholder={String(procuredAwaitingBill.length)} /></PanelField>
-              <PanelField label="Total bill amount (₹) *"><PanelInput value={pmForm.billTotal} onChange={e => setPmForm(f => ({ ...f, billTotal: e.target.value }))} placeholder="e.g. 32800000" /></PanelField>
+              <PanelField label="No. of line items on bill *"><PanelInput type="number" value={pmForm.itemsCount} onChange={e => setPmForm(f => ({ ...f, itemsCount: e.target.value }))} placeholder={String(procuredAwaitingBill.length)} /></PanelField>
+              <PanelField label="Total bill amount (₹) *"><PanelInput value={pmForm.billTotal} onChange={e => setPmForm(f => ({ ...f, billTotal: e.target.value }))} placeholder="e.g. 177936.50" /></PanelField>
             </PanelRow>
             <PhotoUploader onBlobReady={setDispatchBlob} label="Supplier bill photo *" hint="Clear photo of the full supplier bill" />
-            {uploading && <UploadBar pct={uploadPct} color="#A21CAF" />}
-            <button onClick={submitPurchaseManagerBill} disabled={!dispatchBlob || uploading} style={{ ...primaryBtn('#A21CAF'), width: '100%', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>{uploading ? `Uploading… ${uploadPct}%` : 'Upload bill — verify & mark en route'}</button>
+            {uploading && <UploadBar pct={uploadPct} color="#A21CAF" phase={busyPhase} />}
+            <button onClick={submitPurchaseManagerBill} disabled={!dispatchBlob || uploading} style={{ ...primaryBtn('#A21CAF'), width: '100%', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>{uploading ? (busyPhase === 'verifying' ? 'Verifying bill…' : `Uploading… ${uploadPct}%`) : 'Upload bill — verify & mark en route'}</button>
           </div>
         )}
         {procuredAwaitingBill.length > 0 && !(isPurchaseManager || isAdmin) && <div style={awaitTxt}>Purchase Manager (Anshul) to upload the bill…</div>}
@@ -2007,9 +2295,9 @@ export function Maintenance() {
         {/* PM mismatch banner */}
         {t.pm_mismatch && (
           <div style={{ border: '1px solid #FECACA', background: '#FEF2F2', borderRadius: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>⚠ Bill verification mismatch</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>⚠ Bill total mismatch</div>
             <div style={{ fontSize: 11.5, color: '#7F1D1D', marginTop: 3 }}>
-              Declared {t.pm_items_count} items / ₹{Number(t.pm_bill_total || 0).toLocaleString('en-IN')} · OCR read {t.pm_ocr_items ?? '?'} items / ₹{t.pm_ocr_total != null ? Number(t.pm_ocr_total).toLocaleString('en-IN') : '?'}. Please verify the bill.
+              Declared total ₹{Number(t.pm_bill_total || 0).toLocaleString('en-IN')} · OCR read ₹{t.pm_ocr_total != null ? Number(t.pm_ocr_total).toLocaleString('en-IN') : '?'}. Please verify the bill{t.pm_ocr_items != null ? ` (OCR saw ${t.pm_ocr_items} line item${t.pm_ocr_items === 1 ? '' : 's'})` : ''}.
             </div>
           </div>
         )}
@@ -2032,13 +2320,20 @@ export function Maintenance() {
     );
   }
 
-  // Skip the purchase / purchase-manager stages ONLY when NO part on this ticket
-  // went through procurement. A partial split (some in-store, some procured) means
-  // procurement DID happen → don't mark it skipped.
+  // Adaptive workflow — show only the stages that apply to this ticket's actual path:
+  //  • In-house repair (repairable, no store parts) → Raised → Completion Photo → Closed
+  //  • Needs part, available in store        → Raised → Assessed → Store Check → Unit Head → Handover → Defective → Closed
+  //  • Needs part, procurement required       → …+ Purchase → Purchase Manager between Unit Head and Handover
+  // "Needs part" is known immediately from the ticket (title suffix set at raise), so a
+  // freshly-raised part ticket shows the store path even before its store-request row exists.
   const anyProcured = storeReqs.some(sr => sr.store_decision === 'unavailable' || sr.purchase_required);
-  const skippedStages = selectedTicket && !anyProcured
-    ? ['pending_purchase', 'pending_purchase_manager']
-    : [];
+  const ticketPath = selectedTicket ? ticketDecision(selectedTicket.title, storeReqs.length > 0) : 'undecided';
+  const wfStages = ticketPath === 'inhouse'
+    ? INHOUSE_STAGES
+    : ticketPath === 'store'
+      ? (anyProcured ? EMERGENCY_STAGES : AVAILABLE_STAGES)
+      : EMERGENCY_STAGES;
+  const wfLabels = ticketPath === 'inhouse' ? INHOUSE_STAGE_LABELS : STAGE_LABELS;
 
   // ── Blacklist guard ─────────────────────────────────────────────────────────
   // A ticket assigned to (or raised by) a restricted person is flagged. We check
@@ -2131,8 +2426,8 @@ export function Maintenance() {
               <table className="dt">
                 <thead>
                   <tr>
-                    <th>{t('maint.colTask')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
-                    <th>{t('maint.colLastDone')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
+                    <Th sortKey="task" s={periodicSort}>{t('maint.colTask')}</Th><Th sortKey="equipment" s={periodicSort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={periodicSort}>{t('common.plant')}</Th><Th sortKey="frequency" s={periodicSort}>{t('maint.colFrequency')}</Th>
+                    <Th sortKey="lastDone" s={periodicSort} firstDir="desc">{t('maint.colLastDone')}</Th><Th sortKey="due" s={periodicSort} firstDir="desc">{t('maint.colNextDue')}</Th><th>{t('maint.colStatus')}</th>
                     {(isTechnician || isAdmin || isUnitHead) && <th>{t('maint.colAction')}</th>}
                   </tr>
                 </thead>
@@ -2142,7 +2437,7 @@ export function Maintenance() {
                       {!isTechnician ? t('maint.noSchedulesAddSelf') : t('maint.noSchedulesAdmin')}
                     </td></tr>
                   )}
-                  {schedules.map(s => {
+                  {periodicPg.pageRows.map(s => {
                     const linkedTicket = tickets.find(t => t.schedule_id === s.id && t.status !== 'closed');
                     const awaitingVerify = linkedTicket?.status === 'pending_unit_head';
                     const days = daysFromNow(s.next_due_at);
@@ -2182,6 +2477,7 @@ export function Maintenance() {
                 </tbody>
               </table>
             </div>
+            <TablePagination controls={periodicPg.controls} />
           </div>
         </>
       )}
@@ -2238,8 +2534,8 @@ export function Maintenance() {
               <table className="dt">
                 <thead>
                   <tr>
-                    <th>{t('maint.colTicketNo')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colIssue')}</th>
-                    <th>{t('maint.colStatus')}</th><th>{t('maint.colRaisedBy')}</th><th>{t('maint.colCreated')}</th>
+                    <Th sortKey="ticket" s={emergencySort}>{t('maint.colTicketNo')}</Th><Th sortKey="equipment" s={emergencySort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={emergencySort}>{t('common.plant')}</Th><Th sortKey="issue" s={emergencySort}>{t('maint.colIssue')}</Th>
+                    <Th sortKey="status" s={emergencySort}>{t('maint.colStatus')}</Th><Th sortKey="raisedBy" s={emergencySort}>{t('maint.colRaisedBy')}</Th><Th sortKey="created" s={emergencySort} firstDir="desc">{t('maint.colCreated')}</Th>
                     {isAdmin && <th></th>}
                   </tr>
                 </thead>
@@ -2247,7 +2543,7 @@ export function Maintenance() {
                   {emergencyTickets.length === 0 && (
                     <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noEmergencyTickets')}</td></tr>
                   )}
-                  {emergencyTickets.map(t => (
+                  {emergencyPg.pageRows.map(t => (
                     <tr key={t.id} onClick={() => setSelectedTicket(t)} style={{ cursor: 'pointer' }}>
                       <td className="font-mono text-xs text-slate-400">{t.id.slice(0, 8)}</td>
                       <td className="font-semibold">{t.equipment}</td>
@@ -2270,6 +2566,7 @@ export function Maintenance() {
                 </tbody>
               </table>
             </div>
+            <TablePagination controls={emergencyPg.controls} />
           </div>
         </>
       )}
@@ -2305,8 +2602,8 @@ export function Maintenance() {
             <table className="dt">
               <thead>
                 <tr>
-                  <th>{t('maint.colTaskTitle')}</th><th>{t('maint.colEquipment')}</th><th>{t('common.plant')}</th><th>{t('maint.colFrequency')}</th>
-                  <th>{t('maint.colAssignedTo')}</th><th>{t('maint.colNextDue')}</th><th>{t('maint.colStatus')}</th>
+                  <Th sortKey="task" s={scheduleSort}>{t('maint.colTaskTitle')}</Th><Th sortKey="equipment" s={scheduleSort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={scheduleSort}>{t('common.plant')}</Th><Th sortKey="frequency" s={scheduleSort}>{t('maint.colFrequency')}</Th>
+                  <Th sortKey="assignedTo" s={scheduleSort}>{t('maint.colAssignedTo')}</Th><Th sortKey="due" s={scheduleSort} firstDir="desc">{t('maint.colNextDue')}</Th><Th sortKey="status" s={scheduleSort}>{t('maint.colStatus')}</Th>
                   {(isAdmin || isUnitHead) && <th>{t('maint.colActions')}</th>}
                 </tr>
               </thead>
@@ -2314,7 +2611,7 @@ export function Maintenance() {
                 {shownSchedules.length === 0 && (
                   <tr><td colSpan={(isAdmin || isUnitHead) ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noSchedulesDefined')}</td></tr>
                 )}
-                {shownSchedules.map(s => {
+                {schedulePg.pageRows.map(s => {
                   const due = dueDateLabel(daysFromNow(s.next_due_at));
                   const paused = !s.is_active;
                   return (
@@ -2344,6 +2641,7 @@ export function Maintenance() {
               </tbody>
             </table>
           </div>
+          <TablePagination controls={schedulePg.controls} />
         </div>
       )}
 
@@ -2353,23 +2651,40 @@ export function Maintenance() {
       {/* ── PANEL: Raise ticket ──────────────────────────────────────────── */}
       <SlidePanel open={showRaisePanel} onClose={() => { setShowRaisePanel(false); setRaiseSaved(false); }} title={t('maint.raisePanelTitle')} subtitle={t('maint.raisePanelSubtitle')}>
         <PanelField label={t('maint.equipmentAsset')}>
-          <PanelInput value={raiseForm.equipment} onChange={e => setRaiseForm(f => ({ ...f, equipment: e.target.value }))} placeholder={t('maint.equipmentPlaceholder')} />
+          <FarEquipField
+            value={raiseForm.equipment}
+            assets={raiseFarAssets}
+            onChange={v => setRaiseForm(f => ({ ...f, equipment: v, farAssetId: '', equipmentMark: '' }))}
+            onPick={a => setRaiseForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
+          />
+          {raiseForm.equipment.trim().length > 1 && (raiseForm.farAssetId
+            ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to FAR asset{raiseForm.equipmentMark ? ` · ${raiseForm.equipmentMark}` : ''}.</div>
+            : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>✎ Manual entry — not in the FAR (allowed; the notification flags it).</div>)}
         </PanelField>
-        <PanelRow>
+        {raisePlantIsJharkhand ? (
+          <PanelRow>
+            <PanelField label={t('common.plant')}>
+              <PanelSelect value={raiseForm.plant} onChange={e => { const name = e.target.value; const pid = dbPlants.find(p => p.name === name)?.id; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: name, unit: jk ? f.unit : '' })); }}>
+                <option value="">{t('maint.selectPlant')}</option>
+                {plantNames.map(p => <option key={p}>{p}</option>)}
+              </PanelSelect>
+            </PanelField>
+            <PanelField label={t('maint.procurementUnit')}>
+              <PanelSelect value={raiseForm.unit} onChange={e => setRaiseForm(f => ({ ...f, unit: e.target.value }))}>
+                <option value="">{t('maint.notJharkhand')}</option>
+                <option value="chlorides">Suntek Chlorides</option>
+                <option value="plasticiser">Suntek Plasticiser</option>
+              </PanelSelect>
+            </PanelField>
+          </PanelRow>
+        ) : (
           <PanelField label={t('common.plant')}>
-            <PanelSelect value={raiseForm.plant} onChange={e => setRaiseForm(f => ({ ...f, plant: e.target.value }))}>
+            <PanelSelect value={raiseForm.plant} onChange={e => { const name = e.target.value; const pid = dbPlants.find(p => p.name === name)?.id; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: name, unit: jk ? f.unit : '' })); }}>
               <option value="">{t('maint.selectPlant')}</option>
               {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
           </PanelField>
-          <PanelField label={t('maint.procurementUnit')}>
-            <PanelSelect value={raiseForm.unit} onChange={e => setRaiseForm(f => ({ ...f, unit: e.target.value }))}>
-              <option value="">{t('maint.notJharkhand')}</option>
-              <option value="chlorides">Suntek Chlorides</option>
-              <option value="plasticiser">Suntek Plasticiser</option>
-            </PanelSelect>
-          </PanelField>
-        </PanelRow>
+        )}
         <PanelField label={t('maint.issueDescription')}>
           <PanelTextarea value={raiseForm.description} onChange={e => setRaiseForm(f => ({ ...f, description: e.target.value }))} placeholder={t('maint.issuePlaceholder')} />
         </PanelField>
@@ -2386,7 +2701,7 @@ export function Maintenance() {
       </SlidePanel>
 
       {/* ── PANEL: Complete periodic ─────────────────────────────────────── */}
-      <SlidePanel open={!!completingSchedule} onClose={() => { setCompletingSchedule(null); setCompletionBlob(null); }} title="Mark maintenance complete" subtitle={completingSchedule?.title || 'Periodic · Maintenance'}>
+      <SlidePanel open={!!completingSchedule} onClose={() => { setCompletingSchedule(null); setCompletionBlob(null); }} title="Mark maintenance complete" subtitle={completingSchedule?.title || 'Periodic · Maintenance'} locked={uploading}>
         {completingSchedule && (
           <>
             {(() => { const ra = completingSchedule.requires_approval ?? (completingSchedule.frequency !== 'daily'); const doneN = completionChecklist.filter(c => c.done).length; return (
@@ -2465,13 +2780,14 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }}
+        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); setRequestingChanges(false); setResubmitting(false); setChangeReason(''); setChangeTags([]); setResubmitPhotoBlob(null); setRejectReason(''); }}
         title={selectedTicket?.equipment || 'Ticket detail'}
         subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
+        locked={uploading}
       >
         {selectedTicket && (
           <>
-            <StageStrip status={selectedTicket.status} skippedStages={skippedStages} onStageClick={(s) => setViewStage((cur) => cur === s ? null : s)} activeStage={viewStage} />
+            <StageStrip status={selectedTicket.status === 'changes_requested' ? (selectedTicket.revision_prev_status || 'open') : selectedTicket.status} stages={wfStages} labels={wfLabels} onStageClick={(s) => setViewStage((cur) => cur === s ? null : s)} activeStage={viewStage} />
             {viewStage && renderStageDetail(viewStage)}
             {blacklistHit && (
               <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
@@ -2494,10 +2810,14 @@ export function Maintenance() {
               {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><TicketDescription entityId={selectedTicket.id} text={selectedTicket.description} /></div>}
             </div>
 
-            {/* Notes are visible to everyone on the ticket; edit/delete are admin-only. */}
-            {!editingTicket && (
+            {/* Notes are visible to everyone on the ticket; edit/delete are admin-only.
+                Request Changes lets a reviewer send the ticket back for correction. */}
+            {!editingTicket && !requestingChanges && !resubmitting && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                 <NotesButton entityType="maintenance_ticket" entityId={selectedTicket.id} entityLabel={selectedTicket.equipment || selectedTicket.title || 'Ticket'} route={`/dashboard/purchase/maint?ticket=${selectedTicket.id}`} />
+                {(isUnitHead || isAdmin) && !['closed', 'changes_requested'].includes(selectedTicket.status) && (
+                  <button onClick={() => { setChangeTags([]); setChangeReason(''); setRequestingChanges(true); }} className="chip" style={{ color: '#DC2626' }}>↩ Request Changes</button>
+                )}
                 {isAdmin && <button onClick={() => startEdit(selectedTicket)} className="chip">✎ Edit</button>}
                 {isAdmin && <button onClick={() => handleDeleteTicket(selectedTicket)} className="chip" style={{ color: '#DC2626' }}>🗑 Delete</button>}
               </div>
@@ -2529,6 +2849,70 @@ export function Maintenance() {
                   <button onClick={() => setEditingTicket(false)} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
                   <button onClick={saveEdit} disabled={!editForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !editForm.equipment.trim() ? 0.5 : 1 }}>Save changes</button>
                 </div>
+              </div>
+            ) : requestingChanges ? (
+              /* Reviewer: send back for correction */
+              <div style={{ border: '1px solid #FCA5A5', borderRadius: 14, padding: 16, background: '#FFF7F7' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>↩ Request changes</div>
+                <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Send this ticket back to the technician to correct. They edit the same ticket and resubmit for another review.</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>What needs fixing?</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {CHANGE_ISSUE_TAGS.map(tag => {
+                    const on = changeTags.includes(tag);
+                    return <button key={tag} onClick={() => setChangeTags(s => on ? s.filter(x => x !== tag) : [...s, tag])} style={{ padding: '5px 10px', borderRadius: 999, border: '1px solid ' + (on ? '#DC2626' : '#E2E8F0'), background: on ? '#DC2626' : '#fff', color: on ? '#fff' : '#475569', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>{tag}</button>;
+                  })}
+                </div>
+                <PanelField label="Comment (required)">
+                  <PanelTextarea value={changeReason} onChange={e => setChangeReason(e.target.value)} placeholder="Explain what to correct. Type @ to tag someone." />
+                </PanelField>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={() => { setRequestingChanges(false); setChangeTags([]); setChangeReason(''); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
+                  <button onClick={submitRequestChanges} disabled={savingRevision || (!changeTags.length && !changeReason.trim())} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#DC2626', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: (savingRevision || (!changeTags.length && !changeReason.trim())) ? 0.5 : 1 }}>{savingRevision ? 'Sending…' : 'Send back to technician'}</button>
+                </div>
+              </div>
+            ) : resubmitting ? (
+              /* Technician: revise & resubmit the same ticket */
+              <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>✎ Revise &amp; resubmit</div>
+                <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Fix what the reviewer flagged, then resubmit the same ticket for another review.</div>
+                {selectedTicket.revision_reason && <div style={{ fontSize: 12, color: '#7F1D1D', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '8px 10px', marginBottom: 12 }}><strong>Reviewer asked:</strong> {selectedTicket.revision_reason}</div>}
+                <PanelField label="Equipment / asset">
+                  <PanelInput value={resubmitForm.equipment} onChange={e => setResubmitForm(f => ({ ...f, equipment: e.target.value }))} />
+                </PanelField>
+                <PanelRow>
+                  <PanelField label="Plant">
+                    <PanelSelect value={resubmitForm.plant} onChange={e => setResubmitForm(f => ({ ...f, plant: e.target.value }))}>
+                      <option value="">— Select plant —</option>
+                      {plantNames.map(p => <option key={p}>{p}</option>)}
+                    </PanelSelect>
+                  </PanelField>
+                  <PanelField label="Assessment">
+                    <PanelSelect value={resubmitForm.assessment} onChange={e => setResubmitForm(f => ({ ...f, assessment: e.target.value }))}>
+                      <option value="repairable">Can repair in-house</option>
+                      <option value="needs_part">Need a part</option>
+                    </PanelSelect>
+                  </PanelField>
+                </PanelRow>
+                <PanelField label="Issue description">
+                  <PanelTextarea value={resubmitForm.description} onChange={e => setResubmitForm(f => ({ ...f, description: e.target.value }))} placeholder="Describe the issue. Type @ to tag someone." />
+                </PanelField>
+                <PhotoUploader label="Replace photo (optional)" hint="Upload a clearer photo of the item" onBlobReady={setResubmitPhotoBlob} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={() => { setResubmitting(false); setResubmitPhotoBlob(null); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
+                  <button onClick={submitResubmit} disabled={savingRevision || uploading || !resubmitForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: (savingRevision || uploading || !resubmitForm.equipment.trim()) ? 0.5 : 1 }}>{(savingRevision || uploading) ? 'Resubmitting…' : 'Resubmit for review'}</button>
+                </div>
+              </div>
+            ) : selectedTicket.status === 'changes_requested' ? (
+              /* Paused for correction — show the reviewer's request + resubmit CTA */
+              <div style={{ border: '1px solid #FCA5A5', background: '#FEF2F2', borderRadius: 14, padding: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>↩ Changes requested{selectedTicket.revision_count ? ` · cycle ${selectedTicket.revision_count}` : ''}</div>
+                {selectedTicket.revision_reason && <div style={{ fontSize: 12.5, color: '#7F1D1D', marginTop: 6, lineHeight: 1.5 }}>{selectedTicket.revision_reason}</div>}
+                <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 6 }}>Requested by {selectedTicket.revision_requested_by || '—'}{selectedTicket.revision_requested_at ? ` · ${formatDate(selectedTicket.revision_requested_at)}` : ''}</div>
+                {(isTechnician || isAdmin) ? (
+                  <button onClick={() => startResubmit(selectedTicket)} style={{ marginTop: 12, width: '100%', padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit' }}>✎ Revise &amp; Resubmit</button>
+                ) : (
+                  <div style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 10 }}>Waiting for the technician to correct &amp; resubmit.</div>
+                )}
               </div>
             ) : (
               renderTicketActions()
@@ -2716,7 +3100,22 @@ function TicketDescription({ entityId, text }: { entityId: string; text: string 
 
 // ── Inline upload progress bar ────────────────────────────────────────────────
 
-function UploadBar({ pct, color }: { pct: number; color: string }) {
+function UploadBar({ pct, color, phase = 'uploading' }: { pct: number; color: string; phase?: 'verifying' | 'uploading' }) {
+  // "verifying" = the AI is reading the bill (a single call with no real streaming),
+  // so we show an indeterminate sliding bar and an explicit label instead of a stuck 0%.
+  if (phase === 'verifying') {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 11, height: 11, borderRadius: '50%', border: `2px solid ${color}55`, borderTopColor: color, display: 'inline-block', animation: 'sp-spin 0.7s linear infinite' }} />
+          Reading &amp; verifying the bill with AI… this can take up to a minute
+        </div>
+        <div style={{ position: 'relative', height: 4, background: '#E2E8F0', borderRadius: 4, overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 0, bottom: 0, background: color, borderRadius: 4, animation: 'sp-indeterminate 1.3s ease-in-out infinite' }} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4 }}>Uploading… {pct}%</div>

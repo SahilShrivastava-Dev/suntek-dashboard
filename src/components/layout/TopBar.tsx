@@ -8,7 +8,9 @@ import { CautionButton } from '../anomaly/CautionButton';
 import { Search } from 'lucide-react';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
+import { useTodo } from '../../contexts/TodoContext';
 import { useSearchPalette } from '../../contexts/SearchPaletteContext';
+import { profileCanAccess } from '../../lib/profiles';
 import { dropdownStyle } from '../../lib/uiPosition';
 import type { AppNotification } from '../../contexts/NotificationsContext';
 
@@ -39,6 +41,15 @@ function TypeIcon({ type }: { type: NType }) {
   );
 }
 
+/** Shown in place of the type icon for a notification whose workflow is done. */
+function CheckIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface TopBarProps {
@@ -53,7 +64,9 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
   const { t } = useTranslation();
   const { openPalette } = useSearchPalette();
   const { activeProfile } = useRoleContext();
-  const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady } = useNotifications();
+  const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady, isNotificationCompleted } = useNotifications();
+  const { totalCount: todoCount } = useTodo();
+  const canSeeTodo = profileCanAccess(activeProfile, '/dashboard/todo');
   const [open, setOpen] = useState(false);
   const [photoView, setPhotoView] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -146,6 +159,32 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
         {/* Anomaly caution button (renders only for roles with anomaly access) */}
         <CautionButton />
 
+        {/* To-Do / personal work queue — count of items awaiting this user */}
+        {canSeeTodo && (
+          <button
+            title={t('nav.todo')}
+            aria-label={t('nav.todo')}
+            onClick={() => navigate('/dashboard/todo')}
+            className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="9 11 12 14 22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+            {todoCount > 0 && (
+              <span style={{
+                position: 'absolute', top: -2, right: -2,
+                minWidth: 16, height: 16, padding: '0 3px', borderRadius: 999,
+                background: '#EA580C', border: '2px solid #fff',
+                fontSize: 9, fontWeight: 700, color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {todoCount > 9 ? '9+' : todoCount}
+              </span>
+            )}
+          </button>
+        )}
+
         {/* Bell button */}
         <button
           ref={btnRef}
@@ -235,6 +274,11 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
                 notifications.map(n => {
                   const isRead = n.read_by?.includes(roleId);
                   const nType = (n.type as NType) || 'info';
+                  // Belongs to a finished workflow (ticket closed) → render muted +
+                  // struck-through with a ✓, so it's clearly part of the audit trail
+                  // and not something still needing action. Still clickable/searchable.
+                  const done = isNotificationCompleted(n);
+                  const restBg = done ? '#F8FAFC' : (isRead ? '#fff' : '#FAFBFF');
                   return (
                     <div
                       key={n.id}
@@ -242,32 +286,38 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
                       style={{
                         display: 'flex', alignItems: 'flex-start', gap: 12,
                         padding: '13px 18px', cursor: n.route ? 'pointer' : 'default',
-                        background: isRead ? '#fff' : '#FAFBFF',
+                        background: restBg,
+                        opacity: done ? 0.72 : 1,
                         borderBottom: '1px solid #F8FAFC',
                         transition: 'background 0.1s',
                       }}
-                      onMouseEnter={e => { if (n.route) (e.currentTarget as HTMLDivElement).style.background = '#F8FAFC'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = isRead ? '#fff' : '#FAFBFF'; }}
+                      onMouseEnter={e => { if (n.route) (e.currentTarget as HTMLDivElement).style.background = '#F1F5F9'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = restBg; }}
                     >
                       <div style={{
                         width: 32, height: 32, borderRadius: 10, flexShrink: 0,
-                        background: ICON_BG[nType], color: ICON_COLOR[nType],
+                        background: done ? '#DCFCE7' : ICON_BG[nType], color: done ? '#16A34A' : ICON_COLOR[nType],
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         marginTop: 1,
                       }}>
-                        <TypeIcon type={nType} />
+                        {done ? <CheckIcon /> : <TypeIcon type={nType} />}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: isRead ? 500 : 700, color: isRead ? '#475569' : '#0F172A', lineHeight: 1.35 }}>
+                        <div style={{ fontSize: 13, fontWeight: done ? 500 : (isRead ? 500 : 700), color: done ? '#94A3B8' : (isRead ? '#475569' : '#0F172A'), lineHeight: 1.35, textDecoration: done ? 'line-through' : 'none' }}>
                           {n.title}
                         </div>
                         {n.body && (
-                          <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3, lineHeight: 1.4 }}>{n.body}</div>
+                          <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3, lineHeight: 1.4, textDecoration: done ? 'line-through' : 'none' }}>{n.body}</div>
                         )}
                         {n.actor_name && (
                           <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>{t('topbar.by', { name: n.actor_name })}</div>
                         )}
-                        <div style={{ fontSize: 10, color: '#CBD5E1', marginTop: 2 }}>{formatAge(n.created_at)}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                          <span style={{ fontSize: 10, color: '#CBD5E1' }}>{formatAge(n.created_at)}</span>
+                          {done && (
+                            <span style={{ fontSize: 9, fontWeight: 700, color: '#16A34A', background: '#DCFCE7', borderRadius: 999, padding: '1px 6px', letterSpacing: '0.02em' }}>✓ {t('topbar.completed')}</span>
+                          )}
+                        </div>
                       </div>
                       {n.photo_url && (
                         <button
@@ -278,7 +328,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
                           📷
                         </button>
                       )}
-                      {!isRead && (
+                      {!isRead && !done && (
                         <div style={{ width: 7, height: 7, borderRadius: '50%', background: DOT[nType], flexShrink: 0, marginTop: 6 }} />
                       )}
                     </div>

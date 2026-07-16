@@ -475,10 +475,83 @@ export async function extractPurchaseSheet(imageDataUrl: string): Promise<Extrac
 
 // ── Supplier bill verification (Purchase Manager) ─────────────────────────────
 
+export interface SupplierBillLine {
+  description: string;
+  quantity: number | null;
+  unit: string | null;
+  unitPrice: number | null;
+  amount: number | null;
+}
+
+// ── Bill total reconciliation (tax-aware) ─────────────────────────────────────
+// The single source of truth for "do the line amounts add up to the bill?".
+// Indian invoices almost always print PRE-TAX line amounts, so their sum equals
+// the sub-total (Total Before Tax) — NOT the GST-inclusive grand total. Comparing
+// the line sum directly against the grand total therefore reports a false mismatch
+// on every taxed bill (off by exactly the GST). Some suppliers instead print
+// tax-inclusive line amounts. We accept a match against ANY plausible base and only
+// flag when the sum reconciles with none of them.
+
+export interface BillTotals {
+  subTotal?: number | null;
+  taxAmount?: number | null;
+  totalAmount?: number | null;
+}
+
+export interface BillReconcile {
+  /** true = the line amounts reconcile with a plausible base (no warning). */
+  ok: boolean;
+  /** which base the sum matched (or came closest to). */
+  basis: 'subtotal' | 'total-minus-tax' | 'total' | 'none';
+  /** the figure the sum was compared against (best candidate). */
+  expected: number | null;
+  /** |amountSum − expected|. */
+  diff: number | null;
+}
+
+function fin(v: number | null | undefined): number | null {
+  return typeof v === 'number' && isFinite(v) ? v : null;
+}
+
+/**
+ * Reconcile a sum of line-item amounts against a bill's totals, tax-aware.
+ * Returns ok=true when the sum is within `tolPct` of the sub-total, the
+ * grand-total-minus-tax, or the (tax-inclusive) grand total. Returns ok=true
+ * (basis 'none') when there is no total to check against — never cry wolf on
+ * missing data. Absolute floor of ₹1 absorbs "rounded off" lines.
+ */
+export function reconcileBillAmount(amountSum: number, totals: BillTotals, tolPct = 0.02): BillReconcile {
+  if (!(amountSum > 0)) return { ok: true, basis: 'none', expected: null, diff: null };
+  const sub = fin(totals.subTotal);
+  const tax = fin(totals.taxAmount) ?? 0;
+  const total = fin(totals.totalAmount);
+
+  const candidates: { basis: BillReconcile['basis']; value: number }[] = [];
+  if (sub != null) candidates.push({ basis: 'subtotal', value: sub });           // pre-tax lines → sub-total
+  if (total != null) candidates.push({ basis: 'total-minus-tax', value: total - tax }); // pre-tax lines, no explicit sub-total
+  if (total != null) candidates.push({ basis: 'total', value: total });          // tax-inclusive lines
+
+  if (!candidates.length) return { ok: true, basis: 'none', expected: null, diff: null };
+
+  let best = { basis: candidates[0].basis, value: candidates[0].value, diff: Infinity };
+  for (const c of candidates) {
+    const diff = Math.abs(amountSum - c.value);
+    const tol = Math.max(1, Math.abs(c.value) * tolPct);
+    if (diff <= tol) return { ok: true, basis: c.basis, expected: c.value, diff };
+    if (diff < best.diff) best = { ...c, diff };
+  }
+  return { ok: false, basis: best.basis, expected: best.value, diff: best.diff };
+}
 export interface ExtractedSupplierBill {
   totalAmount: number | null;
+  /** Taxable value before GST — pair with taxAmount to compute a robust grand total. */
+  subTotal?: number | null;
+  taxAmount?: number | null;
+  /** Total quantity across all line items (e.g. 466 Boxes). */
+  grandTotalQty?: number | null;
   lineItemCount: number | null;
   currency: string | null;
+  lineItems?: SupplierBillLine[];
   raw?: string;
 }
 

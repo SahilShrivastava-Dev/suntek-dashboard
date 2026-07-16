@@ -21,6 +21,7 @@ export const STATUS_CFG: Record<string, { label: string; bg: string; color: stri
   pending_purchase_manager: { label: 'Bill & Dispatch',   bg: '#FAE8FF', color: '#A21CAF' },
   pending_handover:         { label: 'Handover',          bg: '#F3E8FF', color: '#9333EA' },
   pending_defective_return: { label: 'Defective Return',  bg: '#FEF3C7', color: '#D97706' },
+  changes_requested:        { label: 'Changes Requested', bg: '#FEF2F2', color: '#DC2626' },
   closed:                   { label: 'Closed',            bg: '#DCFCE7', color: '#16A34A' },
 };
 
@@ -35,6 +36,22 @@ export const STAGE_LABELS: Record<string, string> = {
   pending_unit_head: 'Unit Head', pending_purchase: 'Purchase', pending_purchase_manager: 'Purchase Mgr',
   pending_handover: 'Handover', pending_defective_return: 'Defective', closed: 'Closed',
 };
+
+// In-house repairs (no store part requested) never touch the procurement pipeline,
+// so their timeline is just: raise → upload the completion photo → close. Showing the
+// full approval strip for these only confuses users.
+export const INHOUSE_STAGES = ['open', 'in_progress', 'closed'];
+export const INHOUSE_STAGE_LABELS: Record<string, string> = {
+  open: 'Raised', in_progress: 'Completion Photo', closed: 'Closed',
+};
+
+// Part needed but AVAILABLE in store → no procurement, so the Purchase / Purchase Mgr
+// stages are omitted entirely (not just greyed): Raised → Assessed → Store Check →
+// Unit Head → Handover → Defective → Closed.
+export const AVAILABLE_STAGES = [
+  'open', 'in_progress', 'pending_store', 'pending_unit_head',
+  'pending_handover', 'pending_defective_return', 'closed',
+];
 
 // ── Pure helpers ────────────────────────────────────────────────────────────────
 
@@ -123,21 +140,25 @@ export function PhotoUploader({ onBlobReady, label = 'Attach photo proof', hint 
 
 // ── Stage progress strip ──────────────────────────────────────────────────────
 
-export function StageStrip({ status, skippedStages = [], onStageClick, activeStage }: {
+export function StageStrip({ status, skippedStages = [], onStageClick, activeStage, stages = EMERGENCY_STAGES, labels = STAGE_LABELS }: {
   status: string;
   skippedStages?: string[];
   /** Click a reached stage to see what happened there (read-only). */
   onStageClick?: (stage: string) => void;
   activeStage?: string | null;
+  /** Stage list to render — defaults to the full emergency pipeline; pass
+   *  INHOUSE_STAGES for a simplified in-house repair timeline. */
+  stages?: string[];
+  labels?: Record<string, string>;
 }) {
-  const idx = EMERGENCY_STAGES.indexOf(status);
+  const idx = stages.indexOf(status);
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, marginBottom: 20, overflowX: 'auto', paddingBottom: 2 }}>
-      {EMERGENCY_STAGES.map((s, i) => {
+      {stages.map((s, i) => {
         const isPast = i < idx;
         const isCurrent = i === idx;
         const isSkipped = skippedStages.includes(s);
-        const isLast = i === EMERGENCY_STAGES.length - 1;
+        const isLast = i === stages.length - 1;
         // A stage is inspectable once reached (past or current) and not skipped.
         const clickable = !!onStageClick && i <= idx && !isSkipped;
         const isActive = activeStage === s;
@@ -145,7 +166,7 @@ export function StageStrip({ status, skippedStages = [], onStageClick, activeSta
           <React.Fragment key={s}>
             <div
               onClick={clickable ? () => onStageClick!(s) : undefined}
-              title={clickable ? `View ${STAGE_LABELS[s]} details` : undefined}
+              title={clickable ? `View ${labels[s]} details` : undefined}
               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, cursor: clickable ? 'pointer' : 'default' }}
             >
               <div style={{
@@ -161,7 +182,7 @@ export function StageStrip({ status, skippedStages = [], onStageClick, activeSta
                 {isCurrent && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
               </div>
               <div style={{ fontSize: 8.5, fontWeight: isActive || isCurrent ? 700 : 500, color: isActive ? '#0F172A' : isSkipped ? '#CBD5E1' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#94A3B8', marginTop: 3, whiteSpace: 'nowrap', textDecoration: clickable ? 'underline dotted' : 'none', textUnderlineOffset: 2 }}>
-                {STAGE_LABELS[s]}{isSkipped ? ' (skipped)' : ''}
+                {labels[s]}{isSkipped ? ' (skipped)' : ''}
               </div>
             </div>
             {!isLast && <div style={{ height: 2, flex: 1, minWidth: 12, background: (isPast && !isSkipped) ? '#16A34A' : '#E2E8F0', marginTop: 10, flexShrink: 0 }} />}

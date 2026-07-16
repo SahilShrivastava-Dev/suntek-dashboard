@@ -14,6 +14,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { nvidiaChat } from '../_shared/nvidiaVision.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -98,14 +99,14 @@ serve(async (req: Request) => {
       );
     }
 
-    const nvidiaRes = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'meta/llama-3.2-90b-vision-instruct',
+    let content: string;
+    let usedModel: string;
+    try {
+      const r = await nvidiaChat({
+        apiKey,
+        fallbackModel: 'meta/llama-3.2-90b-vision-instruct',
+        maxTokens: 4096,
+        jsonMode: true,
         messages: [
           {
             role: 'user',
@@ -115,25 +116,19 @@ serve(async (req: Request) => {
             ],
           },
         ],
-        max_tokens: 2048,
-        temperature: 0.05,
-      }),
-    });
-
-    if (!nvidiaRes.ok) {
-      const errText = await nvidiaRes.text().catch(() => '');
+      });
+      content = r.content;
+      usedModel = r.model;
+    } catch (e) {
       return new Response(
-        JSON.stringify({ error: `NVIDIA API returned ${nvidiaRes.status}: ${errText.slice(0, 400)}` }),
+        JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
         { status: 502, headers: { ...CORS, 'Content-Type': 'application/json' } },
       );
     }
 
-    const nvidiaJson = await nvidiaRes.json();
-    const content: string = nvidiaJson?.choices?.[0]?.message?.content ?? '';
-
     if (!content) {
       return new Response(
-        JSON.stringify({ error: 'NVIDIA API returned an empty response.' }),
+        JSON.stringify({ error: `NVIDIA API returned an empty response (model ${usedModel}).` }),
         { status: 502, headers: { ...CORS, 'Content-Type': 'application/json' } },
       );
     }

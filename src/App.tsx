@@ -4,6 +4,7 @@ import { RoleProvider } from './contexts/RoleContext';
 import { RequireLogin } from './components/RequireLogin';
 import { PlantScopeProvider } from './contexts/PlantScopeContext';
 import { NotificationsProvider } from './contexts/NotificationsContext';
+import { TodoProvider } from './contexts/TodoContext';
 import { BlacklistProvider } from './contexts/BlacklistContext';
 import { AnomalyProvider } from './contexts/AnomalyContext';
 import { OcrJobsProvider } from './contexts/OcrJobsContext';
@@ -16,6 +17,7 @@ import { Login } from './routes/auth/Login';
 // Page components are code-split so each route ships its own chunk — heavy deps
 // (leaflet, recharts, xlsx, the OCR client) no longer bloat the initial bundle.
 const Overview         = lazy(() => import('./routes/dashboard/Overview').then(m => ({ default: m.Overview })));
+const Todo             = lazy(() => import('./routes/dashboard/Todo').then(m => ({ default: m.Todo })));
 const Sales            = lazy(() => import('./routes/dashboard/Sales').then(m => ({ default: m.Sales })));
 const CPMStock         = lazy(() => import('./routes/dashboard/CPMStock').then(m => ({ default: m.CPMStock })));
 const BatchSheet       = lazy(() => import('./routes/dashboard/BatchSheet').then(m => ({ default: m.BatchSheet })));
@@ -45,6 +47,10 @@ const ActivityLog     = lazy(() => import('./routes/dashboard/purchase/ActivityL
 const PurchaseOrders  = lazy(() => import('./routes/dashboard/purchase/PurchaseOrders').then(m => ({ default: m.PurchaseOrders })));
 const MarineInsurance = lazy(() => import('./routes/dashboard/purchase/MarineInsurance').then(m => ({ default: m.MarineInsurance })));
 const Labour          = lazy(() => import('./routes/dashboard/purchase/Labour').then(m => ({ default: m.Labour })));
+const QRManagement    = lazy(() => import('./routes/dashboard/purchase/QRManagement').then(m => ({ default: m.QRManagement })));
+
+// Standalone asset profile (QR landing) — full page, no sidebar.
+const AssetProfile    = lazy(() => import('./routes/asset/AssetProfile').then(m => ({ default: m.AssetProfile })));
 
 // L1 Operator apps (standalone — no DashboardLayout)
 const CheckIn     = lazy(() => import('./routes/night-manager/CheckIn').then(m => ({ default: m.CheckIn })));
@@ -67,6 +73,7 @@ function App() {
     <RoleProvider>
       <PlantScopeProvider>
       <NotificationsProvider>
+      <TodoProvider>
       <BlacklistProvider>
       <AnomalyProvider>
       <OcrJobsProvider>
@@ -79,6 +86,7 @@ function App() {
           {/* Dashboard — protected layout */}
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<Overview />} />
+            <Route path="todo" element={<Todo />} />
 
             {/* Purchase hub — nested layout with shared stage flow + sub-tabs */}
             <Route path="purchase" element={<PurchaseLayout />}>
@@ -90,6 +98,7 @@ function App() {
               <Route path="purchase" element={<PurchaseOrders />} />
               <Route path="marine"   element={<MarineInsurance />} />
               <Route path="labour"   element={<Labour />} />
+              <Route path="qr"       element={<QRManagement />} />
             </Route>
 
             {/* Main tabs */}
@@ -124,6 +133,10 @@ function App() {
           <Route path="/warehouse/requisition"  element={<RequireLogin><Warehouse /></RequireLogin>} />
           <Route path="/operator/batch-logger"  element={<RequireLogin><BatchLogger /></RequireLogin>} />
 
+          {/* Asset profile — QR landing page. Standalone + login-gated; the QR
+              encodes /asset/<token>. Must be above the catch-all. */}
+          <Route path="/asset/:key" element={<RequireLogin><AssetProfile /></RequireLogin>} />
+
           {/* Default redirect */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
@@ -133,6 +146,7 @@ function App() {
       </OcrJobsProvider>
       </AnomalyProvider>
       </BlacklistProvider>
+      </TodoProvider>
       </NotificationsProvider>
       </PlantScopeProvider>
     </RoleProvider>

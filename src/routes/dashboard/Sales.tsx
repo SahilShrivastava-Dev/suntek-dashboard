@@ -1,4 +1,9 @@
 import React, { useState } from 'react';
+import { EmptyState } from '../../components/ui/states';
+import { usePagination } from '../../components/ui/usePagination';
+import { TablePagination } from '../../components/ui/TablePagination';
+import { TableSearch, useTextFilter } from '../../components/ui/TableSearch';
+import { useSortable, Th } from '../../components/ui/useSortable';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { insertRows } from '../../lib/db';
@@ -29,6 +34,18 @@ export function Sales() {
   const { activeProfile } = useRoleContext();
   const { data: salesKPIs } = useSalesMTD();
   const { data: liveContracts } = useSalesContracts();
+  const [salesSearch, setSalesSearch] = useState('');
+  const contractRows = liveContracts || [];
+  const filteredContracts = useTextFilter(contractRows, salesSearch, c => [c.customer, c.status]);
+  const salesSort = useSortable(filteredContracts, {
+    customer: c => c.customer,
+    totalSales: c => c.totalSales,
+    mtdSales: c => c.mtdSales,
+    invoiceCount: c => c.invoiceCount,
+    outstanding: c => c.outstanding,
+    status: c => c.status,
+  });
+  const salesPg = usePagination(salesSort.sorted, { resetKey: `${salesSearch}|${salesSort.sort.key}|${salesSort.sort.dir}` });
   const { data: analytics } = useAnalyticsKPIs();
 
   function handleExport() {
@@ -318,20 +335,24 @@ export function Sales() {
             {t('sales.newContract')}
           </button>
         </div>
+        <TableSearch value={salesSearch} onChange={setSalesSearch} placeholder={t('sales.searchPh', 'Search customer…')} />
+        {filteredContracts.length === 0 ? (
+          <EmptyState title={salesSearch ? t('sales.noMatches', 'No customers match your search.') : t('sales.noContracts', 'No contracts — data loads from BUSY')} />
+        ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt">
             <thead>
               <tr>
-                <th>{t('sales.colCustomer')}</th>
-                <th className="num">{t('sales.colFySales')}</th>
-                <th className="num">{t('sales.colMtdSales')}</th>
-                <th className="num">{t('sales.colInvoices')}</th>
-                <th className="num">{t('sales.colOutstanding')}</th>
-                <th>{t('sales.colStatus')}</th>
+                <Th sortKey="customer" s={salesSort}>{t('sales.colCustomer')}</Th>
+                <Th sortKey="totalSales" s={salesSort} firstDir="desc" className="num">{t('sales.colFySales')}</Th>
+                <Th sortKey="mtdSales" s={salesSort} firstDir="desc" className="num">{t('sales.colMtdSales')}</Th>
+                <Th sortKey="invoiceCount" s={salesSort} firstDir="desc" className="num">{t('sales.colInvoices')}</Th>
+                <Th sortKey="outstanding" s={salesSort} firstDir="desc" className="num">{t('sales.colOutstanding')}</Th>
+                <Th sortKey="status" s={salesSort}>{t('sales.colStatus')}</Th>
               </tr>
             </thead>
             <tbody>
-              {(liveContracts || []).map(c => {
+              {salesPg.pageRows.map(c => {
                 const sc = c.status === 'on track' ? '#16A34A' : c.status === 'cleared' ? '#475569' : '#DC2626';
                 const sb = c.status === 'on track' ? '#DCFCE7' : c.status === 'cleared' ? '#F1F5F9' : '#FEE2E2';
                 return (
@@ -351,12 +372,11 @@ export function Sales() {
                   </tr>
                 );
               })}
-              {(!liveContracts || liveContracts.length === 0) && (
-                <tr><td colSpan={6} className="text-center text-slate-400 py-6 text-sm">No contracts — data loads from BUSY</td></tr>
-              )}
             </tbody>
           </table>
+          <TablePagination controls={salesPg.controls} />
         </div>
+        )}
       </div>
 
       {/* ── New Contract Modal ── */}

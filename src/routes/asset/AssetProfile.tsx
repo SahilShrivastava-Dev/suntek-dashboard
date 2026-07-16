@@ -9,6 +9,40 @@ import {
 } from 'recharts';
 import type { Database } from '../../lib/database.types';
 
+// ── Small presentational helpers (theme-matched) ───────────────────────────────
+
+/** Section card title — bold, with an accent tick, consistent across the page. */
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 mb-4">
+      <span style={{ width: 4, height: 15, borderRadius: 2, background: 'var(--accent)' }} />
+      <h2 className="text-[15px] font-bold text-slate-900">{children}</h2>
+    </div>
+  );
+}
+
+/** A KPI tile — big number, uppercase caption, tinted surface. */
+function Stat({ label, value, color, bg, small }: { label: string; value: React.ReactNode; color: string; bg: string; small?: boolean }) {
+  return (
+    <div className="rounded-2xl p-4" style={{ background: bg }}>
+      <div className="font-extrabold leading-none" style={{ color, fontSize: small ? 15 : 24 }}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mt-2 leading-tight">{label}</div>
+    </div>
+  );
+}
+
+/** One field in the spec sheet — label over value, so it tiles into a grid. */
+function Field({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="py-2.5 min-w-0" style={{ borderBottom: '1px solid var(--border-2)' }}>
+      <div className="text-[10.5px] uppercase tracking-wide text-slate-400 font-semibold">{label}</div>
+      <div className="text-[13.5px] font-semibold text-slate-800 mt-0.5 truncate" title={typeof value === 'string' ? value : undefined}>
+        {value || '—'}
+      </div>
+    </div>
+  );
+}
+
 type AssetRow = Database['public']['Tables']['fixed_assets']['Row'] & { plants?: { name: string | null } | null };
 type TicketRow = Database['public']['Tables']['maintenance_tickets']['Row'] & { plants?: { name: string | null } | null };
 type ScheduleRow = Database['public']['Tables']['maintenance_schedules']['Row'];
@@ -20,11 +54,11 @@ const fmtDateTime = (d: string | null | undefined) => d ? new Date(d).toLocaleSt
 
 function Screen({ emoji, title, sub }: { emoji: string; title: string; sub: string }) {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#F8FAFC' }}>
-      <div style={{ textAlign: 'center', maxWidth: 380 }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'var(--bg)' }}>
+      <div className="card p-8" style={{ textAlign: 'center', maxWidth: 400 }}>
         <div style={{ fontSize: 44, marginBottom: 12 }}>{emoji}</div>
-        <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A' }}>{title}</div>
-        <div style={{ fontSize: 13, color: '#64748B', marginTop: 6, lineHeight: 1.5 }}>{sub}</div>
+        <div className="serif" style={{ fontSize: 26, color: '#0F172A', lineHeight: 1.1 }}>{title}</div>
+        <div style={{ fontSize: 13, color: '#64748B', marginTop: 8, lineHeight: 1.5 }}>{sub}</div>
       </div>
     </div>
   );
@@ -151,151 +185,183 @@ export function AssetProfile() {
   if (loading) return <Screen emoji="⏳" title="Loading asset…" sub="Fetching the digital profile." />;
   if (notFound || !asset) return <Screen emoji="🏷️" title="QR not recognised" sub="This QR code isn't valid or has been regenerated. Ask an administrator for a fresh code." />;
 
-  const detail = (k: string, v: React.ReactNode) => (
-    <div style={{ padding: '8px 0', borderBottom: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-      <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 600 }}>{k}</span>
-      <span style={{ fontSize: 13, color: '#0F172A', fontWeight: 600, textAlign: 'right' }}>{v || '—'}</span>
-    </div>
-  );
-
-  const kpi = (label: string, value: React.ReactNode, color: string, bg: string) => (
-    <div style={{ border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px', background: bg, flex: '1 1 120px', minWidth: 120 }}>
-      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>{label}</div>
-    </div>
-  );
+  const rupees = asset.value != null ? `₹ ${Number(asset.value).toLocaleString('en-IN')}` : '—';
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F8FAFC' }}>
-      <div style={{ maxWidth: 720, margin: '0 auto', padding: '20px 16px 48px' }}>
-        {/* Header */}
-        <div style={{ background: '#0F172A', borderRadius: 20, padding: '20px 20px 22px', color: '#fff', marginBottom: 16 }}>
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      <div className="mx-auto px-4 sm:px-6 py-6 sm:py-8" style={{ maxWidth: 1120 }}>
+
+        {/* ── Hero ──────────────────────────────────────────────────────────── */}
+        <div
+          className="card overflow-hidden mb-4 sm:mb-5"
+          style={{ background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 100%)', color: '#fff' }}
+        >
+          <div className="p-5 sm:p-7 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
             {asset.photo_url
-              ? <img src={asset.photo_url} alt="" style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover', flexShrink: 0 }} />
-              : <div style={{ width: 56, height: 56, borderRadius: 14, background: '#1E293B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>🏭</div>}
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.15 }}>{asset.name}</div>
-              <div style={{ fontSize: 13, color: '#CBD5E1', marginTop: 2 }}>
+              ? <img src={asset.photo_url} alt="" style={{ width: 64, height: 64, borderRadius: 16, objectFit: 'cover', flexShrink: 0 }} />
+              : <div style={{ width: 64, height: 64, borderRadius: 16, background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, flexShrink: 0 }}>🏭</div>}
+            <div className="min-w-0 flex-1">
+              <div className="serif" style={{ fontSize: 30, lineHeight: 1.05 }}>{asset.name}</div>
+              <div style={{ fontSize: 13.5, color: '#CBD5E1', marginTop: 4 }}>
                 {asset.identification_mark ? <strong style={{ color: '#fff' }}>{asset.identification_mark}</strong> : null}
-                {asset.plants?.name ? `${asset.identification_mark ? ' · ' : ''}${asset.plants.name}` : ''}
+                {asset.plants?.name ? `${asset.identification_mark ? '  ·  ' : ''}${asset.plants.name}` : ''}
+              </div>
+              <div className="flex gap-2 mt-3 flex-wrap">
+                <span style={{ fontSize: 11.5, fontWeight: 700, padding: '4px 11px', borderRadius: 999, background: stats.openCount ? 'rgba(251,191,36,0.16)' : 'rgba(34,197,94,0.16)', color: stats.openCount ? '#FCD34D' : '#4ADE80' }}>
+                  {stats.openCount ? '🔧 Under maintenance' : '✓ Operational'}
+                </span>
+                <span style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 11px', borderRadius: 999, background: 'rgba(255,255,255,0.08)', color: '#CBD5E1' }}>
+                  Asset #{asset.id.slice(0, 8)}
+                </span>
               </div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: stats.openCount ? '#FEF3C7' : '#DCFCE7', color: stats.openCount ? '#B45309' : '#16A34A' }}>
-              {stats.openCount ? '🔧 Under maintenance' : '✓ Operational'}
-            </span>
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999, background: '#1E293B', color: '#CBD5E1' }}>Asset #{asset.id.slice(0, 8)}</span>
-          </div>
         </div>
 
-        {/* Asset details */}
-        <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 16, padding: '4px 16px 12px', marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: '#0F172A', padding: '12px 0 4px' }}>Asset details</div>
-          {detail('Equipment type', asset.name)}
-          {detail('Identification mark', asset.identification_mark)}
-          {detail('Make / manufacturer', asset.make)}
-          {detail('Model', asset.model)}
-          {detail('Serial no', asset.serial_no)}
-          {detail('Capacity', asset.capacity)}
-          {detail('Year', asset.year)}
-          {detail('Purchase date', fmtDate(asset.purchase_date))}
-          {detail('Account head', asset.account_head)}
-          {detail('Value', asset.value != null ? `₹ ${Number(asset.value).toLocaleString('en-IN')}` : '—')}
-          {detail('Plant', asset.plants?.name)}
+        {/* ── KPI strip ─────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4 sm:mb-5">
+          <Stat label="Total maintenance" value={stats.total} color="#0F172A" bg="#FFFFFF" />
+          <Stat label="Emergency" value={stats.emergency} color="#DC2626" bg="var(--red-soft)" />
+          <Stat label="Preventive" value={stats.periodic} color="#2563EB" bg="var(--blue-soft)" />
+          <Stat label="Avg gap (days)" value={stats.avgDays ?? '—'} color="#7C3AED" bg="var(--purple-soft)" />
+          <Stat label="Last maintenance" value={fmtDate(stats.last)} color="#16A34A" bg="var(--green-soft)" small />
+          <Stat label="Next scheduled" value={fmtDate(stats.nextDue)} color="#B45309" bg="var(--amber-soft)" small />
+          <Stat label="Parts requested" value={parts.length} color="#C5421F" bg="var(--accent-soft)" />
+          <Stat label="Open tickets" value={stats.openCount} color={stats.openCount ? '#D97706' : '#16A34A'} bg="#FFFFFF" />
         </div>
 
-        {/* Repair statistics */}
-        <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 16, padding: 16, marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: '#0F172A', marginBottom: 10 }}>Repair statistics</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {kpi('Total maintenance', stats.total, '#0F172A', '#F8FAFC')}
-            {kpi('Emergency', stats.emergency, '#DC2626', '#FEF2F2')}
-            {kpi('Preventive', stats.periodic, '#2563EB', '#EFF6FF')}
-            {kpi('Avg gap (days)', stats.avgDays ?? '—', '#7C3AED', '#F5F3FF')}
-          </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-            {kpi('Last maintenance', fmtDate(stats.last), '#16A34A', '#F0FDF4')}
-            {kpi('Next scheduled', fmtDate(stats.nextDue), '#D97706', '#FFFBEB')}
-            {kpi('Parts requested', parts.length, '#0F172A', '#F8FAFC')}
-          </div>
-        </div>
+        {/* ── Details + Trends (2-col on desktop, stacks on mobile) ──────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mb-4 sm:mb-5">
 
-        {/* Charts (analytics permission) */}
-        {showAnalytics && stats.total > 0 && (
-          <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 16, padding: 16, marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: '#0F172A', marginBottom: 10 }}>Trends</div>
-            <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>Maintenance per month</div>
-            <div style={{ width: '100%', height: 180 }}>
-              <ResponsiveContainer>
-                <BarChart data={perMonth} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ fontSize: 12, borderRadius: 10 }} />
-                  <Bar dataKey="count" fill="#F47651" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+          {/* Asset spec sheet */}
+          <div className={`card p-5 sm:p-6 ${showAnalytics && stats.total > 0 && typeSplit.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
+            <SectionTitle>Asset details</SectionTitle>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6">
+              <Field label="Equipment type" value={asset.name} />
+              <Field label="Identification mark" value={asset.identification_mark} />
+              <Field label="Quantity" value={asset.quantity != null ? String(asset.quantity) : null} />
+              <Field label="Make / manufacturer" value={asset.make} />
+              <Field label="Model" value={asset.model} />
+              <Field label="Serial no" value={asset.serial_no} />
+              <Field label="Capacity / line size" value={asset.capacity} />
+              <Field label="Country of origin" value={asset.origin} />
+              <Field label="Year of manufacturing" value={asset.year} />
+              <Field label="Taxable value" value={rupees} />
+              <Field label="Invoice no" value={asset.invoice_no} />
+              <Field label="Date of purchase" value={fmtDate(asset.purchase_date)} />
+              <Field label="Account head" value={asset.account_head} />
+              <Field label="Plant" value={asset.plants?.name} />
             </div>
-            {typeSplit.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 8 }}>
-                <div style={{ width: 130, height: 130 }}>
-                  <ResponsiveContainer>
-                    <PieChart>
-                      <Pie data={typeSplit} dataKey="value" nameKey="name" innerRadius={34} outerRadius={58} paddingAngle={2}>
-                        {typeSplit.map((d) => <Cell key={d.name} fill={d.color} />)}
-                      </Pie>
-                      <Tooltip contentStyle={{ fontSize: 12, borderRadius: 10 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div>
-                  {typeSplit.map(d => (
-                    <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#475569', marginBottom: 4 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: d.color }} /> {d.name} · <strong>{d.value}</strong>
-                    </div>
-                  ))}
+          </div>
+
+          {/* Type split donut (analytics) */}
+          {showAnalytics && stats.total > 0 && typeSplit.length > 0 && (
+            <div className="card p-5 sm:p-6 lg:col-span-1">
+              <SectionTitle>Maintenance mix</SectionTitle>
+              <div className="flex items-center justify-center" style={{ position: 'relative', height: 176 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={typeSplit} dataKey="value" nameKey="name" innerRadius={56} outerRadius={82} paddingAngle={2} stroke="#fff" strokeWidth={2}>
+                      {typeSplit.map((d) => <Cell key={d.name} fill={d.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 12, border: '1px solid #E2E8F0', boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                {/* Center total */}
+                <div style={{ position: 'absolute', textAlign: 'center', pointerEvents: 'none' }}>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>{stats.total}</div>
+                  <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>repairs</div>
                 </div>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* Maintenance history */}
-        <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 16, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: '#0F172A', marginBottom: 10 }}>Maintenance history</div>
-          {tickets.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: '#94A3B8', padding: '8px 0' }}>No maintenance records for this asset yet.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {tickets.map(t => (
-                <div key={t.id} style={{ border: '1px solid #E2E8F0', borderRadius: 12, padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <button
-                      onClick={() => navigate(`/dashboard/purchase/maint?ticket=${t.id}`)}
-                      style={{ fontSize: 12, fontWeight: 700, color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
-                    >
-                      #{t.id.slice(0, 8)}
-                    </button>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 7px', borderRadius: 999, background: t.type === 'emergency' ? '#FEF2F2' : '#EFF6FF', color: t.type === 'emergency' ? '#DC2626' : '#2563EB' }}>
-                      {t.type === 'emergency' ? 'Emergency' : 'Preventive'}
-                    </span>
-                    {statusBadge(t.status)}
-                    <span style={{ fontSize: 11, color: '#94A3B8', marginLeft: 'auto' }}>{fmtDateTime(t.created_at)}</span>
+              <div className="mt-3 flex flex-col gap-1.5">
+                {typeSplit.map((d) => (
+                  <div key={d.name} className="flex items-center gap-2 text-[12.5px] text-slate-600">
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: d.color, flexShrink: 0 }} />
+                    <span className="flex-1">{d.name}</span>
+                    <strong className="text-slate-900">{d.value}</strong>
+                    <span className="text-slate-400 text-[11px]">{Math.round((d.value / stats.total) * 100)}%</span>
                   </div>
-                  <div style={{ fontSize: 13, color: '#0F172A', fontWeight: 600, marginTop: 6 }}>{t.title || t.equipment}</div>
-                  {t.description && <div style={{ fontSize: 12, color: '#64748B', marginTop: 2, lineHeight: 1.4 }}>{t.description}</div>}
-                  <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>
-                    {t.assigned_to || t.raised_by ? `By ${t.assigned_to || t.raised_by}` : ''}{t.closed_at ? ` · Closed ${fmtDate(t.closed_at)}` : ''}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </div>
 
-        <div style={{ textAlign: 'center', fontSize: 11, color: '#CBD5E1', marginTop: 20 }}>Suntek · CaratSense · Asset profile</div>
+        {/* ── Maintenance-per-month bar chart (analytics) ────────────────────── */}
+        {showAnalytics && stats.total > 0 && (
+          <div className="card p-5 sm:p-6 mb-4 sm:mb-5">
+            <SectionTitle>Maintenance over time</SectionTitle>
+            <div style={{ width: '100%', height: 240 }}>
+              <ResponsiveContainer>
+                <BarChart data={perMonth} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="28%">
+                  <defs>
+                    <linearGradient id="assetBar" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#FF8A66" />
+                      <stop offset="100%" stopColor="#F47651" />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#EEF2F6" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
+                  <YAxis allowDecimals={false} width={28} tick={{ fontSize: 11, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(244,118,81,0.06)' }}
+                    contentStyle={{ fontSize: 12, borderRadius: 12, border: '1px solid #E2E8F0', boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}
+                  />
+                  <Bar dataKey="count" name="Maintenance events" fill="url(#assetBar)" radius={[6, 6, 0, 0]} maxBarSize={44} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {/* ── Maintenance history ────────────────────────────────────────────── */}
+        <div className="card p-5 sm:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <SectionTitle>Maintenance history</SectionTitle>
+            <span className="pill-count" style={{ background: 'var(--bg-soft)', color: '#64748B' }}>{tickets.length}</span>
+          </div>
+          {tickets.length === 0 ? (
+            <div className="text-[13px] text-slate-400 py-2">No maintenance records for this asset yet.</div>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              {tickets.map((t) => {
+                const isEmergency = t.type === 'emergency';
+                return (
+                  <div
+                    key={t.id}
+                    className="rounded-2xl hover:bg-slate-50 transition-colors"
+                    style={{ border: '1px solid var(--border)', padding: '12px 14px', borderLeft: `3px solid ${isEmergency ? '#DC2626' : '#2563EB'}` }}
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => navigate(`/dashboard/purchase/maint?ticket=${t.id}`)}
+                        className="text-[12.5px] font-bold hover:underline"
+                        style={{ color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+                      >
+                        #{t.id.slice(0, 8)}
+                      </button>
+                      <span className="badge" style={{ background: isEmergency ? 'var(--red-soft)' : 'var(--blue-soft)', color: isEmergency ? '#DC2626' : '#2563EB', fontWeight: 700 }}>
+                        {isEmergency ? 'Emergency' : 'Preventive'}
+                      </span>
+                      {statusBadge(t.status)}
+                      <span className="text-[11px] text-slate-400 ml-auto">{fmtDateTime(t.created_at)}</span>
+                    </div>
+                    <div className="text-[13.5px] font-semibold text-slate-900 mt-2">{t.title || t.equipment}</div>
+                    {t.description && <div className="text-[12px] text-slate-500 mt-1 leading-relaxed">{t.description}</div>}
+                    {(t.assigned_to || t.raised_by || t.closed_at) && (
+                      <div className="text-[11px] text-slate-400 mt-1.5">
+                        {t.assigned_to || t.raised_by ? `By ${t.assigned_to || t.raised_by}` : ''}
+                        {t.closed_at ? `${t.assigned_to || t.raised_by ? ' · ' : ''}Closed ${fmtDate(t.closed_at)}` : ''}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="text-center text-[11px] text-slate-400 mt-6">Suntek · CaratSense · Asset profile</div>
       </div>
     </div>
   );

@@ -48,3 +48,6 @@ clone-db-overwrite.sh
 
 # Supabase CLI local state (machine-specific link info, not for the repo)
 supabase/.temp/
+
+# Firebase Hosting deploy cache (regenerated on every deploy, machine-specific)
+.firebase/

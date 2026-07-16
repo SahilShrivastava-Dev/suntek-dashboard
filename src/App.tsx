@@ -4,6 +4,7 @@ import { RoleProvider } from './contexts/RoleContext';
 import { RequireLogin } from './components/RequireLogin';
 import { PlantScopeProvider } from './contexts/PlantScopeContext';
 import { NotificationsProvider } from './contexts/NotificationsContext';
+import { TodoProvider } from './contexts/TodoContext';
 import { BlacklistProvider } from './contexts/BlacklistContext';
 import { AnomalyProvider } from './contexts/AnomalyContext';
 import { OcrJobsProvider } from './contexts/OcrJobsContext';
@@ -16,6 +17,7 @@ import { Login } from './routes/auth/Login';
 // Page components are code-split so each route ships its own chunk — heavy deps
 // (leaflet, recharts, xlsx, the OCR client) no longer bloat the initial bundle.
 const Overview         = lazy(() => import('./routes/dashboard/Overview').then(m => ({ default: m.Overview })));
+const Todo             = lazy(() => import('./routes/dashboard/Todo').then(m => ({ default: m.Todo })));
 const Sales            = lazy(() => import('./routes/dashboard/Sales').then(m => ({ default: m.Sales })));
 const CPMStock         = lazy(() => import('./routes/dashboard/CPMStock').then(m => ({ default: m.CPMStock })));
 const BatchSheet       = lazy(() => import('./routes/dashboard/BatchSheet').then(m => ({ default: m.BatchSheet })));
@@ -71,6 +73,7 @@ function App() {
     <RoleProvider>
       <PlantScopeProvider>
       <NotificationsProvider>
+      <TodoProvider>
       <BlacklistProvider>
       <AnomalyProvider>
       <OcrJobsProvider>
@@ -83,6 +86,7 @@ function App() {
           {/* Dashboard — protected layout */}
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<Overview />} />
+            <Route path="todo" element={<Todo />} />
 
             {/* Purchase hub — nested layout with shared stage flow + sub-tabs */}
             <Route path="purchase" element={<PurchaseLayout />}>
@@ -142,6 +146,7 @@ function App() {
       </OcrJobsProvider>
       </AnomalyProvider>
       </BlacklistProvider>
+      </TodoProvider>
       </NotificationsProvider>
       </PlantScopeProvider>
     </RoleProvider>

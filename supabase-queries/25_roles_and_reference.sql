@@ -105,6 +105,12 @@ insert into roles (id, label, level, description, home_route, allowed_routes, st
     false, false, false, 'from-amber-400', 'to-amber-600', 91)
 on conflict (id) do nothing;
 
+-- Every role gets the personal To-Do page (/dashboard/todo). Admin holds '*'.
+-- Idempotent; also shipped standalone as 50_todo_route_grant.sql for existing DBs
+-- and for the `management` role (added later in 30_management_role.sql).
+update roles set allowed_routes = array_append(allowed_routes, '/dashboard/todo')
+ where not ('*' = any(allowed_routes)) and not ('/dashboard/todo' = any(allowed_routes));
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- oil_ratios — editable reference table (replaces OIL_RATIO_SUNTEK/MANAV)
 -- ───────────────────────────────────────────────────────────────────────────

@@ -8,7 +8,9 @@ import { CautionButton } from '../anomaly/CautionButton';
 import { Search } from 'lucide-react';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
+import { useTodo } from '../../contexts/TodoContext';
 import { useSearchPalette } from '../../contexts/SearchPaletteContext';
+import { profileCanAccess } from '../../lib/profiles';
 import { dropdownStyle } from '../../lib/uiPosition';
 import type { AppNotification } from '../../contexts/NotificationsContext';
 
@@ -63,6 +65,8 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
   const { openPalette } = useSearchPalette();
   const { activeProfile } = useRoleContext();
   const { notifications, unreadCount, markRead, markAllRead, clearAll, tableReady, isNotificationCompleted } = useNotifications();
+  const { totalCount: todoCount } = useTodo();
+  const canSeeTodo = profileCanAccess(activeProfile, '/dashboard/todo');
   const [open, setOpen] = useState(false);
   const [photoView, setPhotoView] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -154,6 +158,32 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
 
         {/* Anomaly caution button (renders only for roles with anomaly access) */}
         <CautionButton />
+
+        {/* To-Do / personal work queue — count of items awaiting this user */}
+        {canSeeTodo && (
+          <button
+            title={t('nav.todo')}
+            aria-label={t('nav.todo')}
+            onClick={() => navigate('/dashboard/todo')}
+            className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="9 11 12 14 22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+            {todoCount > 0 && (
+              <span style={{
+                position: 'absolute', top: -2, right: -2,
+                minWidth: 16, height: 16, padding: '0 3px', borderRadius: 999,
+                background: '#EA580C', border: '2px solid #fff',
+                fontSize: 9, fontWeight: 700, color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {todoCount > 9 ? '9+' : todoCount}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Bell button */}
         <button

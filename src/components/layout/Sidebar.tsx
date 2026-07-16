@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { AuthUser } from '../../hooks/useAuth';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { useAnomalies } from '../../contexts/AnomalyContext';
+import { useTodo } from '../../contexts/TodoContext';
 import { useSearchPalette } from '../../contexts/SearchPaletteContext';
 import { profileCanAccess } from '../../lib/profiles';
 
@@ -68,6 +69,14 @@ function IconGrid() {
       <rect x="14" y="3" width="7" height="7" rx="1.5"/>
       <rect x="3" y="14" width="7" height="7" rx="1.5"/>
       <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+    </svg>
+  );
+}
+function IconCheckSquare() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="9 11 12 14 22 4"/>
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
     </svg>
   );
 }
@@ -189,6 +198,7 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   const { t } = useTranslation();
   const { activeProfile, can } = useRoleContext();
   const { criticalCount } = useAnomalies();
+  const { totalCount: todoCount } = useTodo();
   const { openPalette } = useSearchPalette();
 
   // A dropdown defaults open when the current route is one of its children.
@@ -257,6 +267,8 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   // permission change, only presentation.
 
   const showOverview = canSee('/dashboard');
+  // Personal work queue — available to every profile that has the route granted.
+  const showTodo = canSee('/dashboard/todo');
 
   // A Factory item is visible if the role can reach it (or, for a nested group like
   // FAR, any of its children).
@@ -280,7 +292,7 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
   const showEntryTerminals = showWarehouseEntry || showNightEntry;
 
   // Workspace section header — visible if any workspace item is visible.
-  const showWorkspace = showOverview || showFactory || showOperations || isOperator || showEntryTerminals;
+  const showWorkspace = showTodo || showOverview || showFactory || showOperations || isOperator || showEntryTerminals;
 
   // Reference dropdown — Daily Unit Log · Oil Ratio Table · Audit Log.
   const showOilRatio = canSee('/dashboard/oil-ratio');
@@ -381,6 +393,22 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
           >
             <IconGrid />
             <span>{t('nav.overview')}</span>
+          </a>
+        )}
+
+        {/* To-Do — personal work queue */}
+        {showTodo && (
+          <a
+            className={`nav-link${location.pathname === '/dashboard/todo' ? ' active' : ''}`}
+            onClick={() => navTo('/dashboard/todo')}
+          >
+            <IconCheckSquare />
+            <span>{t('nav.todo')}</span>
+            {todoCount > 0 && (
+              <span className="pill-count" style={{ background: '#FFF7ED', color: '#EA580C' }}>
+                {todoCount > 9 ? '9+' : todoCount}
+              </span>
+            )}
           </a>
         )}
 

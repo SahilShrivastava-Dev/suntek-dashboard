@@ -63,6 +63,7 @@ function BlacklistedOverlay({ entry, onBack }: { entry: BlacklistEntry; onBack: 
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Operations dashboard',
+  '/dashboard/todo': 'To-Do · your work queue',
   '/dashboard/sales': 'Sales · contracts & dispatch',
   '/dashboard/stock': 'CP and Stock · tanks, drums, items',
   '/dashboard/batches': 'Batch Sheet · production',
@@ -85,6 +86,7 @@ const PAGE_TITLES: Record<string, string> = {
 
 const BREADCRUMBS: Record<string, string> = {
   '/dashboard': 'Workspace · Overview',
+  '/dashboard/todo': 'Workspace · To-Do',
   '/dashboard/sales': 'Operations · Sales',
   '/dashboard/stock': 'Operations · CP and Stock',
   '/dashboard/batches': 'Factory · Batch Sheet',

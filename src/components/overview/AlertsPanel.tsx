@@ -28,7 +28,7 @@ export function AlertsPanel({ alerts, onNavigate }: AlertsPanelProps) {
       <KpiInfoButton info={{ title: 'Open Alerts', what: 'Operational alerts across all modules — marine insurance balance, stock levels, batch timing, maintenance overdue. Colour-coded by severity (red=high, amber=medium, grey=low). Click any alert to navigate to the relevant module.', source: 'Supabase', note: 'Live from the alerts table (migration 0003), filtered to unresolved.' }} />
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="text-base font-bold">Open alerts</div>
+          <div className="text-base font-bold font-heading">Open alerts</div>
           <div className="text-xs text-slate-500">Click to navigate · real-time</div>
         </div>
         <span className="badge" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>{alerts.length} open</span>

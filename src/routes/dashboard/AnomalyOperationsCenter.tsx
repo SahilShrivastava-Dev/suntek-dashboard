@@ -215,7 +215,7 @@ export function AnomalyOperationsCenter() {
                       )}
                     </div>
                     <div className="text-right shrink-0">
-                      {val && <div className="text-sm font-bold num text-slate-700">{val}</div>}
+                      {val && <div className="text-sm font-bold font-heading num text-slate-700">{val}</div>}
                       {f.confidence != null && <div className="text-[11px] text-slate-400">{t('anomalyCenter.confidence', { pct: Math.round(f.confidence * 100) })}</div>}
                     </div>
                   </div>

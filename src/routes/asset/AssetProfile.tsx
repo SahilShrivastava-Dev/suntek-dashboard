@@ -23,7 +23,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 mb-4">
       <span style={{ width: 4, height: 15, borderRadius: 2, background: '#22C55E' }} />
-      <h2 className="text-[15px] font-bold text-slate-900 font-heading">{children}</h2>
+      <h2 className="text-[15px] font-bold font-heading text-slate-900 font-heading">{children}</h2>
     </div>
   );
 }
@@ -67,7 +67,7 @@ function Screen({ emoji, title, sub }: { emoji: string; title: string; sub: stri
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'var(--bg)' }}>
       <div className="card2 p-8" style={{ textAlign: 'center', maxWidth: 400 }}>
         <div style={{ fontSize: 44, marginBottom: 12 }}>{emoji}</div>
-        <div className="serif" style={{ fontSize: 26, color: '#0F172A', lineHeight: 1.1 }}>{title}</div>
+        <div className="font-heading font-semibold" style={{ fontSize: 26, color: '#0F172A', lineHeight: 1.1 }}>{title}</div>
         <div style={{ fontSize: 13, color: '#64748B', marginTop: 8, lineHeight: 1.5 }}>{sub}</div>
       </div>
     </div>
@@ -306,7 +306,7 @@ export function AssetProfile() {
           <div className="lg:col-span-1 flex flex-col gap-4">
             <div className="card2 p-5">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-[15px] font-bold text-slate-900 font-heading">Maintenance Overview</h2>
+                <h2 className="text-[15px] font-bold font-heading text-slate-900 font-heading">Maintenance Overview</h2>
                 <button
                   onClick={() => navigate(`/dashboard/purchase/maint`)}
                   className="text-[12px] font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1"

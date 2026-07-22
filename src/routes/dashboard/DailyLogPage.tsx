@@ -264,7 +264,7 @@ export function DailyLogPage() {
   if (job.status === 'error') return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4 max-w-lg mx-auto">
       <div className="w-full bg-red-50 border border-red-200 rounded-[10px] p-4">
-        <div className="text-sm font-bold text-red-700 mb-1">{t('dailyLog.extraction_failed')}</div>
+        <div className="text-sm font-bold font-heading text-red-700 mb-1">{t('dailyLog.extraction_failed')}</div>
         <div className="text-xs text-red-600 whitespace-pre-wrap break-words max-h-40 overflow-y-auto leading-relaxed">
           {error}
         </div>

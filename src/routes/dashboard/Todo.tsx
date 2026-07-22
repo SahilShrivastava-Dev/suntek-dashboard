@@ -229,7 +229,7 @@ export function Todo() {
 
                 {/* Table */}
                 <div style={{ overflowX: 'auto' }}>
-                  <table className="w-full" style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+                  <table className="w-full" style={{ borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead>
                       <tr style={{ background: '#F8FAFC' }}>
                         {s.columns.map((c) => (
@@ -238,7 +238,7 @@ export function Todo() {
                             style={{
                               textAlign: c.align === 'right' ? 'right' : 'left',
                               padding: '8px 16px', whiteSpace: 'nowrap',
-                              fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                              fontSize: 11, fontWeight: 600, letterSpacing: '0.06em',
                               textTransform: 'uppercase', color: '#94A3B8',
                               borderBottom: '1px solid #F1F5F9',
                             }}

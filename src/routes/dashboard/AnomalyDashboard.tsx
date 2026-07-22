@@ -126,7 +126,7 @@ export function AnomalyDashboard() {
           ) : tierFindings.length === 0 ? (
             <div className="flex flex-col items-center py-9 text-green-600">
               <ShieldCheck size={34} />
-              <div className="text-sm font-bold mt-2.5 text-green-700">{t('anomaly.noTierAnomalies', { level: LEVEL_LABEL[tierModal].toLowerCase() })}</div>
+              <div className="text-sm font-bold font-heading mt-2.5 text-green-700">{t('anomaly.noTierAnomalies', { level: LEVEL_LABEL[tierModal].toLowerCase() })}</div>
               <div className="text-xs text-slate-400 mt-1">{t('anomaly.nothingAtSeverity')}</div>
             </div>
           ) : (

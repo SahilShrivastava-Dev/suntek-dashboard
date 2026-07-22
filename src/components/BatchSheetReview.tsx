@@ -248,7 +248,7 @@ export function BatchSheetReview({
             )}
           </div>
           <div>
-            <div className="text-sm font-bold text-slate-800">
+            <div className="text-sm font-bold font-heading text-slate-800">
               {readOnly ? 'Purchase Sheet — Locked (Read-Only)' : 'OCR Extraction — Review & Confirm'}
             </div>
             <div className="text-xs" style={{ color: readOnly ? '#dc2626' : '#94a3b8' }}>

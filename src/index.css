@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&family=Poppins:wght@500;600;700&display=swap');
+/* v2 typography: Poppins = headings, Inter = everything else. (Instrument Serif retired.) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Poppins:wght@500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;

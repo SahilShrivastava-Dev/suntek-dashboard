@@ -31,7 +31,7 @@ export function UploadDropzone({ onFile, accentColor, label }: { onFile: (f: Fil
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
           </svg>
         </div>
-        <div className="text-sm font-bold text-slate-700">{dragging ? 'Drop here' : `Upload ${label}`}</div>
+        <div className="text-sm font-bold font-heading text-slate-700">{dragging ? 'Drop here' : `Upload ${label}`}</div>
         <div className="text-xs text-slate-400">Tap to select · JPG PNG HEIC</div>
       </div>
     </div>
@@ -51,7 +51,7 @@ export function SalesUploadPanel({ state, onFileSelect, onReset }: {
           <circle cx="12" cy="12" r="10" stroke="#e2e8f0" strokeWidth="3" />
           <path d="M12 2 A10 10 0 0 1 22 12" stroke="#16a34a" strokeWidth="3" strokeLinecap="round" />
         </svg>
-        <div className="text-sm font-bold text-slate-700">Analyzing sales sheet…</div>
+        <div className="text-sm font-bold font-heading text-slate-700">Analyzing sales sheet…</div>
         <OcrLoadingBar color="#16a34a" />
       </div>
     );
@@ -92,7 +92,7 @@ export function PurchaseUploadPanel({ state, onFileSelect, onReset }: {
           <circle cx="12" cy="12" r="10" stroke="#e2e8f0" strokeWidth="3" />
           <path d="M12 2 A10 10 0 0 1 22 12" stroke="#dc2626" strokeWidth="3" strokeLinecap="round" />
         </svg>
-        <div className="text-sm font-bold text-slate-700">Analyzing purchase sheet…</div>
+        <div className="text-sm font-bold font-heading text-slate-700">Analyzing purchase sheet…</div>
         <OcrLoadingBar color="#dc2626" />
         <div className="text-xs text-red-500 font-bold">Data will be locked after extraction</div>
       </div>
@@ -140,7 +140,7 @@ export function SalesReviewPanel({ data, imageUrl, onSaved, onCancel }: { data: 
     <div className="flex h-full bg-white rounded-2xl shadow-sm overflow-hidden flex-col">
       <div className="flex items-center justify-between px-5 py-3 border-b bg-green-50 shrink-0">
         <div>
-          <div className="text-sm font-bold text-slate-800">Sales Sheet — Review & Confirm</div>
+          <div className="text-sm font-bold font-heading text-slate-800">Sales Sheet — Review & Confirm</div>
           <div className="text-xs text-slate-400">{items.length} line items · edit before saving</div>
         </div>
         <button onClick={onCancel} className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-white">✕ Cancel</button>
@@ -198,7 +198,7 @@ export function PurchaseReviewPanel({ data, imageUrl, onClose }: { data: Extract
     <div className="flex h-full bg-white rounded-2xl shadow-sm overflow-hidden flex-col">
       <div className="flex items-center justify-between px-5 py-3 border-b shrink-0" style={{ background: 'linear-gradient(to right,#fef2f2,#fff7ed)' }}>
         <div>
-          <div className="text-sm font-bold text-slate-800">Purchase Sheet — Locked (Read-Only)</div>
+          <div className="text-sm font-bold font-heading text-slate-800">Purchase Sheet — Locked (Read-Only)</div>
           <div className="text-xs text-red-600 font-bold">Purchase data is strictly immutable after upload</div>
         </div>
         <button onClick={onClose} className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-white">✕ Close</button>

@@ -92,7 +92,7 @@ export function OcrUploadCard({ kind }: { kind: Kind }) {
             </svg>
           </span>
           <div className="text-left">
-            <div className="text-[14px] font-bold text-slate-800">{title}</div>
+            <div className="text-[14px] font-bold font-heading text-slate-800">{title}</div>
             <div className="text-[11px] text-slate-500">
               {job.status === 'processing' ? t('ocr.extracting') : t('ocr.snapHint')}
             </div>

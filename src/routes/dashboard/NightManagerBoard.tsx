@@ -424,7 +424,7 @@ export function NightManagerBoard() {
 
         {/* Duty list */}
         <div className="col-span-12 lg:col-span-5 card2 p-6">
-          <div className="text-base font-bold font-heading mb-1 text-slate-900 font-serif serif text-lg">{t('nightBoard.onDutyCurrentShift')}</div>
+          <div className="text-base font-bold font-heading mb-1 text-slate-900">{t('nightBoard.onDutyCurrentShift')}</div>
           <div className="text-[11px] text-slate-500 mb-4">{t('nightBoard.dutyListSubtitle')}</div>
           
           <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">

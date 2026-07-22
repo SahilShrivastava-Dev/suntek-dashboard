@@ -631,7 +631,7 @@ export function Overview() {
                 onClick={() => navigate('/dashboard/customers')}
               >
                 <div className="text-sm font-medium truncate pr-2">{c.name}</div>
-                <div className="text-sm font-bold num shrink-0">₹ {c.mtdVal}</div>
+                <div className="text-sm font-bold font-heading num shrink-0">₹ {c.mtdVal}</div>
               </div>
             ))}
           </div>

@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { Camera, RotateCcw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { uploadCheckinPhoto } from '../../lib/cloudinary';
 import { validateGeofence } from '../../lib/algorithms/geofencing';
+import { CameraCapture } from '../../components/CameraCapture';
 
 /**
  * The technician's own night-duty view + check-in. Shows the duties assigned to
@@ -30,8 +32,26 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
   const [plants, setPlants] = useState<Record<string, Plant>>({});
   const [loading, setLoading] = useState(true);
   const [photo, setPhoto] = useState<Record<string, Blob>>({});
+  // Object-URL previews of the captured photos, keyed by duty id (revoked on replace).
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [cameraFor, setCameraFor] = useState<string | null>(null); // duty id the camera modal is open for
   const [busy, setBusy] = useState<string | null>(null);
   const [monthCursor, setMonthCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+
+  function setDutyPhoto(dutyId: string, blob: Blob) {
+    setPhoto(p => ({ ...p, [dutyId]: blob }));
+    setPreviews(prev => {
+      if (prev[dutyId]) URL.revokeObjectURL(prev[dutyId]);
+      return { ...prev, [dutyId]: URL.createObjectURL(blob) };
+    });
+  }
+  function clearDutyPhoto(dutyId: string) {
+    setPhoto(p => { const n = { ...p }; delete n[dutyId]; return n; });
+    setPreviews(prev => {
+      if (prev[dutyId]) URL.revokeObjectURL(prev[dutyId]);
+      const n = { ...prev }; delete n[dutyId]; return n;
+    });
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,7 +119,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
         photo_url: up.secure_url,
       }).then(() => {}, () => {});
       toast.success('Checked in — your unit head has been notified.');
-      setPhoto(p => { const n = { ...p }; delete n[duty.id]; return n; });
+      clearDutyPhoto(duty.id);
       await load();
     } catch (err) {
       toast.error(`Check-in failed: ${err instanceof Error ? err.message : 'GPS/photo error'}`);
@@ -180,11 +200,34 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
                 </div>
               ) : isToday ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer', padding: '6px 10px', border: '1px solid #BFDBFE', borderRadius: 8, background: photo[d.id] ? '#EFF6FF' : '#fff' }}>
-                    {photo[d.id] ? '✓ Photo ready' : '📷 Take photo'}
-                    <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
-                      onChange={e => { const f = e.target.files?.[0]; if (f) setPhoto(p => ({ ...p, [d.id]: f })); }} />
-                  </label>
+                  {photo[d.id] && previews[d.id] ? (
+                    <>
+                      {/* Preview of the photo they're about to check in with */}
+                      <button
+                        type="button"
+                        onClick={() => setCameraFor(d.id)}
+                        title="Tap to retake"
+                        style={{ padding: 0, border: '2px solid #86EFAC', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', background: 'none', lineHeight: 0 }}
+                      >
+                        <img src={previews[d.id]} alt="Check-in photo preview" style={{ width: 52, height: 52, objectFit: 'cover', display: 'block' }} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCameraFor(d.id)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: '#475569', cursor: 'pointer', padding: '6px 10px', border: '1px solid #E2E8F0', borderRadius: 8, background: '#fff', fontFamily: 'inherit' }}
+                      >
+                        <RotateCcw size={12} /> Retake
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setCameraFor(d.id)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer', padding: '6px 10px', border: '1px solid #BFDBFE', borderRadius: 8, background: '#fff', fontFamily: 'inherit' }}
+                    >
+                      <Camera size={13} /> Take photo
+                    </button>
+                  )}
                   <button onClick={() => checkIn(d)} disabled={busy === d.id || !photo[d.id]} className="btn-accent rounded-[10px]"
                     style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: busy === d.id || !photo[d.id] ? 'not-allowed' : 'pointer', opacity: busy === d.id || !photo[d.id] ? 0.5 : 1 }}>
                     {busy === d.id ? 'Checking in…' : 'Check in'}
@@ -197,6 +240,15 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
           );
         })}
       </div>
+
+      {/* In-app camera — live viewfinder w/ front/back flip; falls back to the
+          native capture input where getUserMedia is blocked. */}
+      <CameraCapture
+        open={!!cameraFor}
+        onClose={() => setCameraFor(null)}
+        onCapture={(blob) => { if (cameraFor) setDutyPhoto(cameraFor, blob); }}
+        title="Check-in photo"
+      />
     </div>
   );
 }

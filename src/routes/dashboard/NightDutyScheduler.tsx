@@ -1,15 +1,20 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { Plus, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { insertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
+import { StatCard, SectionCard, ButtonV2 } from '../../components/v2';
 
 /**
  * Night-duty scheduler — shown to users with the `allocate_night_duty` capability
  * (e.g. a unit head). They pick their subordinates (technicians/people in their
  * plant, tier below them), pick dates on a calendar (or a repeat pattern for
  * rotation), and schedule night duty. Each date × person = one night_duty row.
+ *
+ * v2: the scheduling form is an INLINE right-side wizard panel (4 numbered
+ * steps — date → employees → repeat → confirm) instead of a modal. The final
+ * step calls the same night_duty upsert as before.
  */
 
 type Acct = { id: string; name: string; role_id: string | null; plant_id: string | null; is_active: boolean };
@@ -28,6 +33,13 @@ const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> =
   completed:  { label: 'Completed',  bg: '#F1F5F9', color: '#64748B' },
   missed:     { label: 'Missed',     bg: '#FEF2F2', color: '#DC2626' },
 };
+
+const WIZARD_STEPS = [
+  { n: 1, title: 'Choose Date',               sub: 'Select the dates for night duty' },
+  { n: 2, title: 'Select Employees',          sub: 'Choose available employees' },
+  { n: 3, title: 'Repeat Schedule (Optional)', sub: 'Set recurrence and end date' },
+  { n: 4, title: 'Review & Confirm',          sub: 'Review and assign duty' },
+];
 
 export function NightDutyScheduler() {
   const toast = useToast();
@@ -49,8 +61,9 @@ export function NightDutyScheduler() {
   const [saving, setSaving] = useState(false);
   const [techSearch, setTechSearch] = useState('');
   const [expandedTech, setExpandedTech] = useState<Set<string>>(new Set());
-  // The scheduling form lives in a modal so the page shows only the report by default.
+  // The scheduling form lives in an inline right-side wizard panel.
   const [schedulerOpen, setSchedulerOpen] = useState(false);
+  const [step, setStep] = useState(1);
 
   const roleTier = useMemo(() => {
     const m: Record<string, string> = {};
@@ -165,9 +178,13 @@ export function NightDutyScheduler() {
       if (error) { toast.error(`Schedule failed: ${error.message}`); return; }
       toast.success(`Scheduled ${rows.length} duty slot${rows.length === 1 ? '' : 's'}`);
       setSelectedDates([]); setSelectedTechIds([]); setRepeatDays([]); setRepeatUntil('');
-      setSchedulerOpen(false); // close the modal on success — back to the report
+      setSchedulerOpen(false); setStep(1); // close the wizard on success — back to the report
       await load();
     } finally { setSaving(false); }
+  }
+
+  function closeWizard() {
+    setSchedulerOpen(false); setStep(1);
   }
 
   // Month grid
@@ -201,39 +218,144 @@ export function NightDutyScheduler() {
 
   const today = todayIso();
 
-  return (
-    <div className="card p-5 mb-5">
-      {/* Header + top-right action — the scheduling form opens in a modal */}
-      <div className="flex items-start justify-between gap-4 mb-4">
-        <div>
-          <div className="text-base font-bold mb-1">🌙 Night duty</div>
-          <div className="text-xs text-slate-500">Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights.</div>
-        </div>
-        <button
-          onClick={() => setSchedulerOpen(true)}
-          className="btn-accent pill"
-          style={{ padding: '9px 16px', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', cursor: 'pointer', flexShrink: 0 }}
-        >
-          + Schedule Duty
-        </button>
-      </div>
+  // ── Wizard step bodies ─────────────────────────────────────────────────────
 
-      {/* Report — always visible, even when empty */}
-      <div>
-        <div className="text-sm font-bold mb-2">Night duty report</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-          {[
-            { label: 'On duty tonight', value: report.tonight, color: '#2563EB', bg: '#EFF6FF' },
-            { label: 'Scheduled ahead', value: report.scheduled, color: '#64748B', bg: '#F8FAFC' },
-            { label: 'Checked in', value: report.checkedIn, color: '#16A34A', bg: '#DCFCE7' },
-            { label: 'Missed', value: report.missed, color: '#DC2626', bg: '#FEF2F2' },
-          ].map(s => (
-            <div key={s.label} style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: '12px 14px', background: s.bg }}>
-              <div style={{ fontSize: 26, fontWeight: 800, color: s.color, lineHeight: 1 }}>{s.value}</div>
-              <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>{s.label}</div>
-            </div>
-          ))}
+  const calendar = (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <button onClick={() => setMonthCursor(c => new Date(c.getFullYear(), c.getMonth() - 1, 1))} style={navBtn}>‹</button>
+        <div className="text-sm font-semibold">{monthCursor.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</div>
+        <button onClick={() => setMonthCursor(c => new Date(c.getFullYear(), c.getMonth() + 1, 1))} style={navBtn}>›</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
+        {WEEKDAYS.map(w => <div key={w} style={{ textAlign: 'center', fontSize: 10.5, color: '#94A3B8', fontWeight: 700, padding: '2px 0' }}>{w.toUpperCase()}</div>)}
+        {monthGrid.map((d, i) => {
+          if (!d) return <div key={i} />;
+          const past = d < today;
+          const on = selectedDates.includes(d);
+          const has = (dutiesByDate[d]?.length ?? 0) > 0;
+          return (
+            <button
+              key={i}
+              disabled={past}
+              onClick={() => toggleDate(d)}
+              style={{
+                height: 36, borderRadius: 8, border: '1px solid ' + (on ? '#F47651' : 'transparent'),
+                background: on ? '#F47651' : (d === today ? '#FFF7ED' : 'transparent'),
+                color: on ? '#fff' : (past ? '#CBD5E1' : '#334155'),
+                cursor: past ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, position: 'relative',
+              }}
+            >
+              {Number(d.slice(-2))}
+              {has && <span style={{ position: 'absolute', bottom: 3, left: '50%', transform: 'translateX(-50%)', width: 4, height: 4, borderRadius: '50%', background: on ? '#fff' : '#16A34A' }} />}
+            </button>
+          );
+        })}
+      </div>
+      {selectedDates.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <div className="text-[11px] text-slate-500 font-semibold uppercase tracking-wide mb-1">Selected {selectedDates.length === 1 ? 'Date' : `Dates (${selectedDates.length})`}</div>
+          <div className="text-[13px] font-semibold text-[#C5421F]">
+            {[...selectedDates].sort().slice(0, 3).map(d => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })).join(' · ')}
+            {selectedDates.length > 3 && ` +${selectedDates.length - 3} more`}
+          </div>
         </div>
+      )}
+    </div>
+  );
+
+  const peoplePicker = (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-[11.5px] font-bold text-slate-600">Who's on duty ({selectedTechIds.length} selected)</div>
+        {selectedTechIds.length > 0 && <button onClick={() => setSelectedTechIds([])} style={{ fontSize: 10.5, color: '#64748B', border: 'none', background: 'none', cursor: 'pointer' }}>clear</button>}
+      </div>
+      <input
+        type="text" value={techSearch} onChange={e => setTechSearch(e.target.value)}
+        placeholder="Search by name, role or level…"
+        style={{ width: '100%', padding: '8px 11px', border: '1px solid #E2E8F0', borderRadius: 10, fontSize: 12.5, outline: 'none', fontFamily: 'inherit', marginBottom: 6, boxSizing: 'border-box' }}
+      />
+      <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #E2E8F0', borderRadius: 10, padding: 4 }}>
+        {loading && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>Loading…</div>}
+        {!loading && subordinates.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>No team members beneath you in your plant.</div>}
+        {!loading && subordinates.length > 0 && filteredSubs.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>No match for "{techSearch}".</div>}
+        {filteredSubs.map(s => {
+          const on = selectedTechIds.includes(s.id);
+          const lvl = s.role_id ? roleTier[s.role_id] : '';
+          return (
+            <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#334155', cursor: 'pointer', padding: '6px 8px', borderRadius: 8, background: on ? '#FFF7ED' : 'transparent' }}>
+              <input type="checkbox" checked={on} onChange={() => toggleTech(s.id)} />
+              <span style={{ flex: 1, fontWeight: 600 }}>{s.name}</span>
+              <span style={{ fontSize: 10.5, color: '#64748B' }}>{s.role_id ? roleLabel[s.role_id] : ''}</span>
+              {lvl && <span className="badge" style={{ fontSize: 9.5, background: '#F1F5F9', color: '#64748B', padding: '1px 5px' }}>{lvl}</span>}
+              <span style={{ fontSize: 10, color: '#CBD5E1' }}>{s.plant_id ? plantName[s.plant_id] : ''}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const repeatHelper = (
+    <div>
+      <div className="text-[11.5px] font-bold text-slate-600 mb-1.5">Repeat (for rotation) — optional</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+        {WEEKDAYS.map((w, idx) => {
+          const on = repeatDays.includes(idx);
+          return (
+            <button key={w} onClick={() => setRepeatDays(s => on ? s.filter(x => x !== idx) : [...s, idx])}
+              style={{ padding: '5px 9px', borderRadius: 8, border: '1px solid ' + (on ? '#F47651' : '#E2E8F0'), background: on ? '#F47651' : '#fff', color: on ? '#fff' : '#475569', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>{w}</button>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11.5, color: '#64748B' }}>until</span>
+        <input type="date" value={repeatUntil} min={today} onChange={e => setRepeatUntil(e.target.value)}
+          style={{ padding: '7px 10px', border: '1px solid #E2E8F0', borderRadius: 10, fontSize: 12.5, fontFamily: 'inherit' }} />
+        <ButtonV2 size="sm" variant="outline" onClick={applyRepeat}>Add dates</ButtonV2>
+      </div>
+      <div className="text-[11px] text-slate-400 mt-2">Adds every matching weekday between today and the end date to your selected dates ({selectedDates.length} so far).</div>
+    </div>
+  );
+
+  const review = (
+    <div>
+      <div className="text-[11.5px] font-bold text-slate-600 mb-2">Review</div>
+      <div className="rounded-[10px] border border-slate-200 divide-y divide-slate-100">
+        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Employees</span><span className="font-semibold">{selectedTechIds.length}</span></div>
+        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Nights</span><span className="font-semibold">{selectedDates.length}</span></div>
+        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Duty slots</span><span className="font-semibold">{selectedTechIds.length * selectedDates.length}</span></div>
+      </div>
+      {selectedTechIds.length > 0 && (
+        <div className="text-[12px] text-slate-500 mt-2 leading-relaxed">
+          {selectedTechIds.map(id => acctName[id] || 'Unknown').join(', ')}
+        </div>
+      )}
+      {(selectedTechIds.length === 0 || selectedDates.length === 0) && (
+        <div className="text-[12px] text-amber-600 mt-2">Pick at least one date (step 1) and one employee (step 2) before confirming.</div>
+      )}
+    </div>
+  );
+
+  const stepBody = step === 1 ? calendar : step === 2 ? peoplePicker : step === 3 ? repeatHelper : review;
+
+  return (
+    <div className={schedulerOpen ? 'grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-4 items-start mb-5' : 'mb-5'}>
+    <SectionCard
+      title="Night Duty Schedule"
+      subtitle="Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights."
+      actions={!schedulerOpen && (
+        <ButtonV2 variant="primary" icon={<Plus />} onClick={() => setSchedulerOpen(true)}>
+          Assign Night Duty
+        </ButtonV2>
+      )}
+    >
+      {/* Report — always visible, even when empty */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="On Duty Tonight" value={String(report.tonight).padStart(2, '0')} caption="Employees" valueTone="default" />
+        <StatCard label="Upcoming Duties" value={String(report.scheduled).padStart(2, '0')} caption="Scheduled ahead" />
+        <StatCard label="Checked In" value={String(report.checkedIn).padStart(2, '0')} caption="Today" valueTone={report.checkedIn > 0 ? 'green' : 'default'} />
+        <StatCard label="Missed Check-ins" value={String(report.missed).padStart(2, '0')} caption="Employees" valueTone={report.missed > 0 ? 'orange' : 'default'} />
       </div>
 
       {/* Upcoming assignments — one collapsible row per person. */}
@@ -275,127 +397,60 @@ export function NightDutyScheduler() {
           })}
         </div>
       </div>
+    </SectionCard>
 
-      {/* ── Scheduling modal ─────────────────────────────────────────────── */}
-      {schedulerOpen && (
-      <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-        style={{ animation: 'fadein 200ms ease' }}
-        onClick={() => setSchedulerOpen(false)}
-      >
-      <div
-        className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-100 max-h-[88vh] overflow-y-auto"
-        onClick={e => e.stopPropagation()}
-      >
-      <div className="p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <div className="text-base font-bold mb-1">🌙 Schedule night duty</div>
-            <div className="text-xs text-slate-500">Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights.</div>
-          </div>
-          <button
-            onClick={() => setSchedulerOpen(false)}
-            aria-label="Close"
-            style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer', fontSize: 16, color: '#64748B', flexShrink: 0, lineHeight: 1 }}
-          >
-            ✕
-          </button>
+    {/* ── Inline wizard panel: Assign Night Duty ─────────────────────────── */}
+    {schedulerOpen && (
+      <div className="card2 p-5 lg:sticky lg:top-4">
+        <div className="flex items-start justify-between mb-1">
+          <div className="font-heading font-semibold text-[17px]">Assign Night Duty</div>
+          <button onClick={closeWizard} aria-label="Close" className="text-slate-400 hover:text-slate-600 p-1 -mr-1"><X size={16} /></button>
         </div>
+        <div className="text-[12.5px] text-slate-500 mb-4">Schedule night duty for employees.</div>
 
-      <div className="grid grid-cols-12 gap-5">
-        {/* Calendar */}
-        <div className="col-span-12 lg:col-span-7">
-          <div className="flex items-center justify-between mb-2">
-            <button onClick={() => setMonthCursor(c => new Date(c.getFullYear(), c.getMonth() - 1, 1))} style={navBtn}>‹</button>
-            <div className="text-sm font-semibold">{monthCursor.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</div>
-            <button onClick={() => setMonthCursor(c => new Date(c.getFullYear(), c.getMonth() + 1, 1))} style={navBtn}>›</button>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
-            {WEEKDAYS.map(w => <div key={w} style={{ textAlign: 'center', fontSize: 10.5, color: '#94A3B8', fontWeight: 700, padding: '2px 0' }}>{w}</div>)}
-            {monthGrid.map((d, i) => {
-              if (!d) return <div key={i} />;
-              const past = d < today;
-              const on = selectedDates.includes(d);
-              const has = (dutiesByDate[d]?.length ?? 0) > 0;
-              return (
-                <button
-                  key={i}
-                  disabled={past}
-                  onClick={() => toggleDate(d)}
-                  style={{
-                    height: 38, borderRadius: 8, border: '1px solid ' + (on ? '#2563EB' : '#E2E8F0'),
-                    background: on ? '#2563EB' : (d === today ? '#EFF6FF' : '#fff'),
-                    color: on ? '#fff' : (past ? '#CBD5E1' : '#334155'),
-                    cursor: past ? 'not-allowed' : 'pointer', fontSize: 12.5, fontWeight: 600, position: 'relative',
-                  }}
+        {/* Step list */}
+        <div className="flex flex-col gap-3 mb-4">
+          {WIZARD_STEPS.map(s => {
+            const active = s.n === step;
+            const done = s.n < step;
+            return (
+              <button key={s.n} onClick={() => setStep(s.n)} className="flex items-start gap-3 text-left" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
+                <span
+                  className="w-6 h-6 rounded-full inline-flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5"
+                  style={active ? { background: '#F47651', color: '#fff' }
+                    : done ? { background: '#FFEDE5', color: '#C5421F' }
+                    : { background: '#F1F5F9', color: '#94A3B8' }}
                 >
-                  {Number(d.slice(-2))}
-                  {has && <span style={{ position: 'absolute', bottom: 3, left: '50%', transform: 'translateX(-50%)', width: 4, height: 4, borderRadius: '50%', background: on ? '#fff' : '#16A34A' }} />}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Repeat helper */}
-          <div style={{ marginTop: 12, padding: 12, background: '#F8FAFC', borderRadius: 10, border: '1px solid #E2E8F0' }}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', marginBottom: 6 }}>Repeat (for rotation)</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-              {WEEKDAYS.map((w, idx) => {
-                const on = repeatDays.includes(idx);
-                return (
-                  <button key={w} onClick={() => setRepeatDays(s => on ? s.filter(x => x !== idx) : [...s, idx])}
-                    style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid ' + (on ? '#2563EB' : '#E2E8F0'), background: on ? '#2563EB' : '#fff', color: on ? '#fff' : '#475569', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>{w}</button>
-                );
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 11.5, color: '#64748B' }}>until</span>
-              <input type="date" value={repeatUntil} min={today} onChange={e => setRepeatUntil(e.target.value)}
-                style={{ padding: '6px 10px', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit' }} />
-              <button onClick={applyRepeat} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #E2E8F0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#475569', cursor: 'pointer' }}>Add dates</button>
-            </div>
-          </div>
+                  {s.n}
+                </span>
+                <span>
+                  <span className={`block text-[13px] font-semibold ${active ? 'text-slate-900' : 'text-slate-500'}`}>{s.title}</span>
+                  <span className="block text-[11px] text-slate-400">{s.sub}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* People + schedule */}
-        <div className="col-span-12 lg:col-span-5">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: '#475569' }}>Who's on duty ({selectedTechIds.length} selected)</div>
-            {selectedTechIds.length > 0 && <button onClick={() => setSelectedTechIds([])} style={{ fontSize: 10.5, color: '#64748B', border: 'none', background: 'none', cursor: 'pointer' }}>clear</button>}
-          </div>
-          <input
-            type="text" value={techSearch} onChange={e => setTechSearch(e.target.value)}
-            placeholder="Search by name, role or level…"
-            style={{ width: '100%', padding: '7px 10px', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 12.5, outline: 'none', fontFamily: 'inherit', marginBottom: 6 }}
-          />
-          <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #E2E8F0', borderRadius: 10, padding: 4 }}>
-            {loading && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>Loading…</div>}
-            {!loading && subordinates.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>No team members beneath you in your plant.</div>}
-            {!loading && subordinates.length > 0 && filteredSubs.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>No match for "{techSearch}".</div>}
-            {filteredSubs.map(s => {
-              const on = selectedTechIds.includes(s.id);
-              const lvl = s.role_id ? roleTier[s.role_id] : '';
-              return (
-                <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#334155', cursor: 'pointer', padding: '6px 8px', borderRadius: 8, background: on ? '#EFF6FF' : 'transparent' }}>
-                  <input type="checkbox" checked={on} onChange={() => toggleTech(s.id)} />
-                  <span style={{ flex: 1, fontWeight: 600 }}>{s.name}</span>
-                  <span style={{ fontSize: 10.5, color: '#64748B' }}>{s.role_id ? roleLabel[s.role_id] : ''}</span>
-                  {lvl && <span className="badge" style={{ fontSize: 9.5, background: '#F1F5F9', color: '#64748B', padding: '1px 5px' }}>{lvl}</span>}
-                  <span style={{ fontSize: 10, color: '#CBD5E1' }}>{s.plant_id ? plantName[s.plant_id] : ''}</span>
-                </label>
-              );
-            })}
-          </div>
-          <button onClick={schedule} disabled={saving} className="btn-accent pill" style={{ width: '100%', marginTop: 12, padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1 }}>
-            {saving ? 'Scheduling…' : `Schedule ${selectedTechIds.length}× ${selectedDates.length} night${selectedDates.length === 1 ? '' : 's'}`}
-          </button>
-          <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4, textAlign: 'center' }}>{selectedTechIds.length} people × {selectedDates.length} dates</div>
+        <div className="border-t border-slate-100 pt-4">
+          {stepBody}
+        </div>
+
+        {/* Footer buttons */}
+        <div className="flex items-center justify-between gap-2 mt-5">
+          <ButtonV2 variant="outline" onClick={step === 1 ? closeWizard : () => setStep(s => s - 1)}>
+            {step === 1 ? 'Cancel' : 'Back'}
+          </ButtonV2>
+          {step < 4 ? (
+            <ButtonV2 variant="primary" onClick={() => setStep(s => s + 1)}>Next</ButtonV2>
+          ) : (
+            <ButtonV2 variant="primary" onClick={schedule} disabled={saving || !selectedTechIds.length || !selectedDates.length}>
+              {saving ? 'Scheduling…' : `Confirm · ${selectedTechIds.length}× ${selectedDates.length} night${selectedDates.length === 1 ? '' : 's'}`}
+            </ButtonV2>
+          )}
         </div>
       </div>
-      </div>
-      </div>
-      </div>
-      )}
+    )}
     </div>
   );
 }

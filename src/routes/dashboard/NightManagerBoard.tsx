@@ -6,6 +6,7 @@ import { useToast } from '../../components/ui/toast';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { NightDutyScheduler } from './NightDutyScheduler';
 import { MyNightDuty } from './MyNightDuty';
+import { StatCard } from '../../components/v2';
 import type { Database } from '../../lib/database.types';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -299,34 +300,26 @@ export function NightManagerBoard() {
       <MyNightDuty />
 
       {/* KPIs */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.onDutyNow')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.filter(d => d.status === 'green').length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('nightBoard.acrossFactories', { count: new Set(liveDuty.map(d => d.plant)).size || 0 })}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.geoTaggedCheckins')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('nightBoard.today')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.outOfZone')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{liveDuty.filter(d => d.status === 'red').length}</div>
-          <div className="text-[11px] text-amber-600 mt-1">{t('nightBoard.flagged')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.photoProofPct')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">
-            {liveDuty.length > 0 ? Math.round((liveDuty.filter(d => d.photo_url).length / liveDuty.length) * 100) : 0}%
-          </div>
-        </div>
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3"
+          label={t('nightBoard.onDutyNow')} value={liveDuty.filter(d => d.status === 'green').length}
+          caption={t('nightBoard.acrossFactories', { count: new Set(liveDuty.map(d => d.plant)).size || 0 })} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3"
+          label={t('nightBoard.geoTaggedCheckins')} value={liveDuty.length}
+          caption={t('nightBoard.today')} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3"
+          label={t('nightBoard.outOfZone')} value={liveDuty.filter(d => d.status === 'red').length}
+          valueTone={liveDuty.filter(d => d.status === 'red').length > 0 ? 'amber' : 'default'}
+          caption={<span className="text-amber-600">{t('nightBoard.flagged')}</span>} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3"
+          label={t('nightBoard.photoProofPct')}
+          value={`${liveDuty.length > 0 ? Math.round((liveDuty.filter(d => d.photo_url).length / liveDuty.length) * 100) : 0}%`} />
       </div>
 
       {/* Map + duty list */}
       <div className="grid grid-cols-12 gap-5">
         {/* Map - Leaflet container */}
-        <div className="col-span-12 lg:col-span-7 card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
+        <div className="col-span-12 lg:col-span-7 card2 p-6">
           <div className="flex items-center justify-between mb-2">
             <div>
               <div className="text-base font-bold text-slate-900">{t('nightBoard.liveCheckinMap')}</div>
@@ -439,7 +432,7 @@ export function NightManagerBoard() {
         </div>
 
         {/* Duty list */}
-        <div className="col-span-12 lg:col-span-5 card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
+        <div className="col-span-12 lg:col-span-5 card2 p-6">
           <div className="text-base font-bold mb-1 text-slate-900 font-serif serif text-lg">{t('nightBoard.onDutyCurrentShift')}</div>
           <div className="text-[11px] text-slate-500 mb-4">{t('nightBoard.dutyListSubtitle')}</div>
           

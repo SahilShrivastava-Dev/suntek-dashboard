@@ -63,13 +63,13 @@ function BlacklistedOverlay({ entry, onBack }: { entry: BlacklistEntry; onBack: 
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': 'Operations dashboard',
-  '/dashboard/todo': 'To-Do · your work queue',
+  '/dashboard': 'Operations Dashboard',
+  '/dashboard/todo': 'To-Do',
   '/dashboard/sales': 'Sales · contracts & dispatch',
   '/dashboard/stock': 'CP and Stock · tanks, drums, items',
   '/dashboard/batches': 'Batch Sheet · production',
   '/dashboard/customers': 'Customer History',
-  '/dashboard/night-manager': 'Night Manager · GPS + photos',
+  '/dashboard/night-manager': 'Night Manager',
   '/dashboard/oil-ratio': 'Oil Ratio Table · the brain',
   '/dashboard/audit': 'Audit log · security logs',
   '/dashboard/anomalies': 'Anomaly Detection · live risk radar',
@@ -115,6 +115,8 @@ const FACTORY_SUBPAGES: Record<string, { title: string; breadcrumb: string; subt
 
 /** v2 subtitles for non-purchase pages (rendered under the TopBar title). */
 const PAGE_SUBTITLES: Record<string, string> = {
+  '/dashboard': "Today's work, business KPIs and approvals across all plants.",
+  '/dashboard/todo': 'Everything pending your action — updates live as work moves on.',
   '/dashboard/night-manager': 'Manage night duty schedules and employee check-ins.',
 };
 

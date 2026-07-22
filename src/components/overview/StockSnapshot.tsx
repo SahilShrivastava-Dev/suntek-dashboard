@@ -20,7 +20,7 @@ export function StockSnapshot({ densities, locations, matrix, tanks, onOpenStock
   return (
     <div className="grid grid-cols-12 gap-5 mb-5">
       {/* CPM Matrix — green-soft */}
-      <div className="col-span-12 lg:col-span-7 card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
+      <div className="col-span-12 lg:col-span-7 card2 p-6" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'CPM Stock Matrix', what: 'Drums of CP (Chemical Product) on hand at each location, broken down by density grade. Cell shading intensity shows relative volume — darker = more stock. Click "Open Stock" for full inventory view.', source: 'Supabase', note: 'Live from the cpm_drum_stock table (migration 0002), pivoted into the matrix.' }} />
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
@@ -69,7 +69,7 @@ export function StockSnapshot({ densities, locations, matrix, tanks, onOpenStock
       </div>
 
       {/* Tank levels — each card navigates to Stock page */}
-      <div className="col-span-12 lg:col-span-5 card p-6" style={{ position: 'relative' }}>
+      <div className="col-span-12 lg:col-span-5 card2 p-6" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Tank Levels', what: 'Current fill level of each raw material / output tank at port and factory locations. Red = low alert, orange = 30-70%, green = above 70%. Click any tank to open the full stock view.', source: 'Supabase', note: 'Live from the tanks table (migration 0002).' }} />
         <div className="text-base font-bold">Tank levels · port + factory</div>
         <div className="text-xs text-slate-500 mb-4">Click any tank to open full stock view</div>

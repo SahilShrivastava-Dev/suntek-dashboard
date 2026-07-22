@@ -123,10 +123,10 @@ export function Todo() {
   return (
     <div>
       {/* Intro + global controls */}
-      <div className="card p-5 mb-5">
+      <div className="card2 p-5 mb-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
-            <div className="text-base font-bold">{t('todo.heading')}</div>
+            <div className="text-base font-bold font-heading">{t('todo.heading')}</div>
             <div className="text-xs text-slate-500 mt-0.5">
               {t('todo.subheading', { name: activeProfile.name || activeProfile.roleLabel })}
             </div>
@@ -156,7 +156,7 @@ export function Todo() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={t('todo.searchPlaceholder')}
-                className="w-full text-[13px] rounded-full border border-slate-200 bg-white focus:outline-none focus:border-slate-400"
+                className="w-full text-[13px] rounded-[10px] border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
                 style={{ padding: '9px 14px 9px 34px' }}
               />
               {query && (
@@ -173,7 +173,7 @@ export function Todo() {
               value={sort}
               onChange={(e) => setSort(e.target.value as SortMode)}
               title={t('todo.sortAll')}
-              className="text-[13px] rounded-full border border-slate-200 bg-white focus:outline-none focus:border-slate-400"
+              className="text-[13px] rounded-[10px] border border-slate-200 bg-white focus:outline-none focus:border-slate-300"
               style={{ padding: '9px 12px' }}
             >
               {sortOptions}
@@ -187,13 +187,13 @@ export function Todo() {
 
       {/* Empty states */}
       {totalCount === 0 ? (
-        <div className="card p-10 text-center">
+        <div className="card2 p-10 text-center">
           <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
           <div className="text-[15px] font-semibold text-slate-700">{t('todo.emptyTitle')}</div>
           <div className="text-xs text-slate-400 mt-1">{t('todo.emptyBody')}</div>
         </div>
       ) : view.length === 0 ? (
-        <div className="card p-10 text-center">
+        <div className="card2 p-10 text-center">
           <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
           <div className="text-[14px] font-semibold text-slate-600">{t('todo.noMatch', { q: query })}</div>
         </div>
@@ -207,11 +207,11 @@ export function Todo() {
             const start = page * PAGE_SIZE;
             const pageItems = s.items.slice(start, start + PAGE_SIZE);
             return (
-              <div key={s.key} className="card p-0 overflow-hidden">
+              <div key={s.key} className="card2 overflow-hidden">
                 {/* Section header — title, per-section sort, count */}
                 <div className="flex items-center gap-2.5 px-5 py-3" style={{ borderBottom: '1px solid #F1F5F9' }}>
                   <span style={{ fontSize: 18 }}>{s.icon}</span>
-                  <div className="font-bold text-[14px] text-slate-800">{t(s.titleKey)}</div>
+                  <div className="font-bold text-[14px] text-slate-800 font-heading">{t(s.titleKey)}</div>
                   <div className="ml-auto flex items-center gap-2">
                     <select
                       value={sectionSort[s.key] ?? ''}

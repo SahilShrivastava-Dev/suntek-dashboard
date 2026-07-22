@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Download, Building2, Activity } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../components/ui/toast';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
-import { StatCard, SectionCard, ButtonV2 } from '../../components/v2';
+import { StatCard, SectionCard, ButtonV2, FilterBar, FilterSelect, StatusPill, TablePaginationV2 } from '../../components/v2';
+import { usePagination } from '../../components/ui/usePagination';
+import { exportToCsv } from '../../lib/utils/exportCsv';
 
 /**
  * Night-duty scheduler — shown to users with the `allocate_night_duty` capability
@@ -60,10 +62,17 @@ export function NightDutyScheduler() {
   const [repeatUntil, setRepeatUntil] = useState('');
   const [saving, setSaving] = useState(false);
   const [techSearch, setTechSearch] = useState('');
-  const [expandedTech, setExpandedTech] = useState<Set<string>>(new Set());
   // The scheduling form lives in an inline right-side wizard panel.
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [step, setStep] = useState(1);
+
+  // Schedule-table filters (per mockup: search · plant · date range · status · reset)
+  const [schedQ, setSchedQ] = useState('');
+  const [schedPlant, setSchedPlant] = useState('all');
+  const [schedStatus, setSchedStatus] = useState('all');
+  const [schedFrom, setSchedFrom] = useState('');
+  const [schedTo, setSchedTo] = useState('');
+  const resetSchedFilters = () => { setSchedQ(''); setSchedPlant('all'); setSchedStatus('all'); setSchedFrom(''); setSchedTo(''); };
 
   const roleTier = useMemo(() => {
     const m: Record<string, string> = {};
@@ -206,17 +215,52 @@ export function NightDutyScheduler() {
     return m;
   }, [duties]);
 
-  // Grouped by PERSON for the assignments list — one collapsible row each, so it
-  // stays compact with many technicians.
-  const dutiesByTech = useMemo(() => {
-    const m: Record<string, Duty[]> = {};
-    for (const d of duties) (m[d.technician_id] ??= []).push(d);
-    for (const k in m) m[k].sort((a, b) => a.duty_date.localeCompare(b.duty_date));
-    return m;
-  }, [duties]);
-  const toggleTechRow = (id: string) => setExpandedTech(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-
   const today = todayIso();
+  const SHIFT_LABEL = '09:00 PM – 07:00 AM';
+
+  // Flat schedule rows for the mockup table: employee · role · plant · duty date ·
+  // shift · status · check-in. Filters are client-side over the loaded duties.
+  const acctById = useMemo(() => Object.fromEntries(accts.map(a => [a.id, a])), [accts]);
+  const scheduleRows = useMemo(() => {
+    const q = schedQ.trim().toLowerCase();
+    return duties.map(d => {
+      const acct = acctById[d.technician_id];
+      const role = acct?.role_id ? (roleLabel[acct.role_id] || '') : '';
+      const plant = (d.plant_id ? plantName[d.plant_id] : acct?.plant_id ? plantName[acct.plant_id] : '') || '';
+      return { d, name: acctName[d.technician_id] || 'Unknown', role, plant };
+    }).filter(r =>
+      (!q || r.name.toLowerCase().includes(q) || r.role.toLowerCase().includes(q) || r.plant.toLowerCase().includes(q))
+      && (schedPlant === 'all' || r.plant === schedPlant)
+      && (schedStatus === 'all' || r.d.status === schedStatus)
+      && (!schedFrom || r.d.duty_date >= schedFrom)
+      && (!schedTo || r.d.duty_date <= schedTo));
+  }, [duties, acctById, acctName, roleLabel, plantName, schedQ, schedPlant, schedStatus, schedFrom, schedTo]);
+  const schedPg = usePagination(scheduleRows, { resetKey: `${schedQ}|${schedPlant}|${schedStatus}|${schedFrom}|${schedTo}|${duties.length}` });
+
+  const PILL_TONE: Record<string, 'blue' | 'green' | 'slate' | 'red'> = {
+    scheduled: 'blue', checked_in: 'green', completed: 'slate', missed: 'red',
+  };
+
+  /** Un-schedule a future duty (scheduled only — check-ins are audit history). */
+  async function removeDuty(d: Duty) {
+    if (!window.confirm(`Remove this scheduled duty (${new Date(d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })})?`)) return;
+    const { error } = await supabase.from('night_duty').delete().eq('id', d.id);
+    if (error) { toast.error(`Remove failed: ${error.message}`); return; }
+    toast.success('Duty removed');
+    await load();
+  }
+
+  function exportSchedule() {
+    exportToCsv(`night-duty-schedule-${today}`, [
+      { header: 'Employee', key: 'name' }, { header: 'Role', key: 'role' }, { header: 'Plant', key: 'plant' },
+      { header: 'Duty Date', key: 'date' }, { header: 'Shift Time', key: 'shift' }, { header: 'Status', key: 'status' },
+      { header: 'Check-in', key: 'checkin' },
+    ], scheduleRows.map(r => ({
+      name: r.name, role: r.role, plant: r.plant, date: r.d.duty_date, shift: SHIFT_LABEL,
+      status: STATUS_CFG[r.d.status]?.label ?? r.d.status,
+      checkin: r.d.checked_in_at ? new Date(r.d.checked_in_at).toLocaleString('en-IN') : '',
+    })));
+  }
 
   // ── Wizard step bodies ─────────────────────────────────────────────────────
 
@@ -341,63 +385,112 @@ export function NightDutyScheduler() {
 
   return (
     <div className={schedulerOpen ? 'grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-4 items-start mb-5' : 'mb-5'}>
-    <SectionCard
-      title="Night Duty Schedule"
-      subtitle="Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights."
-      actions={!schedulerOpen && (
-        <ButtonV2 variant="primary" icon={<Plus />} onClick={() => setSchedulerOpen(true)}>
-          Assign Night Duty
-        </ButtonV2>
-      )}
-    >
-      {/* Report — always visible, even when empty */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="On Duty Tonight" value={String(report.tonight).padStart(2, '0')} caption="Employees" valueTone="default" />
-        <StatCard label="Upcoming Duties" value={String(report.scheduled).padStart(2, '0')} caption="Scheduled ahead" />
-        <StatCard label="Checked In" value={String(report.checkedIn).padStart(2, '0')} caption="Today" valueTone={report.checkedIn > 0 ? 'green' : 'default'} />
-        <StatCard label="Missed Check-ins" value={String(report.missed).padStart(2, '0')} caption="Employees" valueTone={report.missed > 0 ? 'orange' : 'default'} />
+    <div>
+      {/* KPI cards — "View →" links drive the schedule-table filters */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <StatCard label="On Duty Tonight" value={String(report.tonight).padStart(2, '0')} caption="Employees"
+          viewLabel="View list" onView={() => { resetSchedFilters(); setSchedFrom(today); setSchedTo(today); }} />
+        <StatCard label="Upcoming Duties" value={String(report.scheduled).padStart(2, '0')} caption="Scheduled ahead"
+          viewLabel="View calendar" onView={() => { resetSchedFilters(); setSchedStatus('scheduled'); }} />
+        <StatCard label="Checked In" value={String(report.checkedIn).padStart(2, '0')} caption="Today"
+          valueTone={report.checkedIn > 0 ? 'green' : 'default'}
+          viewLabel="View check-ins" onView={() => { resetSchedFilters(); setSchedStatus('checked_in'); }} />
+        <StatCard label="Missed Check-ins" value={String(report.missed).padStart(2, '0')} caption="Employees"
+          valueTone={report.missed > 0 ? 'orange' : 'default'}
+          viewLabel="View details" onView={() => { resetSchedFilters(); setSchedStatus('missed'); }} />
       </div>
 
-      {/* Upcoming assignments — one collapsible row per person. */}
-      <div style={{ marginTop: 18 }}>
-        <div className="text-sm font-bold mb-2">Upcoming assignments</div>
-        {Object.keys(dutiesByTech).length === 0 && <div style={{ fontSize: 12, color: '#94A3B8' }}>No upcoming night duty scheduled.</div>}
-        <div className="flex flex-col gap-2">
-          {Object.entries(dutiesByTech).map(([techId, ds]) => {
-            const open = expandedTech.has(techId);
-            const checkedIn = ds.filter(d => d.status === 'checked_in').length;
-            const nextDate = ds.find(d => d.status !== 'checked_in')?.duty_date ?? ds[0].duty_date;
-            return (
-              <div key={techId} style={{ border: '1px solid #E2E8F0', borderRadius: 10, overflow: 'hidden' }}>
-                <button
-                  onClick={() => toggleTechRow(techId)}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: open ? '#F8FAFC' : '#fff', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-                >
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', flex: 1 }}>{acctName[techId] || 'Unknown'}</span>
-                  <span className="badge" style={{ background: '#EEF2FF', color: '#4338CA', fontSize: 11 }}>{ds.length} night{ds.length === 1 ? '' : 's'}</span>
-                  {checkedIn > 0 && <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A', fontSize: 11 }}>{checkedIn} checked in</span>}
-                  <span style={{ fontSize: 11, color: '#94A3B8' }}>next {new Date(nextDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
-                  <span style={{ fontSize: 11, color: '#94A3B8', width: 14, textAlign: 'center' }}>{open ? '▾' : '▸'}</span>
-                </button>
-                {open && (
-                  <div style={{ padding: '4px 12px 12px', display: 'flex', flexWrap: 'wrap', gap: 6, borderTop: '1px solid #F1F5F9' }}>
-                    {ds.map(d => {
-                      const cfg = STATUS_CFG[d.status] || STATUS_CFG.scheduled;
-                      return (
-                        <span key={d.id} className="badge" style={{ background: cfg.bg, color: cfg.color, fontSize: 11, marginTop: 6 }}>
-                          {new Date(d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })} · {cfg.label}
-                          {d.checked_in_at && ` · ${new Date(d.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+    <SectionCard
+      flush
+      title="Night Duty Schedule"
+      subtitle="Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights."
+      actions={
+        <>
+          <ButtonV2 variant="outline" icon={<Download />} onClick={exportSchedule} disabled={!scheduleRows.length}>
+            Export
+          </ButtonV2>
+          {!schedulerOpen && (
+            <ButtonV2 variant="primary" icon={<Plus />} onClick={() => setSchedulerOpen(true)}>
+              Assign Night Duty
+            </ButtonV2>
+          )}
+        </>
+      }
+    >
+      {/* Filters — search · plant · date range · status · reset */}
+      <div className="px-5 pb-4">
+        <FilterBar
+          className="!p-0 !border-0"
+          search={schedQ} onSearch={setSchedQ} searchPlaceholder="Search employee, role or plant…"
+          onReset={resetSchedFilters}
+        >
+          <FilterSelect icon={<Building2 />} value={schedPlant} onChange={setSchedPlant}
+            options={[{ value: 'all', label: 'All Plants' }, ...plants.map(p => ({ value: p.name, label: p.name }))]} />
+          <div className="flex items-center gap-1.5">
+            <input type="date" value={schedFrom} onChange={e => setSchedFrom(e.target.value)}
+              className="rounded-[10px] border border-slate-200 bg-white text-[13px] text-slate-700 py-2.5 px-3 hover:bg-slate-50" />
+            <span className="text-slate-400 text-[12px]">–</span>
+            <input type="date" value={schedTo} onChange={e => setSchedTo(e.target.value)}
+              className="rounded-[10px] border border-slate-200 bg-white text-[13px] text-slate-700 py-2.5 px-3 hover:bg-slate-50" />
+          </div>
+          <FilterSelect icon={<Activity />} value={schedStatus} onChange={setSchedStatus}
+            options={[
+              { value: 'all', label: 'All Status' },
+              { value: 'scheduled', label: 'Scheduled' },
+              { value: 'checked_in', label: 'Checked in' },
+              { value: 'completed', label: 'Completed' },
+              { value: 'missed', label: 'Missed' },
+            ]} />
+        </FilterBar>
       </div>
+
+      {/* Schedule table */}
+      <div className="overflow-x-auto scroll-x">
+        <table className="dt2">
+          <thead>
+            <tr>
+              <th>Employee</th><th>Role</th><th>Plant</th><th>Duty Date</th>
+              <th>Shift Time</th><th>Status</th><th>Check-in</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {schedPg.pageRows.length === 0 && (
+              <tr><td colSpan={8} className="text-center text-slate-400 py-8 text-sm">
+                {duties.length === 0 ? 'No upcoming night duty scheduled.' : 'No duties match your filters.'}
+              </td></tr>
+            )}
+            {schedPg.pageRows.map(r => (
+              <tr key={r.d.id}>
+                <td className="font-semibold text-slate-700">{r.name}</td>
+                <td className="text-slate-500">{r.role || '—'}</td>
+                <td className="text-slate-500">{r.plant || '—'}</td>
+                <td>
+                  <div className="text-slate-700 font-medium">{new Date(r.d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                  <div className="text-[11px] text-slate-400">{new Date(r.d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short' })}</div>
+                </td>
+                <td className="text-slate-500">{SHIFT_LABEL}</td>
+                <td><StatusPill tone={PILL_TONE[r.d.status] ?? 'slate'} label={STATUS_CFG[r.d.status]?.label ?? r.d.status} /></td>
+                <td>
+                  {r.d.checked_in_at ? (
+                    <>
+                      <div className="text-slate-700">{new Date(r.d.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div className="text-[11px] text-slate-400">{new Date(r.d.checked_in_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</div>
+                    </>
+                  ) : <span className="text-slate-300">—</span>}
+                </td>
+                <td>
+                  {r.d.status === 'scheduled'
+                    ? <ButtonV2 size="sm" variant="outline" onClick={() => removeDuty(r.d)}>Remove</ButtonV2>
+                    : <span className="text-slate-300 text-xs">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <TablePaginationV2 controls={schedPg.controls} label="records" />
     </SectionCard>
+    </div>
 
     {/* ── Inline wizard panel: Assign Night Duty ─────────────────────────── */}
     {schedulerOpen && (

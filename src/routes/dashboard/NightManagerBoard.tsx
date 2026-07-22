@@ -6,7 +6,7 @@ import { useToast } from '../../components/ui/toast';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { NightDutyScheduler } from './NightDutyScheduler';
 import { MyNightDuty } from './MyNightDuty';
-import { StatCard } from '../../components/v2';
+
 import type { Database } from '../../lib/database.types';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -299,31 +299,22 @@ export function NightManagerBoard() {
       {/* The allocator's own night duty (if they're also assigned any). */}
       <MyNightDuty />
 
-      {/* KPIs */}
-      <div className="grid grid-cols-12 gap-4 mb-4">
-        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3"
-          label={t('nightBoard.onDutyNow')} value={liveDuty.filter(d => d.status === 'green').length}
-          caption={t('nightBoard.acrossFactories', { count: new Set(liveDuty.map(d => d.plant)).size || 0 })} />
-        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3"
-          label={t('nightBoard.geoTaggedCheckins')} value={liveDuty.length}
-          caption={t('nightBoard.today')} />
-        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3"
-          label={t('nightBoard.outOfZone')} value={liveDuty.filter(d => d.status === 'red').length}
-          valueTone={liveDuty.filter(d => d.status === 'red').length > 0 ? 'amber' : 'default'}
-          caption={<span className="text-amber-600">{t('nightBoard.flagged')}</span>} />
-        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3"
-          label={t('nightBoard.photoProofPct')}
-          value={`${liveDuty.length > 0 ? Math.round((liveDuty.filter(d => d.photo_url).length / liveDuty.length) * 100) : 0}%`} />
-      </div>
-
-      {/* Map + duty list */}
+      {/* Map + duty list. (The duty KPI cards live in the scheduler above; the
+          map header carries the geo-compliance stats to avoid a duplicate row.) */}
       <div className="grid grid-cols-12 gap-5">
         {/* Map - Leaflet container */}
         <div className="col-span-12 lg:col-span-7 card2 p-6">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
             <div>
-              <div className="text-base font-bold text-slate-900">{t('nightBoard.liveCheckinMap')}</div>
-              <div className="text-xs text-slate-500">{t('nightBoard.mapSubtitle')}</div>
+              <div className="text-base font-bold text-slate-900 font-heading">{t('nightBoard.liveCheckinMap')}</div>
+              <div className="text-xs text-slate-500">
+                {t('nightBoard.mapSubtitle')}
+                {' · '}{liveDuty.length} {t('nightBoard.geoTaggedCheckins').toLowerCase()}
+                {liveDuty.filter(d => d.status === 'red').length > 0 && (
+                  <span className="text-amber-600 font-semibold"> · {liveDuty.filter(d => d.status === 'red').length} {t('nightBoard.outOfZone').toLowerCase()}</span>
+                )}
+                {' · '}{liveDuty.length > 0 ? Math.round((liveDuty.filter(d => d.photo_url).length / liveDuty.length) * 100) : 0}% {t('nightBoard.photoProofPct').toLowerCase()}
+              </div>
             </div>
             {selectedCheckIn && (
               <button 

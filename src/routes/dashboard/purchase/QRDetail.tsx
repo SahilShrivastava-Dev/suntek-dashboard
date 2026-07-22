@@ -73,17 +73,17 @@ export function QRDetail() {
 
       // Maintenance context (best-effort): last closed ticket + next schedule due.
       const tk = await supabase.from('maintenance_tickets').select('closed_at').eq('far_asset_id', data.id)
-        .not('closed_at', 'is', null).order('closed_at', { ascending: false }).limit(1)
-        .returns<{ closed_at: string }[]>();
+        .not('closed_at', 'is', null).order('closed_at', { ascending: false }).limit(1);
       if (cancelled) return;
-      setLastMaint(tk.data?.[0]?.closed_at ?? null);
+      const tkRows = (tk.data ?? []) as unknown as { closed_at: string }[];
+      setLastMaint(tkRows[0]?.closed_at ?? null);
       if (data.identification_mark) {
         const sc = await supabase.from('maintenance_schedules').select('next_due_at')
           .ilike('equipment', `%${data.identification_mark}%`).eq('is_active', true)
-          .order('next_due_at', { ascending: true }).limit(1)
-          .returns<{ next_due_at: string }[]>();
+          .order('next_due_at', { ascending: true }).limit(1);
         if (cancelled) return;
-        setNextMaint(sc.data?.[0]?.next_due_at ?? null);
+        const scRows = (sc.data ?? []) as unknown as { next_due_at: string }[];
+        setNextMaint(scRows[0]?.next_due_at ?? null);
       }
     })();
     return () => { cancelled = true; };

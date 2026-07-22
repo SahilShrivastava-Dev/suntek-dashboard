@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&family=Poppins:wght@500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -31,6 +31,15 @@
     --purple: #7C3AED;
     --purple-soft: #EDE9FE;
     --sidebar-width: 260px;
+
+    /* ── v2 design system (UI redesign) — additive, old vars untouched ── */
+    --v2-radius: 12px;
+    --sb-bg: #0F172A;        /* sidebar navy */
+    --sb-bg-2: #1E293B;      /* sidebar hover/raised */
+    --sb-text: #CBD5E1;      /* sidebar item text */
+    --sb-muted: #64748B;     /* sidebar section labels */
+    --sb-hover: rgba(255, 255, 255, 0.06);
+    --sb-active: rgba(255, 255, 255, 0.12);
   }
 
   * {
@@ -366,6 +375,56 @@
   }
   .page-enter {
     animation: fadein 320ms ease both;
+  }
+
+  /* ══ v2 design system (UI redesign) ═══════════════════════════════════
+     Additive classes only — .card/.chip/.pill/table.dt stay untouched so
+     unmigrated screens keep rendering unchanged under the new shell. */
+
+  /* ── v2 card ── */
+  .card2 {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--v2-radius);
+  }
+
+  /* ── v2 data table ── */
+  table.dt2 {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  table.dt2 thead th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+    white-space: nowrap;
+    background: #FAFBFC;
+  }
+  table.dt2 tbody td {
+    padding: 16px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-2);
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+  table.dt2 tbody tr { transition: background 120ms; }
+  table.dt2 tbody tr:hover { background: #F8FAFC; }
+  table.dt2 tbody tr:last-child td { border-bottom: none; }
+  table.dt2 .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ── App shell — wires the (previously dead) --sidebar-width var.
+     The collapsed value only applies md+; below md the sidebar is a
+     drawer and must always be full width. ── */
+  .app-shell { --sidebar-width: 260px; }
+  @media (min-width: 768px) {
+    .app-shell[data-sidebar-collapsed='true'] { --sidebar-width: 72px; }
   }
 }
 

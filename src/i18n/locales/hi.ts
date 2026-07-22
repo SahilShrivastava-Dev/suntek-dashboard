@@ -10,6 +10,9 @@ const hi: Translations = {
     far: 'FAR',
     fixedAssets: 'फिक्स्ड एसेट्स',
     qrCode: 'QR कोड',
+    asset: 'एसेट',
+    qrCodes: 'QR कोड्स',
+    collapseMenu: 'मेन्यू समेटें',
     maintenance: 'मेंटेनेंस',
     activityLog: 'एक्टिविटी लॉग',
     storeReq: 'स्टोर रिक्विजिशन',
@@ -129,6 +132,22 @@ const hi: Translations = {
   common: {
     tryAgain: 'पुनः प्रयास करें',
     plant: 'प्लांट',
+    // v2 redesign shared strings
+    export: 'निर्यात',
+    reset: 'रीसेट',
+    search: 'खोजें',
+    view: 'देखें',
+    viewAll: 'सभी देखें',
+    allPlants: 'सभी प्लांट',
+    allStatus: 'सभी स्थिति',
+    allTime: 'सभी समय',
+    noRows: 'कोई पंक्ति नहीं',
+    showingRange: '{{total}} {{noun}} में से {{from}}–{{to}} दिखा रहे हैं',
+    perPage: '/ पृष्ठ',
+  },
+  footer: {
+    timesIST: 'सभी समय IST में दिखाए गए हैं',
+    copyright: '© 2025 Suntek Group. All rights reserved.',
   },
   palette: {
     placeholder: 'टिकट, टिप्पणियाँ, लोग खोजें…',

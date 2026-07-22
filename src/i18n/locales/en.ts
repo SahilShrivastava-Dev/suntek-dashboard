@@ -13,6 +13,9 @@ const en = {
     far: 'FAR',
     fixedAssets: 'Fixed Assets',
     qrCode: 'QR Code',
+    asset: 'Asset',
+    qrCodes: 'QR Codes',
+    collapseMenu: 'Collapse menu',
     maintenance: 'Maintenance',
     activityLog: 'Activity Log',
     storeReq: 'Store Req',
@@ -131,6 +134,22 @@ const en = {
   common: {
     tryAgain: 'Try again',
     plant: 'Plant',
+    // v2 redesign shared strings
+    export: 'Export',
+    reset: 'Reset',
+    search: 'Search',
+    view: 'View',
+    viewAll: 'View all',
+    allPlants: 'All Plants',
+    allStatus: 'All Status',
+    allTime: 'All Time',
+    noRows: 'No rows',
+    showingRange: 'Showing {{from}} to {{to}} of {{total}} {{noun}}',
+    perPage: '/ page',
+  },
+  footer: {
+    timesIST: 'All times shown in IST',
+    copyright: '© 2025 Suntek Group. All rights reserved.',
   },
   palette: {
     placeholder: 'Search tickets, comments, people…',

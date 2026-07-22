@@ -12,6 +12,8 @@
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Check, X, Zap, Plus, RotateCcw, FileText } from 'lucide-react';
+import { ButtonV2, InfoBanner, StatusPill } from '../../components/v2';
 import { MentionTextarea } from '../../components/mentions';
 import { insertRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
@@ -241,38 +243,35 @@ export function DailyLogPage() {
   };
 
   // ── Input style ────────────────────────────────────────────────────────────
-  const inputCls = 'w-full p-2 border-2 border-slate-200 rounded-xl text-sm focus:border-amber-400 focus:outline-none transition-colors';
-  const labelCls = 'block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1';
+  const inputCls = 'w-full p-2 border border-slate-200 rounded-[10px] text-sm focus:border-slate-400 focus:outline-none transition-colors';
+  const labelCls = 'block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1';
 
   // ── Render: done ──────────────────────────────────────────────────────────
   if (savedDone) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 py-16 text-center">
-      <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5">
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
+      <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
+        <Check size={32} strokeWidth={2.5} className="text-green-600" />
       </div>
-      <div className="text-lg font-bold text-slate-800">{t('dailyLog.done_title')}</div>
+      <div className="text-lg font-heading font-semibold text-slate-800">{t('dailyLog.done_title')}</div>
       <div className="text-sm text-slate-500">{doneSummary}</div>
-      <button onClick={reset}
-        className="mt-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white"
-        style={{ background: '#d97706' }}
-      >{t('dailyLog.upload_another')}</button>
+      <ButtonV2 variant="accent" className="mt-2" onClick={reset}>
+        {t('dailyLog.upload_another')}
+      </ButtonV2>
     </div>
   );
 
   // ── Render: error ─────────────────────────────────────────────────────────
   if (job.status === 'error') return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4 max-w-lg mx-auto">
-      <div className="w-full bg-red-50 border border-red-200 rounded-xl p-4">
+      <div className="w-full bg-red-50 border border-red-200 rounded-[10px] p-4">
         <div className="text-sm font-bold text-red-700 mb-1">{t('dailyLog.extraction_failed')}</div>
         <div className="text-xs text-red-600 whitespace-pre-wrap break-words max-h-40 overflow-y-auto leading-relaxed">
           {error}
         </div>
       </div>
-      <button onClick={reset} className="px-5 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition">
-        ↩ {t('dailyLog.try_again')}
-      </button>
+      <ButtonV2 variant="outline" icon={<RotateCcw />} onClick={reset}>
+        {t('dailyLog.try_again')}
+      </ButtonV2>
     </div>
   );
 
@@ -283,10 +282,10 @@ export function DailyLogPage() {
         <img src={previewUrl} alt="Sheet" className="rounded-xl shadow border border-slate-200 object-cover max-h-52 max-w-xs" style={{ objectPosition: 'top' }} />
       )}
       <svg className="animate-spin" width="32" height="32" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="12" r="10" stroke="#fde68a" strokeWidth="3" />
-        <path d="M12 2 A10 10 0 0 1 22 12" stroke="#d97706" strokeWidth="3" strokeLinecap="round" />
+        <circle cx="12" cy="12" r="10" stroke="#E2E8F0" strokeWidth="3" />
+        <path d="M12 2 A10 10 0 0 1 22 12" stroke="#F47651" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      <div className="text-base font-bold font-heading text-slate-700">{t('dailyLog.reading_sheet')}</div>
+      <div className="text-base font-heading font-semibold text-slate-700">{t('dailyLog.reading_sheet')}</div>
       <div className="text-xs text-slate-400">{t('dailyLog.scanning_rows', { count: readings.length || '~13' })}</div>
     </div>
   );
@@ -295,10 +294,10 @@ export function DailyLogPage() {
   if (saving) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3">
       <svg className="animate-spin" width="28" height="28" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="12" r="10" stroke="#fde68a" strokeWidth="3" />
-        <path d="M12 2 A10 10 0 0 1 22 12" stroke="#d97706" strokeWidth="3" strokeLinecap="round" />
+        <circle cx="12" cy="12" r="10" stroke="#E2E8F0" strokeWidth="3" />
+        <path d="M12 2 A10 10 0 0 1 22 12" stroke="#F47651" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      <div className="text-sm font-bold text-slate-700">{t('dailyLog.saving_db')}</div>
+      <div className="text-sm font-semibold text-slate-700">{t('dailyLog.saving_db')}</div>
     </div>
   );
 
@@ -319,73 +318,58 @@ export function DailyLogPage() {
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
-        className="w-full max-w-lg cursor-pointer rounded-2xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-3 p-8 text-center"
-        style={{ borderColor: isDragging ? '#d97706' : '#cbd5e1', background: isDragging ? '#fffbeb' : '#f8fafc' }}
+        className="w-full max-w-lg cursor-pointer rounded-[10px] border-2 border-dashed transition-all flex flex-col items-center justify-center gap-3 p-8 text-center"
+        style={{ borderColor: isDragging ? '#F47651' : '#cbd5e1', background: isDragging ? '#FFF7ED' : '#f8fafc' }}
       >
         {previewUrl ? (
           <>
-            <img src={previewUrl} alt="preview" className="rounded-xl max-h-52 object-cover shadow" style={{ objectPosition: 'top' }} />
+            <img src={previewUrl} alt="preview" className="rounded-[10px] max-h-52 object-cover shadow" style={{ objectPosition: 'top' }} />
             <div className="text-xs text-slate-400">{t('dailyLog.tap_to_change')}</div>
           </>
         ) : (
           <>
-            <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-                <polyline points="10 9 9 9 8 9"/>
-              </svg>
+            <div className="w-14 h-14 rounded-[10px] bg-orange-50 flex items-center justify-center">
+              <FileText size={26} strokeWidth={2} className="text-[#F47651]" />
             </div>
-            <div className="text-base font-bold font-heading text-slate-700">{t('dailyLog.upload_title')}</div>
+            <div className="text-base font-heading font-semibold text-slate-700">{t('dailyLog.upload_title')}</div>
             <div className="text-sm text-slate-400">{t('dailyLog.upload_sub1')}<br/>{t('dailyLog.upload_sub2')}</div>
           </>
         )}
       </div>
 
       {!previewUrl && (
-        <div className="mt-5 max-w-md text-xs text-slate-400 text-center leading-relaxed bg-amber-50 rounded-xl p-4 border border-amber-100">
-          <span className="font-bold text-amber-700">{t('dailyLog.what_extracts_label')} </span>
+        <InfoBanner className="mt-5 max-w-md text-xs leading-relaxed">
+          <span className="font-semibold text-slate-700">{t('dailyLog.what_extracts_label')} </span>
           {t('dailyLog.what_extracts_body')}
-        </div>
+        </InfoBanner>
       )}
 
       {job.status === 'ready' && (
-        <button
-          onClick={handleExtract}
-          className="mt-5 px-8 py-3.5 rounded-xl text-white font-bold text-sm flex items-center gap-2 transition-all"
-          style={{ background: '#d97706', boxShadow: '0 6px 16px -4px rgba(217,119,6,0.45)' }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
+        <ButtonV2 variant="accent" icon={<Zap />} className="mt-5 px-8 py-3" onClick={handleExtract}>
           {t('dailyLog.extract_with_ai')}
-        </button>
+        </ButtonV2>
       )}
     </div>
   );
 
   // ── Render: review ────────────────────────────────────────────────────────
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-white rounded-2xl shadow-sm">
+    <div className="flex-1 flex flex-col overflow-hidden card2">
 
       {/* Top bar */}
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-gradient-to-r from-amber-50 to-slate-50 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-            </svg>
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-[10px] bg-orange-50 flex items-center justify-center">
+            <Zap size={16} strokeWidth={2.5} className="text-[#F47651]" />
           </div>
           <div>
-            <div className="text-sm font-bold text-slate-800">{t('dailyLog.review_title')}</div>
+            <div className="text-sm font-heading font-semibold text-slate-800">{t('dailyLog.review_title')}</div>
             <div className="text-xs text-slate-400">{t('dailyLog.rows_detected', { count: readings.length })}</div>
           </div>
         </div>
-        <button onClick={reset} className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-slate-100 transition">
-          ✕ {t('dailyLog.cancel')}
-        </button>
+        <ButtonV2 variant="ghost" size="sm" icon={<X />} onClick={reset}>
+          {t('dailyLog.cancel')}
+        </ButtonV2>
       </div>
 
       {/* Body: image left | form right */}
@@ -393,9 +377,9 @@ export function DailyLogPage() {
 
         {/* LEFT: Original image */}
         <div className="shrink-0 border-r border-slate-100 bg-slate-50 overflow-auto flex flex-col items-center p-3 gap-2" style={{ width: 200 }}>
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wide self-start">{t('dailyLog.original_sheet')}</div>
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide self-start">{t('dailyLog.original_sheet')}</div>
           {previewUrl && (
-            <img src={previewUrl} alt="original" className="w-full rounded-xl shadow border border-slate-200 object-contain" />
+            <img src={previewUrl} alt="original" className="w-full rounded-[10px] shadow border border-slate-200 object-contain" />
           )}
         </div>
 
@@ -404,7 +388,7 @@ export function DailyLogPage() {
 
           {/* Header fields */}
           <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('dailyLog.sheet_header')}</div>
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">{t('dailyLog.sheet_header')}</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
                 <label className={labelCls}>{t('dailyLog.date_label')}</label>
@@ -436,40 +420,29 @@ export function DailyLogPage() {
 
           {/* Truncation warning */}
           {(rawData as { _truncated?: boolean } | null)?._truncated && (
-            <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-xl p-3">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" className="shrink-0 mt-0.5">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-              <div className="text-xs text-yellow-800">
-                <span className="font-bold">{t('dailyLog.partial_extraction')}</span> {t('dailyLog.partial_extraction_body')}
-              </div>
-            </div>
+            <InfoBanner tone="amber" className="text-xs">
+              <span className="font-bold">{t('dailyLog.partial_extraction')}</span> {t('dailyLog.partial_extraction_body')}
+            </InfoBanner>
           )}
 
           {/* Hourly readings table */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest inline-flex items-center">
                 {t('dailyLog.hourly_readings')}
-                <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold text-xs normal-case">
-                  {t('dailyLog.rows_count', { count: readings.length })}
-                </span>
+                <StatusPill tone="amber" className="ml-2 normal-case tracking-normal" label={t('dailyLog.rows_count', { count: readings.length })} />
               </div>
-              <button onClick={addRow} className="text-xs font-bold text-amber-600 hover:text-amber-800 transition flex items-center gap-1">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
+              <ButtonV2 variant="outline" size="sm" icon={<Plus />} onClick={addRow}>
                 {t('dailyLog.add_row')}
-              </button>
+              </ButtonV2>
             </div>
 
             {readings.length === 0 ? (
-              <div className="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+              <div className="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-slate-200 rounded-[10px]">
                 {t('dailyLog.no_readings')}
               </div>
             ) : (
-              <div className="rounded-xl border border-slate-200 overflow-auto" style={{ maxHeight: 340 }}>
+              <div className="rounded-[10px] border border-slate-200 overflow-auto" style={{ maxHeight: 340 }}>
                 <table className="text-xs border-collapse" style={{ minWidth: COLUMN_DEFS.reduce((s, c) => s + c.width + 8, 40) }}>
                   <thead className="bg-slate-50 sticky top-0 z-10">
                     <tr className="border-b border-slate-200">
@@ -483,7 +456,7 @@ export function DailyLogPage() {
                   </thead>
                   <tbody>
                     {readings.map((r, idx) => (
-                      <tr key={r._key} className="border-b border-slate-100 hover:bg-amber-50/30 transition-colors"
+                      <tr key={r._key} className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
                           style={{ background: idx % 2 === 0 ? undefined : '#fafafa' }}>
                         {COLUMN_DEFS.map(c => (
                           <td key={c.key} className="px-1 py-0.5">
@@ -492,7 +465,7 @@ export function DailyLogPage() {
                               value={rowVal(r, c.key)}
                               onChange={e => updateCell(r._key, c.key, e.target.value)}
                               className="w-full px-1.5 py-1 border border-transparent rounded-lg text-xs font-mono
-                                focus:border-amber-300 focus:bg-white focus:outline-none hover:border-slate-200 transition-colors"
+                                focus:border-slate-300 focus:bg-white focus:outline-none hover:border-slate-200 transition-colors"
                               style={{ minWidth: c.width - 8 }}
                             />
                           </td>
@@ -515,10 +488,10 @@ export function DailyLogPage() {
 
           {/* Tank summaries */}
           <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('dailyLog.tank_summaries')}</div>
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">{t('dailyLog.tank_summaries')}</div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {tankSummaries.map((tank, ti) => (
-                <div key={tank.tankIndex} className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-2">
+                <div key={tank.tankIndex} className="bg-slate-50 rounded-[10px] p-3 border border-slate-200 space-y-2">
                   <div className="text-xs font-bold text-slate-600">{t('dailyLog.tank', { count: tank.tankIndex })}</div>
                   {[
                     { label: t('dailyLog.storage_time'), val: tank.shiftingToStorageTime ?? '', key: 'shiftingToStorageTime' as keyof DailyLogTankSummary },
@@ -537,7 +510,7 @@ export function DailyLogPage() {
                             ? (e.target.value === '' ? null : parseFloat(e.target.value))
                             : (e.target.value || null)
                         } : ts))}
-                        className="w-full p-1.5 border border-slate-200 rounded-lg text-xs focus:border-amber-300 focus:outline-none"
+                        className="w-full p-1.5 border border-slate-200 rounded-lg text-xs focus:border-slate-400 focus:outline-none"
                         placeholder="—"
                       />
                     </div>
@@ -569,22 +542,15 @@ export function DailyLogPage() {
 
       {/* Footer */}
       <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center gap-3 shrink-0">
-        <button onClick={reset}
-          className="py-2.5 px-4 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-500 hover:bg-slate-100 transition whitespace-nowrap">
-          ↩ {t('dailyLog.reupload')}
-        </button>
+        <ButtonV2 variant="outline" icon={<RotateCcw />} onClick={reset}>
+          {t('dailyLog.reupload')}
+        </ButtonV2>
         <div className="flex-1 text-xs text-slate-400 text-center">
           {readings.length} {t('dailyLog.rows_word')} · {date || t('dailyLog.no_date')} · {shift || t('dailyLog.no_shift')}
         </div>
-        <button onClick={handleSave} disabled={!date}
-          className="py-2.5 px-6 rounded-xl text-sm font-bold text-white transition whitespace-nowrap flex items-center gap-2 disabled:opacity-40"
-          style={{ background: date ? '#d97706' : '#94a3b8', boxShadow: date ? '0 6px 16px -4px rgba(217,119,6,0.4)' : 'none' }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+        <ButtonV2 variant="accent" icon={<Check />} onClick={handleSave} disabled={!date}>
           {t('dailyLog.save_readings', { count: readings.filter(r => r.time).length })}
-        </button>
+        </ButtonV2>
       </div>
     </div>
   );

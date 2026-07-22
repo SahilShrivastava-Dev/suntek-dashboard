@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { Plus, Download, ShoppingCart, Package, Truck, Hourglass } from 'lucide-react';
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
@@ -14,9 +15,9 @@ import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/states';
 import { usePagination } from '../../../components/ui/usePagination';
 import { TablePaginationV2 as TablePagination } from '../../../components/v2';
-import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
+import { useTextFilter } from '../../../components/ui/TableSearch';
 import { useSortable } from '../../../components/ui/useSortable';
-import { ThV2 as Th } from '../../../components/v2';
+import { ThV2 as Th, StatCard, SectionCard, FilterBar, ButtonV2, InfoBanner } from '../../../components/v2';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import type { Database } from '../../../lib/database.types';
@@ -195,129 +196,143 @@ export function PurchaseOrders() {
   return (
     <>
       {/* Add purchased spares to the stock register (bill AI or manual) */}
-      <div className="card2 p-6 mb-5" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <div className="text-base font-bold font-heading">Add purchase to stock register</div>
-          <div className="text-xs text-slate-500">Bought new spares? Upload the bill (image / PDF) to auto-read items &amp; quantities, or enter them manually — matched items increment, new items are created.</div>
-        </div>
-        <button onClick={() => setShowPurchase(true)} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm">＋ Add purchase</button>
-      </div>
+      <SectionCard
+        className="mb-4"
+        title="Add purchase to stock register"
+        subtitle={<>Bought new spares? Upload the bill (image / PDF) to auto-read items &amp; quantities, or enter them manually — matched items increment, new items are created.</>}
+        actions={
+          <ButtonV2 variant="accent" icon={<Plus />} onClick={() => setShowPurchase(true)}>
+            Add purchase
+          </ButtonV2>
+        }
+      />
       <AddPurchaseModal open={showPurchase} onClose={() => setShowPurchase(false)} onApplied={() => {}} />
 
       {/* KPI row */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Total Orders', what: 'Total count of oil/material purchase contracts on record.', source: 'Supabase', tables: ['oil_contracts'] }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('po.kpi_total_orders')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{orders.length + maintPOs.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('po.kpi_total_sub', { a: orders.length, b: maintPOs.length })}</div>
+          <StatCard className="h-full" icon={<ShoppingCart />} tone="blue"
+            label={t('po.kpi_total_orders')} value={orders.length + maintPOs.length}
+            caption={t('po.kpi_total_sub', { a: orders.length, b: maintPOs.length })} />
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Total Booked Qty', what: 'Sum of all booked quantities (MT) across all purchase orders.', source: 'Supabase', tables: ['oil_contracts'] }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('po.kpi_booked_qty')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">
-            {orders.reduce((s, r) => s + (r.book_qty_mt || 0), 0).toFixed(0)}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('po.kpi_across_all_pos')}</div>
+          <StatCard className="h-full" icon={<Package />} tone="purple"
+            label={t('po.kpi_booked_qty')}
+            value={orders.reduce((s, r) => s + (r.book_qty_mt || 0), 0).toFixed(0)}
+            caption={t('po.kpi_across_all_pos')} />
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Dispatched', what: 'Total quantity already dispatched from suppliers.', source: 'Supabase', tables: ['oil_contracts'] }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('po.kpi_dispatched')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-green-600">
-            {orders.reduce((s, r) => s + (r.dispatched_qty || 0), 0).toFixed(0)}
-          </div>
+          <StatCard className="h-full" icon={<Truck />} tone="green" valueTone="green"
+            label={t('po.kpi_dispatched')}
+            value={orders.reduce((s, r) => s + (r.dispatched_qty || 0), 0).toFixed(0)} />
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Pending Qty', what: 'Total quantity still pending dispatch from suppliers.', source: 'Supabase', tables: ['oil_contracts'] }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('po.kpi_pending')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">
-            {orders.reduce((s, r) => s + (r.pending_qty || 0), 0).toFixed(0)}
-          </div>
+          <StatCard className="h-full" icon={<Hourglass />} tone="amber" valueTone="amber"
+            label={t('po.kpi_pending')}
+            value={orders.reduce((s, r) => s + (r.pending_qty || 0), 0).toFixed(0)} />
         </div>
       </div>
 
-      {/* Table — red-soft */}
-      <div className="card2 p-6" style={{ position: 'relative' }}>
+      {/* Search / filters */}
+      <FilterBar
+        className="mb-4"
+        search={poSearch} onSearch={setPoSearch}
+        searchPlaceholder={t('po.search_ph', 'Search material, company, port…')}
+        onReset={() => setPoSearch('')}
+      />
+
+      {/* Table — material / oil purchase orders */}
+      <div className="relative">
         <KpiInfoButton info={{ title: 'Purchase Orders List', what: 'All oil/material purchase contracts. New entries via "+ New PO" form.', source: 'Supabase', tables: ['oil_contracts'] }} />
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-base font-bold font-heading">{t('po.section_material_oil')}</span>
+        <SectionCard
+          flush
+          title={
+            <span className="inline-flex items-center gap-2 flex-wrap">
+              {t('po.section_material_oil')}
               <span className="badge" style={{ background: '#E0E7FF', color: '#4338CA', fontWeight: 700, fontSize: 10 }}>⟳ BUSY API</span>
+            </span>
+          }
+          subtitle={t('po.section_material_oil_sub')}
+          actions={
+            <>
+              <ButtonV2 variant="outline" icon={<Download />} onClick={handleExport}>
+                {t('po.btn_export')}
+              </ButtonV2>
+              <ButtonV2 variant="accent" onClick={() => setOpen(true)}>
+                {t('po.btn_new_po')}
+              </ButtonV2>
+            </>
+          }
+        >
+          {/* BUSY integration status — these POs will auto-sync from BUSY; manual entry is the stopgap until then. */}
+          <div className="px-5 pb-4">
+            <InfoBanner><b>{t('po.busy_sync_title')}</b> {t('po.busy_sync_body')}</InfoBanner>
+          </div>
+          {loadError ? (
+            <div className="px-5 pb-5">
+              <ErrorState title={t('po.error_load_title')} message={t('po.error_load_msg')}
+                onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
             </div>
-            <div className="text-xs text-slate-500">{t('po.section_material_oil_sub')}</div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button className="btn-ghost rounded-[10px] px-4 py-2 font-semibold text-sm flex items-center gap-2" onClick={handleExport}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-              {t('po.btn_export')}
-            </button>
-            <button className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-              {t('po.btn_new_po')}
-            </button>
-          </div>
-        </div>
-        {/* BUSY integration status — these POs will auto-sync from BUSY; manual entry is the stopgap until then. */}
-        <div className="mb-4 rounded-xl px-3 py-2 text-[11px] flex items-center gap-2" style={{ background: '#EEF2FF', border: '1px solid #C7D2FE', color: '#4338CA' }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#F59E0B', display: 'inline-block' }} />
-          <span><b>{t('po.busy_sync_title')}</b> {t('po.busy_sync_body')}</span>
-        </div>
-        {loadError ? (
-          <ErrorState title={t('po.error_load_title')} message={t('po.error_load_msg')}
-            onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
-        ) : loading ? (
-          <SkeletonRows rows={6} />
-        ) : (
-        <>
-        <TableSearch value={poSearch} onChange={setPoSearch} placeholder={t('po.search_ph', 'Search material, company, port…')} />
-        {filteredList.length === 0 ? (
-          <EmptyState title={t('po.empty_orders')} message={poSearch ? t('common.noMatches', 'No rows match your search.') : undefined} />
-        ) : (
-        <div className="overflow-x-auto scroll-x">
-          <table className="dt2">
-            <thead>
-              <tr>
-                <Th sortKey="oil" s={ordersSort}>{t('po.col_oil_material')}</Th><Th sortKey="paraffin" s={ordersSort}>{t('po.col_paraffin_type')}</Th><Th sortKey="company" s={ordersSort}>{t('po.col_company')}</Th>
-                <Th sortKey="port" s={ordersSort}>{t('po.col_port_dest')}</Th><Th sortKey="booked" s={ordersSort} firstDir="desc" className="num">{t('po.col_booked_mt')}</Th>
-                <Th sortKey="dispatched" s={ordersSort} firstDir="desc" className="num">{t('po.col_dispatched_mt')}</Th><Th sortKey="pending" s={ordersSort} firstDir="desc" className="num">{t('po.col_pending_mt')}</Th>
-                <Th sortKey="price" s={ordersSort} firstDir="desc" className="num">{t('po.col_price')}</Th><Th sortKey="date" s={ordersSort} firstDir="desc">{t('po.col_date')}</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {ordersPg.pageRows.map(r => (
-                <tr key={r.id} style={{ cursor: 'pointer' }}>
-                  <td className="font-semibold">{r.oil_type || '—'}</td>
-                  <td className="text-slate-500">{r.paraffin_type || '—'}</td>
-                  <td>{r.company || '—'}</td>
-                  <td>{r.port || '—'}</td>
-                  <td className="num">{r.book_qty_mt ?? '—'}</td>
-                  <td className="num text-green-700">{r.dispatched_qty ?? '—'}</td>
-                  <td className="num text-amber-700">{r.pending_qty ?? '—'}</td>
-                  <td className="num font-semibold">{r.price ? `₹ ${Number(r.price).toLocaleString('en-IN')}` : '—'}</td>
-                  <td className="text-slate-500 text-xs">{r.date || '—'}</td>
+          ) : loading ? (
+            <div className="px-5 pb-5"><SkeletonRows rows={6} /></div>
+          ) : filteredList.length === 0 ? (
+            <div className="px-5 pb-5">
+              <EmptyState title={t('po.empty_orders')} message={poSearch ? t('common.noMatches', 'No rows match your search.') : undefined} />
+            </div>
+          ) : (
+          <>
+          <div className="overflow-x-auto scroll-x">
+            <table className="dt2">
+              <thead>
+                <tr>
+                  <Th sortKey="oil" s={ordersSort}>{t('po.col_oil_material')}</Th><Th sortKey="paraffin" s={ordersSort}>{t('po.col_paraffin_type')}</Th><Th sortKey="company" s={ordersSort}>{t('po.col_company')}</Th>
+                  <Th sortKey="port" s={ordersSort}>{t('po.col_port_dest')}</Th><Th sortKey="booked" s={ordersSort} firstDir="desc" className="num">{t('po.col_booked_mt')}</Th>
+                  <Th sortKey="dispatched" s={ordersSort} firstDir="desc" className="num">{t('po.col_dispatched_mt')}</Th><Th sortKey="pending" s={ordersSort} firstDir="desc" className="num">{t('po.col_pending_mt')}</Th>
+                  <Th sortKey="price" s={ordersSort} firstDir="desc" className="num">{t('po.col_price')}</Th><Th sortKey="date" s={ordersSort} firstDir="desc">{t('po.col_date')}</Th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {ordersPg.pageRows.map(r => (
+                  <tr key={r.id} style={{ cursor: 'pointer' }}>
+                    <td className="font-semibold">{r.oil_type || '—'}</td>
+                    <td className="text-slate-500">{r.paraffin_type || '—'}</td>
+                    <td>{r.company || '—'}</td>
+                    <td>{r.port || '—'}</td>
+                    <td className="num">{r.book_qty_mt ?? '—'}</td>
+                    <td className="num text-green-700">{r.dispatched_qty ?? '—'}</td>
+                    <td className="num text-amber-700">{r.pending_qty ?? '—'}</td>
+                    <td className="num font-semibold">{r.price ? `₹ ${Number(r.price).toLocaleString('en-IN')}` : '—'}</td>
+                    <td className="text-slate-500 text-xs">{r.date || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <TablePagination controls={ordersPg.controls} />
-        </div>
-        )}
-        </>
-        )}
+          </>
+          )}
+        </SectionCard>
       </div>
 
       {/* ── Maintenance purchases (derived from the maintenance flow) ─────────── */}
-      <div className="card2 p-6 mt-5">
-        <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-base font-bold font-heading">{t('po.section_maint')}</span>
+      <SectionCard
+        flush
+        className="mt-4"
+        title={
+          <span className="inline-flex items-center gap-2 flex-wrap">
+            {t('po.section_maint')}
             <span className="badge" style={{ background: '#DCFCE7', color: '#15803D', fontWeight: 700, fontSize: 10 }}>⚙ {t('po.badge_from_maint')}</span>
-          </div>
-          <div className="text-xs num font-bold text-slate-700">{t('po.total')} ₹ {maintPOs.reduce((s, m) => s + (m.total || 0), 0).toLocaleString('en-IN')}</div>
-        </div>
-        <div className="text-xs text-slate-500 mb-4">{t('po.section_maint_sub')}</div>
+          </span>
+        }
+        subtitle={t('po.section_maint_sub')}
+        actions={
+          <span className="text-xs num font-bold text-slate-700">{t('po.total')} ₹ {maintPOs.reduce((s, m) => s + (m.total || 0), 0).toLocaleString('en-IN')}</span>
+        }
+      >
         <div className="overflow-x-auto scroll-x">
           <table className="dt2">
             <thead><tr><Th sortKey="ticket" s={maintSort}>{t('po.col_ticket')}</Th><Th sortKey="part" s={maintSort}>{t('po.col_part')}</Th><Th sortKey="equipment" s={maintSort}>{t('po.col_equipment')}</Th><Th sortKey="store" s={maintSort}>{t('po.col_store_unit')}</Th><Th sortKey="supplier" s={maintSort}>{t('po.col_supplier')}</Th><Th sortKey="qty" s={maintSort} firstDir="desc" className="num">{t('po.col_qty')}</Th><Th sortKey="unitPrice" s={maintSort} firstDir="desc" className="num">{t('po.col_unit_price')}</Th><Th sortKey="total" s={maintSort} firstDir="desc" className="num">{t('po.col_total')}</Th><Th sortKey="busyRef" s={maintSort}>{t('po.col_busy_ref')}</Th><th>{t('po.col_bill', 'Bill')}</th><Th sortKey="date" s={maintSort} firstDir="desc">{t('po.col_date')}</Th></tr></thead>
@@ -346,9 +361,9 @@ export function PurchaseOrders() {
               })}
             </tbody>
           </table>
-          <TablePagination controls={maintPg.controls} />
         </div>
-      </div>
+        <TablePagination controls={maintPg.controls} />
+      </SectionCard>
 
       <ImageLightbox images={billLightbox || []} open={!!billLightbox} onClose={() => setBillLightbox(null)} />
 

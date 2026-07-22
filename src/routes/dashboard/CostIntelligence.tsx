@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { IndianRupee, Wallet, Boxes } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { SkeletonRows, ErrorState, EmptyState } from '../../components/ui/states';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
 import { useSortable } from '../../components/ui/useSortable';
-import { ThV2 as Th } from '../../components/v2';
+import { StatCard, SectionCard, ThV2 as Th } from '../../components/v2';
 import { computeBatchCost, DEFAULT_COST_CONFIG, type CostConfig } from '../../lib/algorithms/costEngine';
 import type { Database } from '../../lib/database.types';
 
@@ -90,29 +91,26 @@ export function CostIntelligence() {
   return (
     <>
       {/* KPIs */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-4 card p-5" style={{ position: 'relative' }}>
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-4 relative">
           <KpiInfoButton info={{ title: 'Avg landed cost / MT', what: 'Mean true landed cost per MT across closed batches — material + labour + energy + overhead. The foundation for margin and pricing checks.', source: 'Derived', note: 'computeBatchCost() over closed active_batches with the rates set on the right.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('costIntel.kpiAvgLanded')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{summary.avgPerMT > 0 ? fmtINR(summary.avgPerMT) : '—'}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('costIntel.kpiAvgLandedSub')}</div>
+          <StatCard className="h-full" icon={<IndianRupee />} tone="blue"
+            label={t('costIntel.kpiAvgLanded')}
+            value={summary.avgPerMT > 0 ? fmtINR(summary.avgPerMT) : '—'}
+            caption={t('costIntel.kpiAvgLandedSub')} />
         </div>
-        <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('costIntel.kpiTotalLanded')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{summary.totalLanded > 0 ? fmtINR(summary.totalLanded) : '—'}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('costIntel.kpiTotalLandedSub')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('costIntel.kpiBatchesCosted')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{summary.count}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('costIntel.kpiBatchesCostedSub')}</div>
-        </div>
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-4" icon={<Wallet />}
+          label={t('costIntel.kpiTotalLanded')}
+          value={summary.totalLanded > 0 ? fmtINR(summary.totalLanded) : '—'}
+          caption={t('costIntel.kpiTotalLandedSub')} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-4" icon={<Boxes />} tone="green"
+          label={t('costIntel.kpiBatchesCosted')}
+          value={summary.count}
+          caption={t('costIntel.kpiBatchesCostedSub')} />
       </div>
 
       {/* Rate config */}
-      <div className="card2 p-5 mb-5">
-        <div className="text-base font-bold font-heading mb-1">{t('costIntel.costRatesTitle')}</div>
-        <div className="text-xs text-slate-500 mb-4">{t('costIntel.costRatesSub')}</div>
+      <SectionCard className="mb-4" title={t('costIntel.costRatesTitle')} subtitle={t('costIntel.costRatesSub')}>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {RATE_FIELDS.map(f => (
             <div key={f.key}>
@@ -121,22 +119,21 @@ export function CostIntelligence() {
                 type="number"
                 value={config[f.key]}
                 onChange={e => setRate(f.key, e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-[10px] text-[13px] focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300 transition"
               />
             </div>
           ))}
         </div>
-      </div>
+      </SectionCard>
 
       {/* Per-batch table */}
-      <div className="card2 p-6">
-        <div className="text-base font-bold font-heading mb-3">{t('costIntel.tableTitle')}</div>
+      <SectionCard flush title={t('costIntel.tableTitle')}>
         {isLoading ? (
-          <SkeletonRows rows={6} />
+          <div className="px-5 pb-5"><SkeletonRows rows={6} /></div>
         ) : isError ? (
-          <ErrorState title={t('costIntel.errorLoad')} onRetry={() => refetch()} />
+          <div className="px-5 pb-5"><ErrorState title={t('costIntel.errorLoad')} onRetry={() => refetch()} /></div>
         ) : costed.length === 0 ? (
-          <EmptyState title={t('costIntel.emptyTitle')} message={t('costIntel.emptyMessage')} />
+          <div className="px-5 pb-5"><EmptyState title={t('costIntel.emptyTitle')} message={t('costIntel.emptyMessage')} /></div>
         ) : (
           <div className="overflow-x-auto scroll-x">
             <table className="dt2">
@@ -166,7 +163,7 @@ export function CostIntelligence() {
             </table>
           </div>
         )}
-      </div>
+      </SectionCard>
     </>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Boxes, Layers, Package, Fuel, Plus } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { insertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
@@ -7,7 +8,7 @@ import { SkeletonRows, ErrorState } from '../../components/ui/states';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../lib/scopedList';
 import { useSortable } from '../../components/ui/useSortable';
-import { ThV2 as Th } from '../../components/v2';
+import { ThV2 as Th, StatCard, SectionCard, FilterBar, ButtonV2 } from '../../components/v2';
 import type { Database } from '../../lib/database.types';
 
 type StockRow = Database['public']['Tables']['stock_levels']['Row'] & { plants?: { name: string | null } | null };
@@ -144,31 +145,20 @@ export function CPMStock() {
   return (
     <>
       {/* KPIs */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('cpmStock.totalStockRecords')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{stockItems.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('cpmStock.acrossAllPlants')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('cpmStock.totalQuantity')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">
-            {stockItems.reduce((s, i) => s + (i.quantity || 0), 0).toFixed(0)}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('cpmStock.unitsOnRecord')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('cpmStock.productsTracked')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">
-            {new Set(stockItems.map(i => i.product)).size}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('cpmStock.uniqueProducts')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('cpmStock.tankCapacity')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{avgTankLevel}%</div>
-          <div className="progress mt-2"><div style={{ width: `${avgTankLevel}%` }}></div></div>
-        </div>
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<Boxes />} tone="orange"
+          label={t('cpmStock.totalStockRecords')} value={stockItems.length}
+          caption={t('cpmStock.acrossAllPlants')} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<Layers />} tone="blue"
+          label={t('cpmStock.totalQuantity')}
+          value={stockItems.reduce((s, i) => s + (i.quantity || 0), 0).toFixed(0)}
+          caption={t('cpmStock.unitsOnRecord')} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<Package />} tone="purple"
+          label={t('cpmStock.productsTracked')} value={new Set(stockItems.map(i => i.product)).size}
+          caption={t('cpmStock.uniqueProducts')} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<Fuel />} tone="amber"
+          label={t('cpmStock.tankCapacity')} value={`${avgTankLevel}%`}
+          caption={<div className="progress mt-1"><div style={{ width: `${avgTankLevel}%` }}></div></div>} />
       </div>
 
       {loadError && (
@@ -182,14 +172,13 @@ export function CPMStock() {
       )}
 
       {/* Matrix + Tanks */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-7 card p-6">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="text-base font-bold font-heading">{t('cpmStock.cpDensityLocation')}</div>
-              <div className="text-xs text-slate-500">{t('cpmStock.drumsOnHandHint')}</div>
-            </div>
-          </div>
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <SectionCard
+          flush
+          className="col-span-12 lg:col-span-7"
+          title={t('cpmStock.cpDensityLocation')}
+          subtitle={t('cpmStock.drumsOnHandHint')}
+        >
           <div className="overflow-x-auto scroll-x">
             <table className="dt2">
               <thead>
@@ -223,11 +212,13 @@ export function CPMStock() {
               </tbody>
             </table>
           </div>
-        </div>
+        </SectionCard>
 
-        <div className="col-span-12 lg:col-span-5 card p-6">
-          <div className="text-base font-bold font-heading">{t('cpmStock.tankLevels')}</div>
-          <div className="text-xs text-slate-500 mb-4">{t('cpmStock.tankLevelsHint')}</div>
+        <SectionCard
+          className="col-span-12 lg:col-span-5"
+          title={t('cpmStock.tankLevels')}
+          subtitle={t('cpmStock.tankLevelsHint')}
+        >
           <div className="space-y-3">
             {tanks.map(tk => {
               const color = tk.alert ? '#DC2626' : tk.level_pct > 70 ? '#16A34A' : tk.level_pct > 30 ? '#F47651' : '#D97706';
@@ -255,36 +246,29 @@ export function CPMStock() {
               <div className="text-center text-slate-400 py-6 text-sm">{t('cpmStock.noTanksConfigured')}</div>
             )}
           </div>
-        </div>
+        </SectionCard>
       </div>
 
-      {/* Store items — green-soft */}
-      <div className="card2 p-6">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <div>
-            <div className="text-base font-bold font-heading">{t('cpmStock.storeItems')}</div>
-            <div className="text-xs text-slate-500">{t('cpmStock.storeItemsHint')}</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              value={storeSearch}
-              onChange={e => setStoreSearch(e.target.value)}
-              placeholder={t('cpmStock.searchItemPlaceholder')}
-              className="px-4 py-2 bg-slate-50 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
-            />
-            <button
-              className="chip hover:bg-slate-200 transition-colors cursor-pointer"
-              onClick={() => setShowBulkModal(true)}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 5v14M5 12h14"/>
-              </svg>
-              {t('cpmStock.bulkUpdate')}
-            </button>
-          </div>
-        </div>
+      {/* Store items */}
+      <FilterBar
+        className="mb-4"
+        search={storeSearch} onSearch={setStoreSearch}
+        searchPlaceholder={t('cpmStock.searchItemPlaceholder')}
+        onReset={() => setStoreSearch('')}
+      />
+
+      <SectionCard
+        flush
+        title={t('cpmStock.storeItems')}
+        subtitle={t('cpmStock.storeItemsHint')}
+        actions={
+          <ButtonV2 variant="accent" icon={<Plus />} onClick={() => setShowBulkModal(true)}>
+            {t('cpmStock.bulkUpdate')}
+          </ButtonV2>
+        }
+      >
         {loading ? (
-          <SkeletonRows rows={6} />
+          <div className="p-5"><SkeletonRows rows={6} /></div>
         ) : (
         <div className="overflow-x-auto scroll-x">
           <table className="dt2">
@@ -311,7 +295,7 @@ export function CPMStock() {
           </table>
         </div>
         )}
-      </div>
+      </SectionCard>
 
       {/* ── Bulk Update Modal ── */}
       {showBulkModal && (

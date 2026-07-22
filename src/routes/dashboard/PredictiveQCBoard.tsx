@@ -1,8 +1,10 @@
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Gauge, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts';
+import { StatCard, StatusPill, InfoBanner, type PillTone } from '../../components/v2';
 import { SkeletonRows, ErrorState, EmptyState } from '../../components/ui/states';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
 import { NotesButton } from '../../components/mentions';
@@ -35,10 +37,10 @@ interface BatchProjection {
   chart: { i: number; golden: number; live: number | null }[];
 }
 
-const STATUS_CFG = {
-  green: { label: 'On track', color: '#16A34A', bg: '#DCFCE7' },
-  amber: { label: 'Drifting', color: '#D97706', bg: '#FEF3C7' },
-  red:   { label: 'Off-spec risk', color: '#DC2626', bg: '#FEE2E2' },
+const STATUS_CFG: Record<BatchProjection['status'], { label: string; color: string; pill: PillTone }> = {
+  green: { label: 'On track', color: '#16A34A', pill: 'green' },
+  amber: { label: 'Drifting', color: '#D97706', pill: 'amber' },
+  red:   { label: 'Off-spec risk', color: '#DC2626', pill: 'red' },
 };
 
 export function PredictiveQCBoard() {
@@ -91,26 +93,32 @@ export function PredictiveQCBoard() {
 
   return (
     <>
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-4 card p-5" style={{ position: 'relative' }}>
+      {/* KPI row */}
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Live Predictive QC', what: 'Every running batch projected to where it will land — its live gravity curve against the proven golden-batch trajectory for that grade, hours before closure.', source: 'Derived', note: 'Golden curve per grade; projection = drift vs golden carried to the endpoint. Detector 4.1 raises flags into the Anomaly Center.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('predictiveQc.runningBatches')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{projections.length}</div>
+          <StatCard className="h-full" icon={<Gauge />} tone="blue"
+            label={t('predictiveQc.runningBatches')} value={projections.length} />
         </div>
-        <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('predictiveQc.projectionStatus')}</div>
-          <div className="flex items-center gap-3 mt-2">
-            <span className="text-sm font-bold text-green-600">{t('predictiveQc.onTrackCount', { count: counts.green })}</span>
-            <span className="text-sm font-bold text-amber-600">{t('predictiveQc.driftingCount', { count: counts.amber })}</span>
-            <span className="text-sm font-bold text-red-600">{t('predictiveQc.atRiskCount', { count: counts.red })}</span>
-          </div>
-        </div>
-        <div className="col-span-12 lg:col-span-4 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('predictiveQc.goldenBatchModel')}</div>
-          <div className="text-sm font-semibold mt-2 text-slate-600">{t('predictiveQc.perGradeTrajectory')}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('predictiveQc.steerHint')}</div>
-        </div>
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<CheckCircle2 />} tone="green"
+          valueTone={counts.green > 0 ? 'green' : 'default'}
+          label={t('predictiveQc.status_green')} value={counts.green}
+          caption={t('predictiveQc.onTrackCount', { count: counts.green })} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<AlertCircle />} tone="amber"
+          valueTone={counts.amber > 0 ? 'amber' : 'default'}
+          label={t('predictiveQc.status_amber')} value={counts.amber}
+          caption={t('predictiveQc.driftingCount', { count: counts.amber })} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<AlertTriangle />} tone="red"
+          valueTone={counts.red > 0 ? 'red' : 'default'}
+          label={t('predictiveQc.status_red')} value={counts.red}
+          caption={t('predictiveQc.atRiskCount', { count: counts.red })} />
       </div>
+
+      {/* Golden-batch model explainer */}
+      <InfoBanner className="mb-4">
+        <span className="font-semibold text-slate-700">{t('predictiveQc.goldenBatchModel')}</span>
+        {' — '}{t('predictiveQc.perGradeTrajectory')} · {t('predictiveQc.steerHint')}
+      </InfoBanner>
 
       {isLoading ? (
         <div className="card2 p-5"><SkeletonRows rows={6} /></div>
@@ -119,18 +127,18 @@ export function PredictiveQCBoard() {
       ) : projections.length === 0 ? (
         <div className="card2 p-5"><EmptyState title={t('predictiveQc.emptyTitle')} message={t('predictiveQc.emptyMessage')} /></div>
       ) : (
-        <div className="grid grid-cols-12 gap-5">
+        <div className="grid grid-cols-12 gap-4">
           {projections.map(p => {
             const cfg = STATUS_CFG[p.status];
             return (
-              <div key={p.batch.id} className="col-span-12 lg:col-span-6 card p-5" style={{ borderTop: `3px solid ${cfg.color}` }}>
+              <div key={p.batch.id} className="col-span-12 lg:col-span-6 card2 p-5" style={{ borderTop: `3px solid ${cfg.color}` }}>
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    <div className="text-base font-bold font-heading">{t('predictiveQc.batchLabel', { no: p.batch.batch_no })}</div>
-                    <div className="text-xs text-slate-500">{t('predictiveQc.batchMeta', { plant: p.batch.plants?.name || '—', grade: p.grade, count: p.live.length })}</div>
+                    <div className="text-base font-heading font-semibold">{t('predictiveQc.batchLabel', { no: p.batch.batch_no })}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{t('predictiveQc.batchMeta', { plant: p.batch.plants?.name || '—', grade: p.grade, count: p.live.length })}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{t('predictiveQc.status_' + p.status)}</span>
+                    <StatusPill tone={cfg.pill} dot label={t('predictiveQc.status_' + p.status)} />
                     <NotesButton
                       entityType="active_batch"
                       entityId={p.batch.id}

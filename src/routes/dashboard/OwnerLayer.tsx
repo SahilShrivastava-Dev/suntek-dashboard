@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Send } from 'lucide-react';
 import { useOverviewKPIs, useAnalyticsKPIs, useTopCustomers, fmtINR } from '../../hooks/useBusyData';
 import { useToast } from '../../components/ui/toast';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
+import { SectionCard, ButtonV2, InfoBanner } from '../../components/v2';
 import { computeBatchCost, DEFAULT_COST_CONFIG, type CostConfig } from '../../lib/algorithms/costEngine';
 
 // ── Daily digest ──────────────────────────────────────────────────────────────
@@ -52,6 +54,8 @@ const DRIVERS: { key: keyof CostConfig; label: string }[] = [
   { key: 'energyRatePerHour', label: 'owner.driver.energy' },
 ];
 
+const FIELD_CLS = 'w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-[10px] text-[13px] focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300 transition';
+
 function WhatIf() {
   const { t } = useTranslation();
   const [driver, setDriver] = useState<keyof CostConfig>('cl2RatePerMT');
@@ -67,36 +71,34 @@ function WhatIf() {
   const orderBookHit = deltaPerMT * orderBookMT;
 
   return (
-    <div className="card2 p-6">
-      <div className="text-base font-bold font-heading mb-1">{t('owner.whatif.title')}</div>
-      <div className="text-xs text-slate-500 mb-4">{t('owner.whatif.subtitle')}</div>
-      <div className="grid grid-cols-3 gap-3 mb-4">
+    <SectionCard title={t('owner.whatif.title')} subtitle={t('owner.whatif.subtitle')}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <div>
           <div className="text-[11px] font-semibold text-slate-500 mb-1">{t('owner.whatif.driver')}</div>
-          <select value={driver} onChange={e => setDriver(e.target.value as keyof CostConfig)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none">
+          <select value={driver} onChange={e => setDriver(e.target.value as keyof CostConfig)} className={FIELD_CLS + ' cursor-pointer'}>
             {DRIVERS.map(d => <option key={d.key} value={d.key}>{t(d.label)}</option>)}
           </select>
         </div>
         <div>
           <div className="text-[11px] font-semibold text-slate-500 mb-1">{t('owner.whatif.change')}</div>
-          <input type="number" value={pct} onChange={e => setPct(parseFloat(e.target.value) || 0)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none" />
+          <input type="number" value={pct} onChange={e => setPct(parseFloat(e.target.value) || 0)} className={FIELD_CLS} />
         </div>
         <div>
           <div className="text-[11px] font-semibold text-slate-500 mb-1">{t('owner.whatif.orderBook')}</div>
-          <input type="number" value={orderBookMT} onChange={e => setOrderBookMT(parseFloat(e.target.value) || 0)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none" />
+          <input type="number" value={orderBookMT} onChange={e => setOrderBookMT(parseFloat(e.target.value) || 0)} className={FIELD_CLS} />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-          <div className="text-xs text-slate-500">{t('owner.whatif.costImpact')}</div>
-          <div className="text-xl font-bold num" style={{ color: deltaPerMT > 0 ? '#DC2626' : '#16A34A' }}>{deltaPerMT >= 0 ? '+' : ''}{fmtINR(deltaPerMT)}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('owner.whatif.costImpact')}</div>
+          <div className="text-[24px] font-extrabold mt-1 num" style={{ color: deltaPerMT > 0 ? '#DC2626' : '#16A34A' }}>{deltaPerMT >= 0 ? '+' : ''}{fmtINR(deltaPerMT)}</div>
         </div>
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-          <div className="text-xs text-slate-500">{t('owner.whatif.orderBookHit')}</div>
-          <div className="text-xl font-bold num" style={{ color: orderBookHit > 0 ? '#DC2626' : '#16A34A' }}>{orderBookHit >= 0 ? '+' : ''}{fmtINR(orderBookHit)}</div>
+        <div className="rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
+          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('owner.whatif.orderBookHit')}</div>
+          <div className="text-[24px] font-extrabold mt-1 num" style={{ color: orderBookHit > 0 ? '#DC2626' : '#16A34A' }}>{orderBookHit >= 0 ? '+' : ''}{fmtINR(orderBookHit)}</div>
         </div>
       </div>
-    </div>
+    </SectionCard>
   );
 }
 
@@ -119,41 +121,49 @@ export function OwnerLayer() {
 
   return (
     <>
-      <div className="grid grid-cols-12 gap-5 mb-5">
+      <div className="grid grid-cols-12 gap-4 mb-4">
         {/* Daily digest */}
-        <div className="col-span-12 lg:col-span-6 card p-6" style={{ position: 'relative' }}>
-          <KpiInfoButton info={{ title: 'Daily digest', what: 'An auto-generated end-of-day summary — sales, margin, collections, cash cycle — so the day no longer starts with three phone calls. Pushable to WhatsApp/email.', source: 'Derived', note: 'Composed live from the overview + analytics KPIs.' }} />
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-base font-bold font-heading">{t('owner.dailyDigest.title')}</div>
-            <button className="chip hover:bg-slate-200" onClick={() => toast.success(t('owner.digestQueued'))}>{t('owner.send')}</button>
-          </div>
+        <SectionCard
+          className="col-span-12 lg:col-span-6"
+          title={t('owner.dailyDigest.title')}
+          actions={
+            <>
+              <KpiInfoButton
+                style={{ position: 'relative', top: 0, right: 0 }}
+                info={{ title: 'Daily digest', what: 'An auto-generated end-of-day summary — sales, margin, collections, cash cycle — so the day no longer starts with three phone calls. Pushable to WhatsApp/email.', source: 'Derived', note: 'Composed live from the overview + analytics KPIs.' }}
+              />
+              <ButtonV2 size="sm" variant="outline" icon={<Send />} onClick={() => toast.success(t('owner.digestQueued'))}>{t('owner.send')}</ButtonV2>
+            </>
+          }
+        >
           <ul className="space-y-2">
             {digest.map((l, i) => (
               <li key={i} className="text-sm text-slate-600 flex gap-2"><span className="text-orange-400">•</span><span>{l}</span></li>
             ))}
           </ul>
-        </div>
+        </SectionCard>
 
         {/* Ask-your-data */}
-        <div className="col-span-12 lg:col-span-6 card p-6" style={{ position: 'relative' }}>
+        <div className="col-span-12 lg:col-span-6 relative">
           <KpiInfoButton info={{ title: 'Ask your data', what: 'A natural-language layer over the data — ask a question, get a number. (Routes to the LLM analyst for open-ended queries.)', source: 'Derived', note: 'Deterministic answers over live KPIs today; LLM-backed for free-form questions.' }} />
-          <div className="text-base font-bold font-heading mb-3">{t('owner.askData.title')}</div>
-          <div className="flex gap-2">
-            <input
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && q.trim()) setReply(answer(q)); }}
-              placeholder={t('owner.askData.placeholder')}
-              className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
-            />
-            <button className="btn-accent rounded-[10px] px-4 font-semibold text-sm" onClick={() => q.trim() && setReply(answer(q))}>{t('owner.askData.ask')}</button>
-          </div>
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            {quickChips.map(c => (
-              <button key={c.value} className="chip text-xs" onClick={() => { setQ(c.value); setReply(answer(c.value)); }}>{t(c.labelKey)}</button>
-            ))}
-          </div>
-          {reply && <div className="mt-4 p-3 rounded-xl bg-blue-50 border border-blue-100 text-sm text-blue-900">{reply}</div>}
+          <SectionCard className="h-full" title={t('owner.askData.title')}>
+            <div className="flex gap-2">
+              <input
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && q.trim()) setReply(answer(q)); }}
+                placeholder={t('owner.askData.placeholder')}
+                className="flex-1 px-3.5 py-2.5 bg-white border border-slate-200 rounded-[10px] text-[13px] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300 transition"
+              />
+              <ButtonV2 variant="accent" onClick={() => q.trim() && setReply(answer(q))}>{t('owner.askData.ask')}</ButtonV2>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-2.5">
+              {quickChips.map(c => (
+                <ButtonV2 key={c.value} size="sm" variant="outline" onClick={() => { setQ(c.value); setReply(answer(c.value)); }}>{t(c.labelKey)}</ButtonV2>
+              ))}
+            </div>
+            {reply && <InfoBanner className="mt-4">{reply}</InfoBanner>}
+          </SectionCard>
         </div>
       </div>
 

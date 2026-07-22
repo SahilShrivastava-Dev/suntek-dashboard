@@ -373,7 +373,7 @@ export function ActivityLog() {
               {showManualOnly ? t('activity.showMaintenanceFeed') : t('activity.manualOnly')}
             </button>
             <button className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-              {t('activity.logActivityBtn')}
+              + {t('activity.logActivityBtn')}
             </button>
           </div>
         </div>

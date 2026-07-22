@@ -262,7 +262,7 @@ export function PurchaseOrders() {
               <ButtonV2 variant="outline" icon={<Download />} onClick={handleExport}>
                 {t('po.btn_export')}
               </ButtonV2>
-              <ButtonV2 variant="accent" onClick={() => setOpen(true)}>
+              <ButtonV2 variant="accent" icon={<Plus />} onClick={() => setOpen(true)}>
                 {t('po.btn_new_po')}
               </ButtonV2>
             </>

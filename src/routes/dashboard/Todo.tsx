@@ -198,6 +198,31 @@ export function Todo() {
           <div className="text-[14px] font-semibold text-slate-600">{t('todo.noMatch', { q: query })}</div>
         </div>
       ) : (
+        <>
+        {/* ── Section tiles — one per work bucket; click jumps to its table ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+          {view.map((s) => {
+            const tone = TONE[s.tone];
+            return (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => document.getElementById(`todo-sec-${s.key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className="card2 p-4 text-left hover:shadow-md hover:-translate-y-0.5 transition-all"
+                style={{ fontFamily: 'inherit', cursor: 'pointer', borderTop: `3px solid ${tone.color}` }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="w-9 h-9 rounded-[10px] inline-flex items-center justify-center text-[17px]" style={{ background: tone.bg }}>
+                    {s.icon}
+                  </span>
+                  <span className="text-[24px] font-bold num" style={{ color: tone.color }}>{s.items.length}</span>
+                </div>
+                <div className="text-[12px] font-semibold text-slate-700 leading-snug">{t(s.titleKey)}</div>
+              </button>
+            );
+          })}
+        </div>
+
         <div className="flex flex-col gap-4">
           {view.map((s) => {
             const tone = TONE[s.tone];
@@ -207,10 +232,10 @@ export function Todo() {
             const start = page * PAGE_SIZE;
             const pageItems = s.items.slice(start, start + PAGE_SIZE);
             return (
-              <div key={s.key} className="card2 overflow-hidden">
-                {/* Section header — title, per-section sort, count */}
+              <div key={s.key} id={`todo-sec-${s.key}`} className="card2 overflow-hidden" style={{ scrollMarginTop: 16, borderLeft: `3px solid ${tone.color}` }}>
+                {/* Section header — tone icon square, title, per-section sort, count */}
                 <div className="flex items-center gap-2.5 px-5 py-3" style={{ borderBottom: '1px solid #F1F5F9' }}>
-                  <span style={{ fontSize: 18 }}>{s.icon}</span>
+                  <span className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[15px] shrink-0" style={{ background: tone.bg }}>{s.icon}</span>
                   <div className="font-bold text-[14px] text-slate-800 font-heading">{t(s.titleKey)}</div>
                   <div className="ml-auto flex items-center gap-2">
                     <select
@@ -313,6 +338,7 @@ export function Todo() {
             );
           })}
         </div>
+        </>
       )}
     </div>
   );

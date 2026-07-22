@@ -471,7 +471,7 @@ export function Blacklist() {
               style={{ background: '#DC2626' }}
               onClick={() => { setForm({ ...BLANK_FORM }); setSaved(false); setShowPanel(true); }}
             >
-              {t('blacklist.addBtn')}
+              + {t('blacklist.addBtn')}
             </button>
           </div>
         </div>

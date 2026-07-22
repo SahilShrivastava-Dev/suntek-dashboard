@@ -10,6 +10,7 @@ import { useRoleContext } from '../../contexts/RoleContext';
 import { statusBadge } from '../dashboard/purchase/maintenance/shared';
 import { matchAsset } from '../../lib/far/assets';
 import { ButtonV2, StatusPill } from '../../components/v2';
+import { ImageLightbox, type LightboxImage } from '../../components/ui/ImageLightbox';
 import { assetQrUrl, downloadDataUrl, printQrLabel, safeFileName } from '../../lib/far/qr';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell,
@@ -88,6 +89,7 @@ export function AssetProfile() {
 
   const [loading, setLoading] = useState(true);
   const qrCanvasRef = useRef<HTMLDivElement>(null);
+  const [photoView, setPhotoView] = useState<LightboxImage[] | null>(null);
   const [asset, setAsset] = useState<AssetRow | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [tickets, setTickets] = useState<TicketRow[]>([]);
@@ -239,7 +241,17 @@ export function AssetProfile() {
         <div className="card2 p-5 sm:p-6 mb-4 sm:mb-5">
           <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5 flex-wrap">
             {asset.photo_url
-              ? <img src={asset.photo_url} alt="" className="w-20 h-20 rounded-xl object-cover shrink-0 border border-slate-200 bg-slate-50" />
+              ? (
+                <button
+                  type="button"
+                  onClick={() => setPhotoView([{ url: asset.photo_url as string, label: heroLabel }])}
+                  title="View full photo"
+                  className="shrink-0 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:ring-2 hover:ring-slate-300 transition"
+                  style={{ padding: 0, lineHeight: 0, cursor: 'zoom-in' }}
+                >
+                  <img src={asset.photo_url} alt={heroLabel} className="w-20 h-20 object-cover block" />
+                </button>
+              )
               : <div className="w-20 h-20 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-[28px] shrink-0">🏭</div>}
             <div className="min-w-0 flex-1">
               <div className="font-heading font-semibold text-[26px] leading-tight">{asset.name}</div>
@@ -464,6 +476,8 @@ export function AssetProfile() {
 
         <div className="text-center text-[11px] text-slate-400 mt-6">All asset information is automatically updated from the system.</div>
       </div>
+
+      <ImageLightbox images={photoView || []} open={!!photoView} onClose={() => setPhotoView(null)} />
     </div>
   );
 }

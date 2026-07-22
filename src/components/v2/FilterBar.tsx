@@ -41,7 +41,10 @@ export function FilterBar({
       )}
       {children}
       {onReset && (
-        <ButtonV2 variant="outline" icon={<RotateCw />} onClick={onReset}>
+        <ButtonV2
+          variant="outline" icon={<RotateCw />} onClick={onReset}
+          title={t('common.resetHint', 'Clear the search box and set every filter back to "All"')}
+        >
           {t('common.reset')}
         </ButtonV2>
       )}

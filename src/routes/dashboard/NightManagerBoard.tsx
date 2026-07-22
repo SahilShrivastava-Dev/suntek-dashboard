@@ -130,7 +130,7 @@ const createCustomIcon = (initials: string, status: string) => {
 export function NightManagerBoard() {
   const { t } = useTranslation();
   const toast = useToast();
-  const { can } = useRoleContext();
+  const { can, roles } = useRoleContext();
   const [liveDuty, setLiveDuty] = useState<CheckInLog[]>([]);
   const [deviceMappings, setDeviceMappings] = useState<DeviceMappingRow[]>([]);
   const [selectedCheckIn, setSelectedCheckIn] = useState<CheckInLog | null>(null);
@@ -166,17 +166,44 @@ export function NightManagerBoard() {
 
       const logs = logsData || [];
 
+      // 2b. Night-duty check-ins carry no profiles row — resolve the person via
+      //     shift_logs.night_duty_id → night_duty.technician_id → user_accounts.
+      const dutyIds = [...new Set(logs.map(l => (l as { night_duty_id?: string | null }).night_duty_id).filter(Boolean))] as string[];
+      const dutyTech = new Map<string, string>(); // night_duty_id → technician account id
+      const acctName = new Map<string, { name: string; role_id: string | null }>();
+      if (dutyIds.length) {
+        const { data: dutyRows } = await supabase.from('night_duty').select('id, technician_id').in('id', dutyIds)
+          .returns<{ id: string; technician_id: string }[]>();
+        (dutyRows ?? []).forEach(d => dutyTech.set(d.id, d.technician_id));
+        const techIds = [...new Set((dutyRows ?? []).map(d => d.technician_id))];
+        if (techIds.length) {
+          const { data: acctRows } = await supabase.from('user_accounts').select('id, name, role_id').in('id', techIds)
+            .returns<{ id: string; name: string; role_id: string | null }[]>();
+          (acctRows ?? []).forEach(a => acctName.set(a.id, { name: a.name, role_id: a.role_id }));
+        }
+      }
+      const roleLabelOf = (roleId: string | null) => roles.find(r => r.id === roleId)?.label ?? 'Technician';
+
       // 3. Format shift logs with mapping resolution
       const formatted = logs.map((row, index: number) => {
         const isGuest = !row.employee_id;
         const ip = row.ip_address;
-        
+
         let name = row.profiles?.name || t('nightBoard.liveCheckIn');
         let role = row.profiles?.role || 'L1';
         let phone = row.profiles?.phone || null;
         let isMapped = false;
 
-        if (isGuest && ip) {
+        // Night-duty check-in → real person from the duty roster.
+        const dutyId = (row as { night_duty_id?: string | null }).night_duty_id;
+        if (dutyId && dutyTech.has(dutyId)) {
+          const acct = acctName.get(dutyTech.get(dutyId)!);
+          if (acct) {
+            name = acct.name;
+            role = roleLabelOf(acct.role_id);
+            isMapped = true;
+          }
+        } else if (isGuest && ip) {
           const mapping = activeMappings.find((m) => m.ip_address === ip);
           if (mapping) {
             name = mapping.name;

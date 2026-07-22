@@ -166,7 +166,7 @@ export function BatchSheet() {
             to="/operator/batch-logger"
             className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm no-underline inline-block text-center flex items-center justify-center"
           >
-            {t('batch.startBatch')}
+            + {t('batch.startBatch')}
           </Link>
         </div>
         <div className="overflow-x-auto scroll-x">

@@ -60,6 +60,9 @@ export function NightDutyScheduler() {
   const [selectedTechIds, setSelectedTechIds] = useState<string[]>([]);
   const [repeatDays, setRepeatDays] = useState<number[]>([]);
   const [repeatUntil, setRepeatUntil] = useState('');
+  // Duty plant: 'auto' = each person's own plant; or force a specific plant so a
+  // multi-plant technician can hold separate duties at each plant per night.
+  const [dutyPlant, setDutyPlant] = useState<string>('auto');
   const [saving, setSaving] = useState(false);
   const [techSearch, setTechSearch] = useState('');
   // The scheduling form lives in an inline right-side wizard panel.
@@ -173,20 +176,35 @@ export function NightDutyScheduler() {
           rows.push({
             technician_id: techId,
             assigned_by: myAccountId,
-            plant_id: tech?.plant_id ?? null,
+            plant_id: dutyPlant === 'auto' ? (tech?.plant_id ?? null) : dutyPlant,
             duty_date: date,
             status: 'scheduled',
             recurrence_group: group,
           });
         }
       }
-      // Idempotent per (technician, date): skip clashes rather than error out.
+      // Idempotent per (technician, date, plant) — migration 52. Falls back to the
+      // legacy (technician, date) key until that migration has been run. Skipped
+      // duplicates are reported honestly instead of pretending they were created.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (supabase.from('night_duty') as any)
-        .upsert(rows, { onConflict: 'technician_id,duty_date', ignoreDuplicates: true });
-      if (error) { toast.error(`Schedule failed: ${error.message}`); return; }
-      toast.success(`Scheduled ${rows.length} duty slot${rows.length === 1 ? '' : 's'}`);
-      setSelectedDates([]); setSelectedTechIds([]); setRepeatDays([]); setRepeatUntil('');
+      let res = await (supabase.from('night_duty') as any)
+        .upsert(rows, { onConflict: 'technician_id,duty_date,plant_id', ignoreDuplicates: true })
+        .select('id');
+      if (res.error && /no unique|exclusion constraint/i.test(res.error.message)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        res = await (supabase.from('night_duty') as any)
+          .upsert(rows, { onConflict: 'technician_id,duty_date', ignoreDuplicates: true })
+          .select('id');
+      }
+      if (res.error) { toast.error(`Schedule failed: ${res.error.message}`); return; }
+      const created = res.data?.length ?? 0;
+      const skipped = rows.length - created;
+      if (created === 0) {
+        toast.error(`Nothing new — ${skipped === 1 ? 'that slot already exists' : `all ${skipped} slots already exist`} for the selected people/dates${skipped ? ' (same plant + date)' : ''}.`);
+        return; // keep the wizard open so the allocator can adjust
+      }
+      toast.success(`Scheduled ${created} duty slot${created === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} already existed` : ''}`);
+      setSelectedDates([]); setSelectedTechIds([]); setRepeatDays([]); setRepeatUntil(''); setDutyPlant('auto');
       setSchedulerOpen(false); setStep(1); // close the wizard on success — back to the report
       await load();
     } finally { setSaving(false); }
@@ -337,6 +355,20 @@ export function NightDutyScheduler() {
           );
         })}
       </div>
+
+      {/* Duty plant — lets a multi-plant technician be scheduled per plant */}
+      <div className="mt-3">
+        <div className="text-[11.5px] font-bold text-slate-600 mb-1">Duty plant</div>
+        <select
+          value={dutyPlant}
+          onChange={e => setDutyPlant(e.target.value)}
+          style={{ width: '100%', padding: '8px 11px', border: '1px solid #E2E8F0', borderRadius: 10, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', cursor: 'pointer' }}
+        >
+          <option value="auto">Auto — each person's own plant</option>
+          {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <div className="text-[10.5px] text-slate-400 mt-1">Pick a specific plant to schedule someone at a plant other than their own — e.g. a second duty the same night at another plant.</div>
+      </div>
     </div>
   );
 
@@ -368,6 +400,7 @@ export function NightDutyScheduler() {
       <div className="rounded-[10px] border border-slate-200 divide-y divide-slate-100">
         <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Employees</span><span className="font-semibold">{selectedTechIds.length}</span></div>
         <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Nights</span><span className="font-semibold">{selectedDates.length}</span></div>
+        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Duty plant</span><span className="font-semibold">{dutyPlant === 'auto' ? "Each person's own" : (plantName[dutyPlant] ?? '—')}</span></div>
         <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Duty slots</span><span className="font-semibold">{selectedTechIds.length * selectedDates.length}</span></div>
       </div>
       {selectedTechIds.length > 0 && (

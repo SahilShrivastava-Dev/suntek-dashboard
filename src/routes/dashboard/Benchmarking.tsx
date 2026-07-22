@@ -105,10 +105,10 @@ export function Benchmarking() {
         </div>
       </div>
 
-      <div className="card p-6">
+      <div className="card2 p-6">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">{t('benchmarking.title')}</div>
+            <div className="text-base font-bold font-heading">{t('benchmarking.title')}</div>
             <div className="text-xs text-slate-500">{t('benchmarking.subtitle')}</div>
           </div>
         </div>
@@ -120,7 +120,7 @@ export function Benchmarking() {
           <EmptyState title={t('benchmarking.emptyTitle')} message={t('benchmarking.emptyMessage')} />
         ) : (
           <div className="overflow-x-auto scroll-x">
-            <table className="dt">
+            <table className="dt2">
               <thead>
                 <tr>
                   <th className="num">#</th><th>{t('benchmarking.colPlant')}</th><th className="num">{t('benchmarking.colBatches')}</th>

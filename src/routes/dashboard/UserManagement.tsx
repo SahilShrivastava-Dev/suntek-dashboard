@@ -13,8 +13,9 @@ import { logUserAccountEvent, LANGUAGE_OPTIONS } from '../../lib/userEvents';
 import { SlidePanel, PanelField, PanelInput, PanelPasswordInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
 import { usePagination } from '../../components/ui/usePagination';
-import { TablePagination } from '../../components/ui/TablePagination';
-import { useSortable, Th } from '../../components/ui/useSortable';
+import { TablePaginationV2 as TablePagination } from '../../components/v2';
+import { useSortable } from '../../components/ui/useSortable';
+import { ThV2 as Th } from '../../components/v2';
 
 interface UserEvent {
   id: string;
@@ -612,11 +613,11 @@ export function UserManagement() {
       </div>
 
       {/* User table */}
-      <div className="card p-6">
+      <div className="card2 p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">{t('userMgmt.userAccounts')}</div>
+            <div className="text-base font-bold font-heading">{t('userMgmt.userAccounts')}</div>
             <div className="text-xs text-slate-500">{t('userMgmt.userAccountsSub')}</div>
           </div>
           <div className="flex gap-2">
@@ -630,7 +631,7 @@ export function UserManagement() {
               </button>
             )}
             {can('manage_users') && (
-              <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAdd}>
+              <button className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" onClick={openAdd}>
                 + {t('userMgmt.addUser')}
               </button>
             )}
@@ -658,7 +659,7 @@ export function UserManagement() {
         </div>
 
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="name" s={usersSort}>{t('userMgmt.colName')}</Th>
@@ -1037,7 +1038,7 @@ export function UserManagement() {
         subtitle={t('userMgmt.roleManagerSub', 'Define roles and what each can access')}
       >
         <div className="flex justify-end mb-3">
-          <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openRoleAdd}>
+          <button className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" onClick={openRoleAdd}>
             + {t('userMgmt.addRole', 'New Role')}
           </button>
         </div>

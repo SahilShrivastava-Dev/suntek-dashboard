@@ -135,13 +135,13 @@ export function AuditLog() {
 
       {/* Main card */}
       <div
-        className="card p-6"
-        style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}
+        className="card2 p-6"
+       
       >
         {/* Header row and Search */}
         <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
           <div>
-            <div className="text-base font-bold flex items-center gap-2">
+            <div className="text-base font-bold font-heading flex items-center gap-2">
               {t('audit.auditTrailTitle')}
               <span
                 className="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -207,7 +207,7 @@ export function AuditLog() {
                   </span>
 
                   {/* Log Content Card */}
-                  <div className="card p-4 bg-white/70 backdrop-blur-sm shadow-sm border border-slate-200/50 hover:border-slate-300 transition-all rounded-2xl">
+                  <div className="card2 p-4 bg-white/70 backdrop-blur-sm shadow-sm border border-slate-200/50 hover:border-slate-300 transition-all rounded-2xl">
                     <div className="flex items-start justify-between flex-wrap gap-2 mb-2">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-slate-900">

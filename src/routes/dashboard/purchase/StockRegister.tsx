@@ -4,8 +4,9 @@ import { insertRows } from '../../../lib/db';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows } from '../../../components/ui/states';
 import { usePagination } from '../../../components/ui/usePagination';
-import { TablePagination } from '../../../components/ui/TablePagination';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { TablePaginationV2 as TablePagination } from '../../../components/v2';
+import { useSortable } from '../../../components/ui/useSortable';
+import { ThV2 as Th } from '../../../components/v2';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
@@ -317,10 +318,10 @@ export function StockRegister() {
   const multiStore = plantFilter.length !== 1 && plantsInData.length > 1;
 
   return (
-    <div className="card p-6 mb-5">
+    <div className="card2 p-6 mb-5">
       <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
         <div>
-          <div className="text-base font-bold">Stock register</div>
+          <div className="text-base font-bold font-heading">Stock register</div>
           <div className="text-xs text-slate-500">
             On-hand seeded from the monthly Store Keeping file, adjusted live as parts are issued.
             {latestUpload ? ` · Latest month: ${latestUpload.slice(0, 7)}` : ''}
@@ -330,7 +331,7 @@ export function StockRegister() {
           {items.length > 0 && (
             <button onClick={() => setShowPurchase(true)} className="pill px-4 py-2 font-semibold text-sm" style={{ border: '1px solid #E2E8F0', background: '#fff', color: '#334155', cursor: 'pointer' }}>＋ Add Purchase</button>
           )}
-          <button onClick={() => fileRef.current?.click()} className="btn-accent pill px-4 py-2 font-semibold text-sm">↑ Upload Excel</button>
+          <button onClick={() => fileRef.current?.click()} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm">↑ Upload Excel</button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
             onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
         </div>
@@ -406,7 +407,7 @@ export function StockRegister() {
               )}
 
               <div className="overflow-x-auto scroll-x">
-                <table className="dt">
+                <table className="dt2">
                   <thead>
                     <tr>
                       <Th sortKey="item" s={mergedSort}>Item</Th><th>Equipment</th>{multiStore && <th>Stores</th>}<th>Unit</th>

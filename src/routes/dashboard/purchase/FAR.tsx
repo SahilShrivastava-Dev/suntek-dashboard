@@ -170,7 +170,7 @@ function AssetDetailTable({ assets, showPlant }: { assets: AssetRow[]; showPlant
   });
   return (
     <div className="overflow-x-auto scroll-x">
-      <table className="dt" style={{ margin: 0 }}>
+      <table className="dt2" style={{ margin: 0 }}>
         <thead><tr><Th sortKey="mark" s={s}>Mark</Th><Th sortKey="make" s={s}>Make</Th><Th sortKey="serial" s={s}>Serial</Th><Th sortKey="model" s={s}>Model</Th><Th sortKey="capacity" s={s} className="num">Capacity</Th><Th sortKey="year" s={s} firstDir="desc" className="num">Year</Th><Th sortKey="value" s={s} firstDir="desc" className="num">Value</Th>{showPlant && <Th sortKey="plant" s={s}>Plant</Th>}<th>Pic</th></tr></thead>
         <tbody>
           {s.sorted.map(a => (
@@ -670,7 +670,7 @@ export function FAR() {
                   </div>
                 </div>
                 <div className="overflow-x-auto scroll-x" style={{ maxHeight: 280 }}>
-                  <table className="dt">
+                  <table className="dt2">
                     <thead><tr><th>Equipment</th><th>{t('far.thIdMark')}</th><th>Make</th><th>Serial</th><th>Qty</th><th>{t('far.thModel')}</th><th>{t('far.thYear')}</th><th>{t('far.thTaxableValue')}</th><th>{t('far.thInvoice')}</th><th>{t('far.thPurchaseDate')}</th><th>{t('far.thAccountHead')}</th></tr></thead>
                     <tbody>
                       {parsedRows.map((r, i) => {
@@ -683,7 +683,7 @@ export function FAR() {
                 </div>
                 <div className="flex gap-2 mt-3">
                   <button onClick={() => resetImport()} className="chip">{t('far.cancel')}</button>
-                  <button onClick={confirmImport} disabled={!importPlantIds.length} className="btn-accent pill px-4 py-2 font-semibold text-sm" style={{ background: importPlantIds.length ? '#16A34A' : '#94A3B8', opacity: importPlantIds.length ? 1 : 0.6 }}>
+                  <button onClick={confirmImport} disabled={!importPlantIds.length} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" style={{ background: importPlantIds.length ? '#16A34A' : '#94A3B8', opacity: importPlantIds.length ? 1 : 0.6 }}>
                     ✓ Register {parsedRows.length * Math.max(1, importPlantIds.length)} asset{parsedRows.length * Math.max(1, importPlantIds.length) === 1 ? '' : 's'}
                   </button>
                 </div>

@@ -286,7 +286,7 @@ export function DailyLogPage() {
         <circle cx="12" cy="12" r="10" stroke="#fde68a" strokeWidth="3" />
         <path d="M12 2 A10 10 0 0 1 22 12" stroke="#d97706" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      <div className="text-base font-bold text-slate-700">{t('dailyLog.reading_sheet')}</div>
+      <div className="text-base font-bold font-heading text-slate-700">{t('dailyLog.reading_sheet')}</div>
       <div className="text-xs text-slate-400">{t('dailyLog.scanning_rows', { count: readings.length || '~13' })}</div>
     </div>
   );
@@ -338,7 +338,7 @@ export function DailyLogPage() {
                 <polyline points="10 9 9 9 8 9"/>
               </svg>
             </div>
-            <div className="text-base font-bold text-slate-700">{t('dailyLog.upload_title')}</div>
+            <div className="text-base font-bold font-heading text-slate-700">{t('dailyLog.upload_title')}</div>
             <div className="text-sm text-slate-400">{t('dailyLog.upload_sub1')}<br/>{t('dailyLog.upload_sub2')}</div>
           </>
         )}

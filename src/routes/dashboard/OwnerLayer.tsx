@@ -67,8 +67,8 @@ function WhatIf() {
   const orderBookHit = deltaPerMT * orderBookMT;
 
   return (
-    <div className="card p-6">
-      <div className="text-base font-bold mb-1">{t('owner.whatif.title')}</div>
+    <div className="card2 p-6">
+      <div className="text-base font-bold font-heading mb-1">{t('owner.whatif.title')}</div>
       <div className="text-xs text-slate-500 mb-4">{t('owner.whatif.subtitle')}</div>
       <div className="grid grid-cols-3 gap-3 mb-4">
         <div>
@@ -124,7 +124,7 @@ export function OwnerLayer() {
         <div className="col-span-12 lg:col-span-6 card p-6" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Daily digest', what: 'An auto-generated end-of-day summary — sales, margin, collections, cash cycle — so the day no longer starts with three phone calls. Pushable to WhatsApp/email.', source: 'Derived', note: 'Composed live from the overview + analytics KPIs.' }} />
           <div className="flex items-center justify-between mb-3">
-            <div className="text-base font-bold">{t('owner.dailyDigest.title')}</div>
+            <div className="text-base font-bold font-heading">{t('owner.dailyDigest.title')}</div>
             <button className="chip hover:bg-slate-200" onClick={() => toast.success(t('owner.digestQueued'))}>{t('owner.send')}</button>
           </div>
           <ul className="space-y-2">
@@ -137,7 +137,7 @@ export function OwnerLayer() {
         {/* Ask-your-data */}
         <div className="col-span-12 lg:col-span-6 card p-6" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Ask your data', what: 'A natural-language layer over the data — ask a question, get a number. (Routes to the LLM analyst for open-ended queries.)', source: 'Derived', note: 'Deterministic answers over live KPIs today; LLM-backed for free-form questions.' }} />
-          <div className="text-base font-bold mb-3">{t('owner.askData.title')}</div>
+          <div className="text-base font-bold font-heading mb-3">{t('owner.askData.title')}</div>
           <div className="flex gap-2">
             <input
               value={q}
@@ -146,7 +146,7 @@ export function OwnerLayer() {
               placeholder={t('owner.askData.placeholder')}
               className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
             />
-            <button className="btn-accent pill px-4 font-semibold text-sm" onClick={() => q.trim() && setReply(answer(q))}>{t('owner.askData.ask')}</button>
+            <button className="btn-accent rounded-[10px] px-4 font-semibold text-sm" onClick={() => q.trim() && setReply(answer(q))}>{t('owner.askData.ask')}</button>
           </div>
           <div className="flex flex-wrap gap-1.5 mt-2">
             {quickChips.map(c => (

@@ -32,7 +32,7 @@ export function StockSnapshot({ densities, locations, matrix, tanks, onOpenStock
           </button>
         </div>
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <th>Location</th>

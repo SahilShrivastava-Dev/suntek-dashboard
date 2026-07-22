@@ -81,7 +81,7 @@ export function OcrUploadCard({ kind }: { kind: Kind }) {
   const panelState = { stage, imageUrl: job.previewUrl ?? undefined, error: job.error ?? undefined };
 
   return (
-    <div className="card p-5 mb-5">
+    <div className="card2 p-5 mb-5">
       <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <span style={{ width: 30, height: 30, borderRadius: 9, background: `${accent}14`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>

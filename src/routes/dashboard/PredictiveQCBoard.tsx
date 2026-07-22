@@ -113,11 +113,11 @@ export function PredictiveQCBoard() {
       </div>
 
       {isLoading ? (
-        <div className="card p-5"><SkeletonRows rows={6} /></div>
+        <div className="card2 p-5"><SkeletonRows rows={6} /></div>
       ) : isError ? (
-        <div className="card p-5"><ErrorState title={t('predictiveQc.errorLoadTitle')} onRetry={() => refetch()} /></div>
+        <div className="card2 p-5"><ErrorState title={t('predictiveQc.errorLoadTitle')} onRetry={() => refetch()} /></div>
       ) : projections.length === 0 ? (
-        <div className="card p-5"><EmptyState title={t('predictiveQc.emptyTitle')} message={t('predictiveQc.emptyMessage')} /></div>
+        <div className="card2 p-5"><EmptyState title={t('predictiveQc.emptyTitle')} message={t('predictiveQc.emptyMessage')} /></div>
       ) : (
         <div className="grid grid-cols-12 gap-5">
           {projections.map(p => {
@@ -126,7 +126,7 @@ export function PredictiveQCBoard() {
               <div key={p.batch.id} className="col-span-12 lg:col-span-6 card p-5" style={{ borderTop: `3px solid ${cfg.color}` }}>
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    <div className="text-base font-bold">{t('predictiveQc.batchLabel', { no: p.batch.batch_no })}</div>
+                    <div className="text-base font-bold font-heading">{t('predictiveQc.batchLabel', { no: p.batch.batch_no })}</div>
                     <div className="text-xs text-slate-500">{t('predictiveQc.batchMeta', { plant: p.batch.plants?.name || '—', grade: p.grade, count: p.live.length })}</div>
                   </div>
                   <div className="flex items-center gap-2">

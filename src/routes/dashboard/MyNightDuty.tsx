@@ -125,8 +125,8 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
   if (!showEmpty && visible.length === 0) return null;
 
   return (
-    <div className="card p-5 mb-5">
-      <div className="text-base font-bold mb-1">🌙 My night duty</div>
+    <div className="card2 p-5 mb-5">
+      <div className="text-base font-bold font-heading mb-1">🌙 My night duty</div>
       <div className="text-xs text-slate-500 mb-3">Your booked night shifts. You can only check in <strong>on the night itself</strong> — take a photo to check in.</div>
 
       {/* Calendar of my booked nights */}
@@ -185,7 +185,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
                     <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
                       onChange={e => { const f = e.target.files?.[0]; if (f) setPhoto(p => ({ ...p, [d.id]: f })); }} />
                   </label>
-                  <button onClick={() => checkIn(d)} disabled={busy === d.id || !photo[d.id]} className="btn-accent pill"
+                  <button onClick={() => checkIn(d)} disabled={busy === d.id || !photo[d.id]} className="btn-accent rounded-[10px]"
                     style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: busy === d.id || !photo[d.id] ? 'not-allowed' : 'pointer', opacity: busy === d.id || !photo[d.id] ? 0.5 : 1 }}>
                     {busy === d.id ? 'Checking in…' : 'Check in'}
                   </button>

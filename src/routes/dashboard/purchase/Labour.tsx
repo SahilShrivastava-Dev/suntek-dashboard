@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
 import { SlidePanel, PanelField, PanelInput, PanelTextarea, PanelDivider, PanelFooter } from '../../../components/SlidePanel';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { useSortable } from '../../../components/ui/useSortable';
+import { ThV2 as Th } from '../../../components/v2';
 import { useMentionNotifier } from '../../../lib/mentions';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
@@ -99,15 +100,15 @@ export function Labour() {
       </div>
 
       {/* Per-plant table — green-soft */}
-      <div className="card p-6 mb-5" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
+      <div className="card2 p-6 mb-5">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="text-base font-bold">{t('labour.logTitle')}</div>
+            <div className="text-base font-bold font-heading">{t('labour.logTitle')}</div>
             <div className="text-xs text-slate-500">
               {t('labour.logSubtitle')}
             </div>
           </div>
-          <button className="btn-outline pill px-3 py-2 text-xs font-semibold" onClick={() => setOpen(true)}>
+          <button className="btn-outline rounded-[10px] px-3 py-2 text-xs font-semibold" onClick={() => setOpen(true)}>
             {t('labour.editFormula')}
           </button>
         </div>
@@ -118,7 +119,7 @@ export function Labour() {
           <SkeletonRows rows={5} />
         ) : (
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="plant" s={cSort}>{t('labour.colPlant')}</Th>

@@ -13,9 +13,10 @@ import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/states';
 import { usePagination } from '../../../components/ui/usePagination';
-import { TablePagination } from '../../../components/ui/TablePagination';
+import { TablePaginationV2 as TablePagination } from '../../../components/v2';
 import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { useSortable } from '../../../components/ui/useSortable';
+import { ThV2 as Th } from '../../../components/v2';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import type { Database } from '../../../lib/database.types';
@@ -194,12 +195,12 @@ export function PurchaseOrders() {
   return (
     <>
       {/* Add purchased spares to the stock register (bill AI or manual) */}
-      <div className="card p-6 mb-5" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+      <div className="card2 p-6 mb-5" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div className="text-base font-bold">Add purchase to stock register</div>
+          <div className="text-base font-bold font-heading">Add purchase to stock register</div>
           <div className="text-xs text-slate-500">Bought new spares? Upload the bill (image / PDF) to auto-read items &amp; quantities, or enter them manually — matched items increment, new items are created.</div>
         </div>
-        <button onClick={() => setShowPurchase(true)} className="btn-accent pill px-4 py-2 font-semibold text-sm">＋ Add purchase</button>
+        <button onClick={() => setShowPurchase(true)} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm">＋ Add purchase</button>
       </div>
       <AddPurchaseModal open={showPurchase} onClose={() => setShowPurchase(false)} onApplied={() => {}} />
 
@@ -236,24 +237,24 @@ export function PurchaseOrders() {
       </div>
 
       {/* Table — red-soft */}
-      <div className="card p-6" style={{ background: 'var(--red-soft)', border: '1px solid #fecaca', position: 'relative' }}>
+      <div className="card2 p-6" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Purchase Orders List', what: 'All oil/material purchase contracts. New entries via "+ New PO" form.', source: 'Supabase', tables: ['oil_contracts'] }} />
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-base font-bold">{t('po.section_material_oil')}</span>
+              <span className="text-base font-bold font-heading">{t('po.section_material_oil')}</span>
               <span className="badge" style={{ background: '#E0E7FF', color: '#4338CA', fontWeight: 700, fontSize: 10 }}>⟳ BUSY API</span>
             </div>
             <div className="text-xs text-slate-500">{t('po.section_material_oil_sub')}</div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <button className="btn-ghost pill px-4 py-2 font-semibold text-sm flex items-center gap-2" onClick={handleExport}>
+            <button className="btn-ghost rounded-[10px] px-4 py-2 font-semibold text-sm flex items-center gap-2" onClick={handleExport}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
               {t('po.btn_export')}
             </button>
-            <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
+            <button className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
               {t('po.btn_new_po')}
             </button>
           </div>
@@ -275,7 +276,7 @@ export function PurchaseOrders() {
           <EmptyState title={t('po.empty_orders')} message={poSearch ? t('common.noMatches', 'No rows match your search.') : undefined} />
         ) : (
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="oil" s={ordersSort}>{t('po.col_oil_material')}</Th><Th sortKey="paraffin" s={ordersSort}>{t('po.col_paraffin_type')}</Th><Th sortKey="company" s={ordersSort}>{t('po.col_company')}</Th>
@@ -308,17 +309,17 @@ export function PurchaseOrders() {
       </div>
 
       {/* ── Maintenance purchases (derived from the maintenance flow) ─────────── */}
-      <div className="card p-6 mt-5">
+      <div className="card2 p-6 mt-5">
         <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-base font-bold">{t('po.section_maint')}</span>
+            <span className="text-base font-bold font-heading">{t('po.section_maint')}</span>
             <span className="badge" style={{ background: '#DCFCE7', color: '#15803D', fontWeight: 700, fontSize: 10 }}>⚙ {t('po.badge_from_maint')}</span>
           </div>
           <div className="text-xs num font-bold text-slate-700">{t('po.total')} ₹ {maintPOs.reduce((s, m) => s + (m.total || 0), 0).toLocaleString('en-IN')}</div>
         </div>
         <div className="text-xs text-slate-500 mb-4">{t('po.section_maint_sub')}</div>
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead><tr><Th sortKey="ticket" s={maintSort}>{t('po.col_ticket')}</Th><Th sortKey="part" s={maintSort}>{t('po.col_part')}</Th><Th sortKey="equipment" s={maintSort}>{t('po.col_equipment')}</Th><Th sortKey="store" s={maintSort}>{t('po.col_store_unit')}</Th><Th sortKey="supplier" s={maintSort}>{t('po.col_supplier')}</Th><Th sortKey="qty" s={maintSort} firstDir="desc" className="num">{t('po.col_qty')}</Th><Th sortKey="unitPrice" s={maintSort} firstDir="desc" className="num">{t('po.col_unit_price')}</Th><Th sortKey="total" s={maintSort} firstDir="desc" className="num">{t('po.col_total')}</Th><Th sortKey="busyRef" s={maintSort}>{t('po.col_busy_ref')}</Th><th>{t('po.col_bill', 'Bill')}</th><Th sortKey="date" s={maintSort} firstDir="desc">{t('po.col_date')}</Th></tr></thead>
             <tbody>
               {maintPOs.length === 0 && (

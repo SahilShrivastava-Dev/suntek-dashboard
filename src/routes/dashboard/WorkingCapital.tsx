@@ -6,7 +6,7 @@ import { SkeletonRows } from '../../components/ui/states';
 
 function Stat({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div className="card p-5">
+    <div className="card2 p-5">
       <div className="text-[11px] text-slate-500 uppercase tracking-wider">{label}</div>
       <div className="text-[28px] font-extrabold mt-1 num" style={color ? { color } : undefined}>{value}</div>
       {sub && <div className="text-[11px] text-slate-500 mt-1">{sub}</div>}
@@ -20,7 +20,7 @@ export function WorkingCapital() {
   const { data: a, isLoading: l2 } = useAnalyticsKPIs();
 
   if (l1 || l2 || !a || !kpis) {
-    return <div className="card p-5"><SkeletonRows rows={6} /></div>;
+    return <div className="card2 p-5"><SkeletonRows rows={6} /></div>;
   }
 
   const debtors = kpis.debtorsOutstanding ?? 0;
@@ -40,7 +40,7 @@ export function WorkingCapital() {
     <>
       <div className="grid grid-cols-12 gap-5 mb-5" style={{ display: 'grid', gridTemplateColumns: 'repeat(12,1fr)' }}>
         <div className="col-span-12 lg:col-span-3" style={{ gridColumn: 'span 3' }}>
-          <div className="card p-5" style={{ position: 'relative' }}>
+          <div className="card2 p-5" style={{ position: 'relative' }}>
             <KpiInfoButton info={{ title: 'Projected cash position', what: 'Forward cash from collectible receivables (weighted by ageing) net of payables coming due. Turns the ledger into a forward-looking picture.', source: 'Derived', note: 'Receivable/payable ageing buckets from analytics KPIs, weighted by collectibility.' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('workingCapital.projectedCashPosition')}</div>
             <div className="text-[28px] font-extrabold mt-1 num" style={{ color: projectedCash >= 0 ? '#16A34A' : '#DC2626' }}>{fmtINR(projectedCash)}</div>
@@ -54,7 +54,7 @@ export function WorkingCapital() {
 
       <div className="grid grid-cols-12 gap-5 mb-5">
         <div className="col-span-12 lg:col-span-6 card p-6">
-          <div className="text-base font-bold mb-3">{t('workingCapital.receivablesAgeing')}</div>
+          <div className="text-base font-bold font-heading mb-3">{t('workingCapital.receivablesAgeing')}</div>
           {([[t('workingCapital.ageing1_30'), ag.d1_30], [t('workingCapital.ageing31_60'), ag.d31_60], [t('workingCapital.ageing61_90'), ag.d61_90], [t('workingCapital.ageing90plus'), ag.d90plus]] as [string, number][]).map(([label, v], i) => {
             const max = Math.max(ag.d1_30, ag.d31_60, ag.d61_90, ag.d90plus, 1);
             const colors = ['#16A34A', '#D97706', '#EA580C', '#DC2626'];
@@ -67,7 +67,7 @@ export function WorkingCapital() {
           })}
         </div>
         <div className="col-span-12 lg:col-span-6 card p-6">
-          <div className="text-base font-bold mb-3">{t('workingCapital.position')}</div>
+          <div className="text-base font-bold font-heading mb-3">{t('workingCapital.position')}</div>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between"><span className="text-slate-500">{t('workingCapital.debtorsOutstanding')}</span><span className="font-semibold num">{fmtINR(debtors)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">{t('workingCapital.creditorsOutstanding')}</span><span className="font-semibold num">{fmtINR(creditors)}</span></div>

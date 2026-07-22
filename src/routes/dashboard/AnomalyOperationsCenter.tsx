@@ -153,7 +153,7 @@ export function AnomalyOperationsCenter() {
       </div>
 
       {/* Filters */}
-      <div className="card p-4 mb-5 flex flex-wrap items-center gap-2">
+      <div className="card2 p-4 mb-5 flex flex-wrap items-center gap-2">
         {(['open', 'resolved', 'all'] as const).map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} className={`chip${statusFilter === s ? ' active' : ''}`} style={{ textTransform: 'capitalize' }}>{t(`anomalyCenter.filter_${s}`)}</button>
         ))}
@@ -172,11 +172,11 @@ export function AnomalyOperationsCenter() {
 
       {/* Feed */}
       {isLoading ? (
-        <div className="card p-5"><SkeletonRows rows={6} /></div>
+        <div className="card2 p-5"><SkeletonRows rows={6} /></div>
       ) : isError ? (
-        <div className="card p-5"><ErrorState title={t('anomalyCenter.error_load')} onRetry={() => refetch()} /></div>
+        <div className="card2 p-5"><ErrorState title={t('anomalyCenter.error_load')} onRetry={() => refetch()} /></div>
       ) : visible.length === 0 ? (
-        <div className="card p-5"><EmptyState title={t('anomalyCenter.empty_title')} message={t('anomalyCenter.empty_message')} /></div>
+        <div className="card2 p-5"><EmptyState title={t('anomalyCenter.empty_title')} message={t('anomalyCenter.empty_message')} /></div>
       ) : (
         <div className="space-y-3">
           {visible.map(f => {
@@ -184,7 +184,7 @@ export function AnomalyOperationsCenter() {
             const val = fmtValue(f.value_at_stake, f.value_unit);
             const isOpen = f.status === 'open' || f.status === 'acknowledged';
             return (
-              <div key={f.id} className="card p-5" style={{ borderLeft: `3px solid ${cfg.color}` }}>
+              <div key={f.id} className="card2 p-5" style={{ borderLeft: `3px solid ${cfg.color}` }}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -256,8 +256,8 @@ export function AnomalyOperationsCenter() {
               <CcSelect value={reasonCc} onChange={setReasonCc} label={t('anomalyCenter.also_notify_cc')} excludeIds={[activeProfile.id]} />
             </div>
             <div className="flex gap-3 mt-4">
-              <button onClick={() => setReasonFor(null)} className="btn-ghost pill flex-1 py-2.5 font-semibold text-sm">{t('anomalyCenter.cancel')}</button>
-              <button onClick={submitReason} disabled={!reasonText.trim()} className="btn-accent pill flex-1 py-2.5 font-semibold text-sm" style={{ opacity: reasonText.trim() ? 1 : 0.5 }}>
+              <button onClick={() => setReasonFor(null)} className="btn-ghost rounded-[10px] flex-1 py-2.5 font-semibold text-sm">{t('anomalyCenter.cancel')}</button>
+              <button onClick={submitReason} disabled={!reasonText.trim()} className="btn-accent rounded-[10px] flex-1 py-2.5 font-semibold text-sm" style={{ opacity: reasonText.trim() ? 1 : 0.5 }}>
                 {reasonFor.action === 'resolved' ? t('anomalyCenter.confirm_resolve') : t('anomalyCenter.confirm_dismiss')}
               </button>
             </div>

@@ -8,8 +8,9 @@ import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/states';
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { usePagination } from '../../../components/ui/usePagination';
-import { TablePagination } from '../../../components/ui/TablePagination';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { TablePaginationV2 as TablePagination } from '../../../components/v2';
+import { useSortable } from '../../../components/ui/useSortable';
+import { ThV2 as Th } from '../../../components/v2';
 import { TableSearch } from '../../../components/ui/TableSearch';
 import { useDirectory, extractMentionIds, truncate } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
@@ -355,11 +356,11 @@ export function ActivityLog() {
       </div>
 
       {/* Table — amber-soft */}
-      <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a', position: 'relative' }}>
+      <div className="card2 p-6" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Activity log book', what: 'The overall record of activity across all plants. Maintenance milestones flow in automatically and are tagged with their ticket #; ad-hoc work is added with "+ Log activity". Every row aims to carry photo proof.', source: 'Derived', note: 'Auto-fed from the maintenance workflow + manual activity_logs entries.' }} />
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">{t('activity.logBookTitle')}</div>
+            <div className="text-base font-bold font-heading">{t('activity.logBookTitle')}</div>
             <div className="text-xs text-slate-500">{t('activity.logBookSubtitle')}</div>
           </div>
           <div className="flex items-center gap-2">
@@ -371,7 +372,7 @@ export function ActivityLog() {
             >
               {showManualOnly ? t('activity.showMaintenanceFeed') : t('activity.manualOnly')}
             </button>
-            <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
+            <button className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
               {t('activity.logActivityBtn')}
             </button>
           </div>
@@ -394,7 +395,7 @@ export function ActivityLog() {
           <EmptyState title={t('activity.emptyState')} message={search || plantFilter ? t('activity.noMatches', 'No rows match your filters.') : undefined} />
         ) : (
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="equipment" s={actSort}>{t('activity.colEquipment')}</Th><Th sortKey="activity" s={actSort}>{t('activity.colActivity')}</Th><Th sortKey="ticket" s={actSort}>{t('activity.colTicket')}</Th><Th sortKey="date" s={actSort} firstDir="desc">{t('activity.colDate')}</Th>

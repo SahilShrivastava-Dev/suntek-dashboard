@@ -65,7 +65,7 @@ const fmtDateTime = (d: string | null | undefined) => d ? new Date(d).toLocaleSt
 function Screen({ emoji, title, sub }: { emoji: string; title: string; sub: string }) {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'var(--bg)' }}>
-      <div className="card p-8" style={{ textAlign: 'center', maxWidth: 400 }}>
+      <div className="card2 p-8" style={{ textAlign: 'center', maxWidth: 400 }}>
         <div style={{ fontSize: 44, marginBottom: 12 }}>{emoji}</div>
         <div className="serif" style={{ fontSize: 26, color: '#0F172A', lineHeight: 1.1 }}>{title}</div>
         <div style={{ fontSize: 13, color: '#64748B', marginTop: 8, lineHeight: 1.5 }}>{sub}</div>

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { EmptyState } from '../../components/ui/states';
 import { usePagination } from '../../components/ui/usePagination';
-import { TablePagination } from '../../components/ui/TablePagination';
+import { TablePaginationV2 as TablePagination } from '../../components/v2';
 import { TableSearch, useTextFilter } from '../../components/ui/TableSearch';
-import { useSortable, Th } from '../../components/ui/useSortable';
+import { useSortable } from '../../components/ui/useSortable';
+import { ThV2 as Th } from '../../components/v2';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { insertRows } from '../../lib/db';
@@ -134,7 +135,7 @@ export function Sales() {
 
       {/* KPIs — live from BUSY — blue tiles */}
       <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Total Sales MTD', what: 'Gross sales value invoiced this calendar month across all customers and plants. Counts non-cancelled sales vouchers only.', source: 'BUSY DB', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0, current month' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('sales.totalSalesLabel')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-blue-700">
@@ -142,7 +143,7 @@ export function Sales() {
           </div>
           <div className="text-[11px] text-slate-500 mt-1">{salesKPIs ? t('sales.dispatchesMtd', { count: salesKPIs.dispatchesMTD }) : ''}</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'GST Output MTD', what: 'Total GST collected from customers on sales invoices this month. Net payable = Output GST minus Input ITC. This is what must be remitted to the government.', source: 'BUSY DB', tables: ['VchGSTSumItemWise', 'Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > VchGSTSumItemWise', filter: 'VchType=9, current month' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('sales.gstOutputLabel')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-blue-700">
@@ -150,7 +151,7 @@ export function Sales() {
           </div>
           <div className="text-[11px] text-slate-500 mt-1">{salesKPIs ? t('sales.netPayable', { amount: fmtINR(salesKPIs.netGSTPayable) }) : ''}</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Customers with Outstanding', what: 'Count of unique parties in the Sundry Debtors group that have a non-zero Dr balance — i.e., customers who owe money.', source: 'BUSY DB', tables: ['DailySum', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > DailySum\nBusyFY2026 > dbo > Tables > Master1', filter: 'Master1.ParentGrp=116 (Sundry Debtors), MasterType=2' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('sales.customersOutstandingLabel')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-blue-700">
@@ -158,7 +159,7 @@ export function Sales() {
           </div>
           <div className="text-[11px] text-slate-500 mt-1">{t('sales.partiesSundryDebtors')}</div>
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #bfdbfe', position: 'relative' }}>
+        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Receipts MTD', what: 'Cash actually received from customers this month via receipt vouchers. Excludes sales invoices not yet paid. Key indicator of real cash inflow.', source: 'BUSY DB', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=16 (Receipt), Cancelled=0, current month' }} />
           <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('sales.receiptsLabel')}</div>
           <div className="text-[28px] font-extrabold mt-1 num text-blue-700">
@@ -224,7 +225,7 @@ export function Sales() {
         <div className="grid grid-cols-12 gap-5 mb-5">
 
           {/* Active Suppliers */}
-          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
             <KpiInfoButton info={{ title: 'Active Suppliers FY / MTD', what: 'Number of unique supplier parties that had at least one purchase invoice this financial year (FY) and this month (MTD). The top-5 concentration % shows if spend is dangerously concentrated in a few vendors.', source: 'BUSY DB', tables: ['Tran1', 'Master1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=14, Cancelled=0 · COUNT DISTINCT MasterCode1' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('sales.activeSuppliersLabel')}</div>
             <div className="text-[28px] font-extrabold mt-1 num text-blue-700">{analytics.activeSuppliersFY}</div>
@@ -235,7 +236,7 @@ export function Sales() {
           </div>
 
           {/* New vs Lapsed Customers */}
-          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
             <KpiInfoButton info={{ title: 'Customer Flow MTD', what: 'New = customers whose very first-ever invoice was this month. Lapsed = customers active last month who have zero invoices so far this month. Net = New minus Lapsed — an early churn signal.', source: 'BUSY DB', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0 · MIN(Date) per party for New; EXCEPT query for Lapsed', note: 'Lapsed uses an EXCEPT between last-month buyers and this-month buyers.' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">{t('sales.customerFlowLabel')}</div>
             <div className="flex items-center gap-4">
@@ -255,7 +256,7 @@ export function Sales() {
           </div>
 
           {/* GST Net Position */}
-          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
             <KpiInfoButton info={{ title: 'GST Net Position MTD', what: 'GST Output (collected from customers) minus GST Input ITC (paid to suppliers). Positive = amount payable to government. Negative = ITC refund position.', source: 'Derived', formula: 'GST Net = Output MTD − Input ITC MTD', tables: ['VchGSTSumItemWise'], dbPath: 'BusyFY2026 > dbo > Tables > VchGSTSumItemWise', filter: 'Output: VchType=9 · Input: VchType=14, current month' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">{t('sales.gstNetPositionLabel')}</div>
             <div className={`text-[22px] font-extrabold num mt-1 ${analytics.gstNetMTD > 0 ? 'text-red-600' : 'text-green-600'}`}>
@@ -275,7 +276,7 @@ export function Sales() {
           </div>
 
           {/* Invoice Frequency */}
-          <div className="col-span-6 lg:col-span-3 card p-5" style={{ background: 'var(--blue-soft)', border: '1px solid #BFDBFE', position: 'relative' }}>
+          <div className="col-span-6 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
             <KpiInfoButton info={{ title: 'Invoice Frequency', what: 'Average number of invoices raised per customer over the full financial year. >3× = sticky repeat buyers. 2-3× = moderate repeat. <2× = largely transactional, one-off purchases.', source: 'Derived', formula: 'Frequency = FY Invoice Count / Unique Customers FY', tables: ['Tran1'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1', filter: 'VchType=9, Cancelled=0' }} />
             <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">{t('sales.invoiceFrequencyLabel')}</div>
             <div className="text-[28px] font-extrabold num text-blue-700">{analytics.invoiceFrequency}×</div>
@@ -294,7 +295,7 @@ export function Sales() {
       )}
 
       {/* Info banner */}
-      <div className="card p-5 mb-5" style={{ background: '#FFF7E6', border: '1px solid #FCD9C5', position: 'relative' }}>
+      <div className="card2 p-5 mb-5" style={{ background: '#FFF7E6', border: '1px solid #FCD9C5', position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Sales → Ops Pipeline', what: 'Explains the auto-cascade: when a sale is logged in BUSY, it triggers stock deduction, contract balance update, labour cost posting, and syncs back to this dashboard — all without manual re-entry. This card is an informational note, not a data tile.', source: 'Mock data', note: 'Static explainer banner. No data source.' }} />
         <div className="flex items-start gap-3">
           <div className="w-9 h-9 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
@@ -312,15 +313,15 @@ export function Sales() {
       </div>
 
       {/* Contracts table — green-soft */}
-      <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
+      <div className="card2 p-6" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Sales Contracts Table', what: 'All customer contracts with locked-in price and density spread. Shows FY sales, MTD sales, invoice count, and outstanding balance per customer. Status (On Track / Overdue / Cleared) is derived from BUSY outstanding balance. Live data from BUSY DB.', source: 'BUSY DB', tables: ['Tran1', 'Master1', 'DailySum'], dbPath: 'BusyFY2026 > dbo > Tables > Tran1\nBusyFY2026 > dbo > Tables > Master1', filter: 'VchType=9, Cancelled=0 · outstanding from DailySum/Master1 ParentGrp=116' }} />
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">{t('sales.contractsTitle')}</div>
+            <div className="text-base font-bold font-heading">{t('sales.contractsTitle')}</div>
             <div className="text-xs text-slate-500">{t('sales.contractsSub')}</div>
           </div>
           <button
-            className="btn-ghost pill px-4 py-2 font-semibold text-sm flex items-center gap-2"
+            className="btn-ghost rounded-[10px] px-4 py-2 font-semibold text-sm flex items-center gap-2"
             onClick={handleExport}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -329,7 +330,7 @@ export function Sales() {
             {t('sales.export')}
           </button>
           <button
-            className="btn-accent pill px-4 py-2 font-semibold text-sm"
+            className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm"
             onClick={() => setShowModal(true)}
           >
             {t('sales.newContract')}
@@ -340,7 +341,7 @@ export function Sales() {
           <EmptyState title={salesSearch ? t('sales.noMatches', 'No customers match your search.') : t('sales.noContracts', 'No contracts — data loads from BUSY')} />
         ) : (
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="customer" s={salesSort}>{t('sales.colCustomer')}</Th>
@@ -486,13 +487,13 @@ export function Sales() {
                 {/* Actions */}
                 <div className="flex gap-3 mt-6">
                   <button
-                    className="btn-ghost pill flex-1 py-3 font-semibold text-sm"
+                    className="btn-ghost rounded-[10px] flex-1 py-3 font-semibold text-sm"
                     onClick={handleCloseModal}
                   >
                     Cancel
                   </button>
                   <button
-                    className="btn-accent pill flex-1 py-3 font-semibold text-sm"
+                    className="btn-accent rounded-[10px] flex-1 py-3 font-semibold text-sm"
                     disabled={!form.customer.trim() || !form.lockedPrice || !form.bookedQty}
                     onClick={handleSaveContract}
                     style={{ opacity: (!form.customer.trim() || !form.lockedPrice || !form.bookedQty) ? 0.5 : 1 }}

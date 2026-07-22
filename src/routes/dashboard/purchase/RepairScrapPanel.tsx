@@ -6,8 +6,9 @@ import { withEmbedFallback } from '../../../lib/scopedList';
 import { SkeletonRows, EmptyState } from '../../../components/ui/states';
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { usePagination } from '../../../components/ui/usePagination';
-import { TablePagination } from '../../../components/ui/TablePagination';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { TablePaginationV2 as TablePagination } from '../../../components/v2';
+import { useSortable } from '../../../components/ui/useSortable';
+import { ThV2 as Th } from '../../../components/v2';
 import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
 import type { Database } from '../../../lib/database.types';
 
@@ -52,12 +53,12 @@ export function RepairScrapPanel() {
   const repair = useMemo(() => filtered.filter(r => r.defective_part_decision === 'repair'), [filtered]);
   const scrap = useMemo(() => filtered.filter(r => r.defective_part_decision === 'scrap'), [filtered]);
 
-  if (loading) return <div className="card p-6" style={{ marginTop: 20 }}><SkeletonRows rows={4} /></div>;
+  if (loading) return <div className="card2 p-6" style={{ marginTop: 20 }}><SkeletonRows rows={4} /></div>;
   if (rows.length === 0) return null; // nothing sent to repair/scrap yet → hide the panel entirely
 
   return (
-    <div className="card p-6" style={{ marginTop: 20, position: 'relative' }}>
-      <div className="text-base font-bold">Repair &amp; scrap tracking</div>
+    <div className="card2 p-6" style={{ marginTop: 20, position: 'relative' }}>
+      <div className="text-base font-bold font-heading">Repair &amp; scrap tracking</div>
       <div className="text-xs text-slate-500 mb-3">Assets sent for repair or scrapped at the end of a maintenance job — with photo proof and a link to the ticket.</div>
       <TableSearch value={search} onChange={setSearch} placeholder="Search equipment, plant, ticket…" />
       <RepairScrapTable title="Repair items" accent="#D97706" rows={repair} onOpenTicket={id => navigate(`/dashboard/purchase/maint?ticket=${id}`)} onPhoto={setLightbox} />
@@ -90,7 +91,7 @@ function RepairScrapTable({ title, accent, rows, onOpenTicket, onPhoto }: {
         <EmptyState title={`No ${title.toLowerCase()} yet`} />
       ) : (
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead><tr><Th sortKey="equipment" s={s}>Equipment</Th><Th sortKey="plant" s={s}>Plant</Th><Th sortKey="ticket" s={s}>Ticket #</Th><Th sortKey="closed" s={s} firstDir="desc">Closed</Th><Th sortKey="status" s={s}>Status</Th><th>Photo</th></tr></thead>
             <tbody>
               {pageRows.map(r => (

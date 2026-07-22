@@ -116,13 +116,13 @@ export function OilRatioTable() {
       <div className="grid grid-cols-12 gap-5">
         {/* Main table card */}
         <div
-          className={`card p-6 ${selectedRow ? 'col-span-12 lg:col-span-8' : 'col-span-12'}`}
-          style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}
+          className={`card2 p-6 ${selectedRow ? 'col-span-12 lg:col-span-8' : 'col-span-12'}`}
+         
         >
           {/* Header row */}
           <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
             <div>
-              <div className="text-base font-bold flex items-center gap-2">
+              <div className="text-base font-bold font-heading flex items-center gap-2">
                 {t('oilRatio.title')}{' '}
                 <span
                   className="text-xs font-semibold px-2 py-0.5 rounded-full"

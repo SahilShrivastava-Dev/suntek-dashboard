@@ -6,7 +6,8 @@ import { useToast } from '../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../components/ui/states';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../lib/scopedList';
-import { useSortable, Th } from '../../components/ui/useSortable';
+import { useSortable } from '../../components/ui/useSortable';
+import { ThV2 as Th } from '../../components/v2';
 import type { Database } from '../../lib/database.types';
 
 type StockRow = Database['public']['Tables']['stock_levels']['Row'] & { plants?: { name: string | null } | null };
@@ -171,7 +172,7 @@ export function CPMStock() {
       </div>
 
       {loadError && (
-        <div className="card p-4 mb-5">
+        <div className="card2 p-4 mb-5">
           <ErrorState
             title={t('cpmStock.loadErrorTitle')}
             message={t('cpmStock.loadErrorMessage')}
@@ -185,12 +186,12 @@ export function CPMStock() {
         <div className="col-span-12 lg:col-span-7 card p-6">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className="text-base font-bold">{t('cpmStock.cpDensityLocation')}</div>
+              <div className="text-base font-bold font-heading">{t('cpmStock.cpDensityLocation')}</div>
               <div className="text-xs text-slate-500">{t('cpmStock.drumsOnHandHint')}</div>
             </div>
           </div>
           <div className="overflow-x-auto scroll-x">
-            <table className="dt">
+            <table className="dt2">
               <thead>
                 <tr>
                   <th>{t('cpmStock.location')}</th>
@@ -225,7 +226,7 @@ export function CPMStock() {
         </div>
 
         <div className="col-span-12 lg:col-span-5 card p-6">
-          <div className="text-base font-bold">{t('cpmStock.tankLevels')}</div>
+          <div className="text-base font-bold font-heading">{t('cpmStock.tankLevels')}</div>
           <div className="text-xs text-slate-500 mb-4">{t('cpmStock.tankLevelsHint')}</div>
           <div className="space-y-3">
             {tanks.map(tk => {
@@ -258,10 +259,10 @@ export function CPMStock() {
       </div>
 
       {/* Store items — green-soft */}
-      <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}>
+      <div className="card2 p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">{t('cpmStock.storeItems')}</div>
+            <div className="text-base font-bold font-heading">{t('cpmStock.storeItems')}</div>
             <div className="text-xs text-slate-500">{t('cpmStock.storeItemsHint')}</div>
           </div>
           <div className="flex items-center gap-2">
@@ -286,7 +287,7 @@ export function CPMStock() {
           <SkeletonRows rows={6} />
         ) : (
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="product" s={storeSort}>{t('cpmStock.product')}</Th><Th sortKey="plant" s={storeSort}>{t('cpmStock.plant')}</Th><Th sortKey="density" s={storeSort} firstDir="desc" className="num">{t('cpmStock.density')}</Th>
@@ -434,11 +435,11 @@ export function CPMStock() {
 
                 {/* Actions */}
                 <div className="flex gap-3">
-                  <button className="btn-ghost pill flex-1 py-3 font-semibold text-sm" onClick={handleCloseBulkModal}>
+                  <button className="btn-ghost rounded-[10px] flex-1 py-3 font-semibold text-sm" onClick={handleCloseBulkModal}>
                     {t('cpmStock.cancel')}
                   </button>
                   <button
-                    className="btn-accent pill flex-1 py-3 font-semibold text-sm"
+                    className="btn-accent rounded-[10px] flex-1 py-3 font-semibold text-sm"
                     disabled={!bulkRows.some(r => r.item.trim() && r.adjustment)}
                     onClick={handleBulkSave}
                     style={{ opacity: !bulkRows.some(r => r.item.trim() && r.adjustment) ? 0.5 : 1 }}

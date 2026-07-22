@@ -4,7 +4,8 @@ import { supabase } from '../../lib/supabase';
 import { useQuery } from '@tanstack/react-query';
 import { SkeletonRows, ErrorState, EmptyState } from '../../components/ui/states';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
-import { useSortable, Th } from '../../components/ui/useSortable';
+import { useSortable } from '../../components/ui/useSortable';
+import { ThV2 as Th } from '../../components/v2';
 import { computeBatchCost, DEFAULT_COST_CONFIG, type CostConfig } from '../../lib/algorithms/costEngine';
 import type { Database } from '../../lib/database.types';
 
@@ -109,8 +110,8 @@ export function CostIntelligence() {
       </div>
 
       {/* Rate config */}
-      <div className="card p-5 mb-5">
-        <div className="text-base font-bold mb-1">{t('costIntel.costRatesTitle')}</div>
+      <div className="card2 p-5 mb-5">
+        <div className="text-base font-bold font-heading mb-1">{t('costIntel.costRatesTitle')}</div>
         <div className="text-xs text-slate-500 mb-4">{t('costIntel.costRatesSub')}</div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {RATE_FIELDS.map(f => (
@@ -128,8 +129,8 @@ export function CostIntelligence() {
       </div>
 
       {/* Per-batch table */}
-      <div className="card p-6">
-        <div className="text-base font-bold mb-3">{t('costIntel.tableTitle')}</div>
+      <div className="card2 p-6">
+        <div className="text-base font-bold font-heading mb-3">{t('costIntel.tableTitle')}</div>
         {isLoading ? (
           <SkeletonRows rows={6} />
         ) : isError ? (
@@ -138,7 +139,7 @@ export function CostIntelligence() {
           <EmptyState title={t('costIntel.emptyTitle')} message={t('costIntel.emptyMessage')} />
         ) : (
           <div className="overflow-x-auto scroll-x">
-            <table className="dt">
+            <table className="dt2">
               <thead>
                 <tr>
                   <Th sortKey="batch" s={cSort}>{t('costIntel.colBatch')}</Th><Th sortKey="plant" s={cSort}>{t('costIntel.colPlant')}</Th><Th sortKey="output" s={cSort} firstDir="desc" className="num">{t('costIntel.colOutput')}</Th><Th sortKey="reactor" s={cSort} firstDir="desc" className="num">{t('costIntel.colReactorHrs')}</Th>

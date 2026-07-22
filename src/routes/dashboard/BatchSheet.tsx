@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useSortable, Th } from '../../components/ui/useSortable';
+import { useSortable } from '../../components/ui/useSortable';
+import { ThV2 as Th } from '../../components/v2';
 
 const QC_BADGE: Record<string, { bg: string; color: string }> = {
   pending:  { bg: '#FEF3C7', color: '#D97706' },
@@ -155,21 +156,21 @@ export function BatchSheet() {
       </div>
 
       {/* Active batches table — amber-soft */}
-      <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
+      <div className="card2 p-6">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">{t('batch.activeBatches')}</div>
+            <div className="text-base font-bold font-heading">{t('batch.activeBatches')}</div>
             <div className="text-xs text-slate-500">{t('batch.liveReadingsSub')}</div>
           </div>
           <Link
             to="/operator/batch-logger"
-            className="btn-accent pill px-4 py-2 font-semibold text-sm no-underline inline-block text-center flex items-center justify-center"
+            className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm no-underline inline-block text-center flex items-center justify-center"
           >
             {t('batch.startBatch')}
           </Link>
         </div>
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="num" s={batchSort}>{t('batch.colBatchNo')}</Th><Th sortKey="plant" s={batchSort}>{t('common.plant')}</Th><Th sortKey="recipe" s={batchSort}>{t('batch.colRecipe')}</Th>

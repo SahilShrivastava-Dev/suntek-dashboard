@@ -2440,7 +2440,7 @@ export function Maintenance() {
           onRetry={() => { setLoading(true); setLoadError(false); loadData(); }}
         />
       ) : loading ? (
-        <div className="card p-5"><SkeletonRows rows={6} /></div>
+        <div className="card2 p-5"><SkeletonRows rows={6} /></div>
       ) : (
       <>
 

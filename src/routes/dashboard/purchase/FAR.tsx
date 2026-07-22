@@ -7,8 +7,9 @@ import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { usePagination } from '../../../components/ui/usePagination';
-import { TablePagination } from '../../../components/ui/TablePagination';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { useSortable } from '../../../components/ui/useSortable';
+import { StatCard, SectionCard, ButtonV2, SegmentTabs, TablePaginationV2, ThV2 as Th } from '../../../components/v2';
+import { Boxes, ShieldCheck, Wrench, Camera, Download, Upload, Plus } from 'lucide-react';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import * as XLSX from 'xlsx';
@@ -502,55 +503,45 @@ export function FAR() {
   return (
     <>
       {/* KPI row */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Total Fixed Assets', what: 'Count of all capitalised fixed assets registered across all 4 factory plants (SHD, Rehla, Ganjam, HQ). Each asset is named and tracked in the FAR.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Stored in FAR_DATA mock; future target: Supabase fixed_assets table.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('far.totalFixedAssets')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{assets.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('far.across4Factories')}</div>
+          <StatCard className="h-full" icon={<Boxes />} label={t('far.totalFixedAssets')} value={assets.length} caption={t('far.across4Factories')} />
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Insurance Coverage', what: `Annual insurance cover (${cr(INSURANCE_COVERAGE)}). Capital asset purchases plus maintenance/repair procurement for the financial year are deducted against this cover. If total spend exceeds the cover, the excess is paid out of pocket.`, source: 'Derived', note: 'Coverage − (FY asset spend + FY repair procurement) = headroom. FY repairs come from the maintenance workflow; asset spend from FAR purchase values.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('far.insuranceCoverage')} · {displayFY}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{cr(INSURANCE_COVERAGE)}</div>
-          {fyRemaining >= 0
-            ? <div className="text-[11px] text-green-600 mt-1">{t('far.leftUsed', { left: cr(fyRemaining), used: cr(fyDeduction) })}</div>
-            : <div className="text-[11px] text-red-600 mt-1 font-semibold">⚠ {t('far.overOutOfPocket', { amt: cr(fyOverage) })}</div>}
+          <StatCard className="h-full" icon={<ShieldCheck />} tone="blue" label={`${t('far.insuranceCoverage')} · ${displayFY}`} value={cr(INSURANCE_COVERAGE)}
+            caption={fyRemaining >= 0
+              ? <span className="text-green-600">{t('far.leftUsed', { left: cr(fyRemaining), used: cr(fyDeduction) })}</span>
+              : <span className="text-red-600 font-semibold">⚠ {t('far.overOutOfPocket', { amt: cr(fyOverage) })}</span>} />
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Assets Flagged for Repair', what: 'Count of fixed assets that have been flagged as requiring repair or maintenance and are awaiting resolution. High count = production downtime risk.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Assets with repair flag set in FAR_DATA.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('far.repairFlagged')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{maintEntries.filter(e => e.status !== 'closed').length}</div>
-          <div className="text-[11px] text-amber-600 mt-1">{t('far.awaitingClosure')}</div>
+          <StatCard className="h-full" icon={<Wrench />} tone="amber" valueTone="amber" label={t('far.repairFlagged')} value={maintEntries.filter(e => e.status !== 'closed').length} caption={<span className="text-amber-600">{t('far.awaitingClosure')}</span>} />
         </div>
-        <div className="col-span-12 lg:col-span-3 card p-5" style={{ position: 'relative' }}>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
           <KpiInfoButton info={{ title: 'Pic-Proof Coverage', what: 'Percentage of registered assets that have a photo on file as proof of existence. Required for insurance claims and audits. Target 100%.', source: 'Form entry', formLabel: 'Add Asset form (OCR upload)', formPath: '/dashboard/purchase/far', note: 'Photo attached during asset registration via the OCR uploader in the slide panel.' }} />
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('far.picProofCoverage')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">95%</div>
-          <div className="progress mt-2"><div style={{ width: '95%' }}></div></div>
+          <StatCard className="h-full" icon={<Camera />} tone="green" label={t('far.picProofCoverage')} value="95%"
+            caption={<div className="progress mt-1"><div style={{ width: '95%' }}></div></div>} />
         </div>
       </div>
 
       {/* ── Maintenance & Repairs by Financial Year ─────────────────────────── */}
-      <div className="card p-6 mb-5">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
-          <div>
-            <div className="text-base font-bold">{t('far.maintRepairsTitle')}</div>
-            <div className="text-xs text-slate-500">{t('far.maintRepairsSubtitle')}</div>
-          </div>
-          <button onClick={downloadMaintCsv} disabled={!fyEntries.length} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, opacity: fyEntries.length ? 1 : 0.5 }}>
-            ⬇ {t('far.downloadCsvReport')}
-          </button>
-        </div>
+      <SectionCard
+        className="mb-4"
+        title={t('far.maintRepairsTitle')}
+        subtitle={t('far.maintRepairsSubtitle')}
+        actions={
+          <ButtonV2 variant="outline" icon={<Download />} onClick={downloadMaintCsv} disabled={!fyEntries.length}>
+            {t('far.downloadCsvReport')}
+          </ButtonV2>
+        }
+      >
 
-        {/* Financial-year chips */}
-        <div className="flex gap-2 mb-4 flex-wrap">
-          {fyList.length === 0
-            ? <span className="text-xs text-slate-400">{t('far.noMaintRecorded')}</span>
-            : fyList.map(fy => (
-              <button key={fy} onClick={() => setSelectedFY(fy)} className={`chip${activeFY === fy ? ' active' : ''}`}>{fy}</button>
-            ))}
-        </div>
+        {/* Financial-year tabs */}
+        {fyList.length === 0
+          ? <span className="text-xs text-slate-400 block mb-4">{t('far.noMaintRecorded')}</span>
+          : <SegmentTabs className="mb-4" items={fyList.map(fy => ({ key: fy, label: fy }))} value={activeFY ?? fyList[0]} onChange={setSelectedFY} />}
 
         {activeFY && (
           <>
@@ -574,7 +565,7 @@ export function FAR() {
             </div>
 
             <div className="overflow-x-auto scroll-x">
-              <table className="dt">
+              <table className="dt2">
                 <thead>
                   <tr><Th sortKey="ticket" s={fySort}>{t('far.thTicket')}</Th><Th sortKey="equipment" s={fySort}>{t('far.thEquipment')}</Th><Th sortKey="part" s={fySort}>{t('far.thPartType')}</Th><Th sortKey="status" s={fySort}>{t('far.thStatus')}</Th><Th sortKey="closed" s={fySort} firstDir="desc">{t('far.thClosed')}</Th><Th sortKey="cost" s={fySort} firstDir="desc" className="num">{t('far.thCost')}</Th></tr>
                 </thead>
@@ -601,28 +592,28 @@ export function FAR() {
                 </tbody>
               </table>
             </div>
-            <TablePagination controls={fyPg.controls} />
+            <TablePaginationV2 controls={fyPg.controls} label="entries" />
           </>
         )}
-      </div>
+      </SectionCard>
 
-      {/* FAR table — amber-soft */}
-      <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a', position: 'relative' }}>
+      {/* FAR register */}
+      <div className="relative">
         <KpiInfoButton info={{ title: 'Fixed Asset Register (FAR)', what: 'Complete list of all capitalized fixed assets across 4 plants. Each asset must be individually named on the FAR to be covered by the marine/fire insurance policy. Photo proof required for audit. New assets added via the "+ Add asset" slide panel.', source: 'Form entry', formLabel: '+ Add asset form', formPath: '/dashboard/purchase/far', note: 'Data from FAR_DATA mock (mockData.ts). Future: Supabase fixed_assets table.' }} />
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <div>
-            <div className="text-base font-bold">{t('far.fixedAssetRegister')}</div>
-            <div className="text-xs text-slate-500">Equipment master for Preventive Maintenance — grouped by type · {equipGroups.length} types · {assets.length} assets</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="chip" onClick={() => { setImportOpen(o => !o); if (importStage === 'done') resetImport(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              ⬆ {t('far.importCsvExcel')}
-            </button>
-            <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-              + {t('far.registerAsset')}
-            </button>
-          </div>
-        </div>
+      <SectionCard
+        title={t('far.fixedAssetRegister')}
+        subtitle={`Equipment master for Preventive Maintenance — grouped by type · ${equipGroups.length} types · ${assets.length} assets`}
+        actions={
+          <>
+            <ButtonV2 variant="outline" icon={<Upload />} onClick={() => { setImportOpen(o => !o); if (importStage === 'done') resetImport(); }}>
+              {t('far.importCsvExcel')}
+            </ButtonV2>
+            <ButtonV2 variant="accent" icon={<Plus />} onClick={() => setOpen(true)}>
+              {t('far.registerAsset')}
+            </ButtonV2>
+          </>
+        }
+      >
 
         {/* Bulk-import accordion */}
         {importOpen && (
@@ -715,12 +706,12 @@ export function FAR() {
         ) : (
           <>
             {/* Summary strip + expand toggle — the big list stays collapsed */}
-            <div className="flex items-center justify-between flex-wrap gap-2" style={{ background: '#FFFDF5', border: '1px solid #FDE68A', borderRadius: 12, padding: '10px 14px' }}>
-              <div style={{ fontSize: 13, color: '#92400E' }}>
+            <div className="flex items-center justify-between flex-wrap gap-2 bg-slate-50 border border-slate-200 rounded-[10px] px-3.5 py-2.5">
+              <div className="text-[13px] text-slate-600">
                 <strong>{assets.length}</strong> asset{assets.length === 1 ? '' : 's'} · <strong>{equipGroups.length}</strong> equipment type{equipGroups.length === 1 ? '' : 's'}
                 {plantsInFar.length > 1 && <span> · {plantsInFar.length} plants</span>}
               </div>
-              <button onClick={() => setEquipOpenTable(o => !o)} className="text-sm font-semibold" style={{ color: '#D97706', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+              <button onClick={() => setEquipOpenTable(o => !o)} className="text-sm font-semibold text-slate-700 hover:text-slate-900" style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
                 {equipOpenTable ? 'Hide register ▴' : 'Show register ▾'}
               </button>
             </div>
@@ -736,9 +727,9 @@ export function FAR() {
                     {equipPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>combined</span>}
                   </div>
                 )}
-                <input value={equipSearch} onChange={e => setEquipSearch(e.target.value)} placeholder="Search equipment type or mark…" style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 8, padding: '7px 10px', fontSize: 13, marginBottom: 10, outline: 'none', background: '#fff' }} />
+                <input value={equipSearch} onChange={e => setEquipSearch(e.target.value)} placeholder="Search equipment type or mark…" style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 12px', fontSize: 13, marginBottom: 10, outline: 'none', background: '#fff' }} />
                 <div className="overflow-x-auto scroll-x" style={{ maxHeight: 460 }}>
-                  <table className="dt">
+                  <table className="dt2">
                     <thead>
                       <tr>
                         <Th sortKey="type" s={groupSort}>Equipment Type</Th>
@@ -770,7 +761,7 @@ export function FAR() {
                             </tr>
                             {open && (
                               <tr>
-                                <td colSpan={8} style={{ background: '#FFFDF5', padding: 0 }}>
+                                <td colSpan={8} style={{ background: '#F8FAFC', padding: 0 }}>
                                   <AssetDetailTable assets={g.assets} showPlant={plantsInFar.length > 1} />
                                 </td>
                               </tr>
@@ -781,11 +772,12 @@ export function FAR() {
                     </tbody>
                   </table>
                 </div>
-                <TablePagination controls={groupPg.controls} />
+                <TablePaginationV2 controls={groupPg.controls} label="types" />
               </div>
             )}
           </>
         )}
+      </SectionCard>
       </div>
 
       {/* Slide panel */}

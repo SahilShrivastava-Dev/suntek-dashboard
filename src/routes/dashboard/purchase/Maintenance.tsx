@@ -29,8 +29,9 @@ import {
   PhotoUploader, StageStrip, EMERGENCY_STAGES, INHOUSE_STAGES, INHOUSE_STAGE_LABELS, AVAILABLE_STAGES,
 } from './maintenance/shared';
 import { usePagination } from '../../../components/ui/usePagination';
-import { TablePagination } from '../../../components/ui/TablePagination';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { useSortable } from '../../../components/ui/useSortable';
+import { SegmentTabs, StatCard, SectionCard, FilterBar, FilterSelect, ButtonV2, TablePaginationV2, ThV2 as Th } from '../../../components/v2';
+import { Calendar, CalendarDays, AlertTriangle, CheckCircle2, Hourglass, ShoppingCart, Settings, Building2, Activity, Plus, Upload, FileText, Trash2 } from 'lucide-react';
 
 type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
 
@@ -766,8 +767,54 @@ export function Maintenance() {
   const shownSchedules = schedPlantFilter.length ? schedules.filter(s => s.plant_id && schedPlantFilter.includes(s.plant_id)) : schedules;
   const emergencyTickets = tickets.filter(t => t.type === 'emergency');
 
+  // ── v2 filter bar (client-side; resets when switching tabs) ───────────────
+  const [fltQ, setFltQ] = useState('');
+  const [fltPlant, setFltPlant] = useState('all');
+  const [fltStatus, setFltStatus] = useState('all');
+  useEffect(() => { setFltQ(''); setFltPlant('all'); setFltStatus('all'); }, [tab]);
+  const resetFilters = () => { setFltQ(''); setFltPlant('all'); setFltStatus('all'); };
+
+  /** Derived schedule state — same classification the periodic rows render. */
+  const schedStatusOf = (s: ScheduleRow): string => {
+    const linked = tickets.find(t => t.schedule_id === s.id && t.status !== 'closed');
+    if (linked?.status === 'pending_unit_head') return 'verify';
+    if (linked) return 'ticket';
+    const d = daysFromNow(s.next_due_at);
+    if (d !== null && d < 0) return 'overdue';
+    if (d !== null && d <= 3) return 'due-soon';
+    return 'on-track';
+  };
+  const matchQ = (...txt: (string | null | undefined)[]) => {
+    const q = fltQ.trim().toLowerCase();
+    return !q || txt.some(x => (x || '').toLowerCase().includes(q));
+  };
+  const fltPeriodic = schedules.filter(s =>
+    matchQ(s.title, s.equipment, s.plants?.name)
+    && (fltPlant === 'all' || s.plants?.name === fltPlant)
+    && (fltStatus === 'all' || schedStatusOf(s) === fltStatus));
+  const fltEmergency = emergencyTickets.filter(t =>
+    matchQ(t.equipment, t.title, t.description, t.plants?.name, t.raised_by)
+    && (fltPlant === 'all' || t.plants?.name === fltPlant)
+    && (fltStatus === 'all' || t.status === fltStatus));
+  const plantFilterOptions = [
+    { value: 'all', label: t('common.allPlants') },
+    ...dbPlants.map(p => ({ value: p.name, label: p.name })),
+  ];
+  const statusFilterOptions = tab === 'periodic'
+    ? [
+        { value: 'all', label: t('common.allStatus') },
+        { value: 'overdue', label: t('maint.schedStatusOverdue') },
+        { value: 'due-soon', label: t('maint.schedStatusDueSoon') },
+        { value: 'on-track', label: t('maint.schedStatusOnTrack') },
+        { value: 'ticket', label: t('maint.schedStatusTicketOpen') },
+      ]
+    : [
+        { value: 'all', label: t('common.allStatus') },
+        ...[...new Set(emergencyTickets.map(t => t.status))].map(s => ({ value: s, label: STATUS_CFG[s]?.label ?? s })),
+      ];
+
   // Click-to-sort for the three maintenance tables (sorts feed pagination below).
-  const periodicSort = useSortable(schedules, {
+  const periodicSort = useSortable(fltPeriodic, {
     task: s => s.title,
     equipment: s => s.equipment,
     plant: s => s.plants?.name,
@@ -775,7 +822,7 @@ export function Maintenance() {
     lastDone: s => (s.last_completed_at ? new Date(s.last_completed_at) : null),
     due: s => (s.next_due_at ? new Date(s.next_due_at) : null),
   }, { key: 'due', dir: 'asc' });
-  const emergencySort = useSortable(emergencyTickets, {
+  const emergencySort = useSortable(fltEmergency, {
     ticket: t => t.id,
     equipment: t => t.equipment,
     plant: t => t.plants?.name,
@@ -795,8 +842,9 @@ export function Maintenance() {
   }, { key: 'due', dir: 'asc' });
 
   // Pagination for the three long maintenance tables (default 10/page).
-  const periodicPg = usePagination(periodicSort.sorted, { resetKey: `${schedules.length}|${periodicSort.sort.key}|${periodicSort.sort.dir}` });
-  const emergencyPg = usePagination(emergencySort.sorted, { resetKey: `${emergencyTickets.length}|${emergencySort.sort.key}|${emergencySort.sort.dir}` });
+  const fltKey = `${fltQ}|${fltPlant}|${fltStatus}`;
+  const periodicPg = usePagination(periodicSort.sorted, { resetKey: `${fltKey}|${schedules.length}|${periodicSort.sort.key}|${periodicSort.sort.dir}` });
+  const emergencyPg = usePagination(emergencySort.sorted, { resetKey: `${fltKey}|${emergencyTickets.length}|${emergencySort.sort.key}|${emergencySort.sort.dir}` });
   const schedulePg = usePagination(scheduleSort.sorted, { resetKey: `${schedPlantFilter.join(',')}|${scheduleSort.sort.key}|${scheduleSort.sort.dir}` });
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -2373,18 +2421,17 @@ export function Maintenance() {
   return (
     <>
       {/* Tab bar */}
-      <div className="flex gap-2 mb-5 flex-wrap">
-        {(['periodic', 'emergency'] as const).map(tb => (
-          <button key={tb} onClick={() => setTab(tb)} className={`chip${tab === tb ? ' active' : ''}`}>
-            {tb === 'periodic' ? `🔄 ${t('maint.periodic')}` : `⚡ ${t('maint.emergency')}`}
-          </button>
-        ))}
-        {!isTechnician && !isStoreManager && (
-          <button onClick={() => setTab('schedule')} className={`chip${tab === 'schedule' ? ' active' : ''}`}>
-            📋 {t('maint.scheduleSetup')}
-          </button>
-        )}
-      </div>
+      <SegmentTabs
+        className="mb-5"
+        items={[
+          { key: 'periodic', label: t('maint.periodic'), icon: <Calendar /> },
+          { key: 'emergency', label: t('maint.emergency'), icon: <AlertTriangle /> },
+          // Role gate identical to the old strip: hidden for technicians + store managers.
+          { key: 'schedule', label: t('maint.scheduleSetup'), icon: <Settings />, hidden: isTechnician || isStoreManager },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
 
       {loadError ? (
         <ErrorState
@@ -2400,30 +2447,37 @@ export function Maintenance() {
       {/* ── PERIODIC TAB ─────────────────────────────────────────────────── */}
       {tab === 'periodic' && (
         <>
-          <div className="grid grid-cols-12 gap-5 mb-5">
-            <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.dueToday')}</div>
-              <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{dueToday}</div>
-            </div>
-            <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.dueThisWeek')}</div>
-              <div className="text-[28px] font-extrabold mt-1 num">{dueWeek}</div>
-            </div>
-            <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.overdue')}</div>
-              <div className="text-[28px] font-extrabold mt-1 num text-red-600">{overdue}</div>
-              <div className="text-[11px] text-red-600 mt-1">{t('maint.needsAttention')}</div>
-            </div>
-            <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.completedMtd')}</div>
-              <div className="text-[28px] font-extrabold mt-1 num text-green-600">{closedPeriodicMTD}</div>
-            </div>
+          <div className="grid grid-cols-12 gap-4 mb-4">
+            <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<Calendar />} tone="amber"
+              label={t('maint.dueToday')} value={dueToday}
+              caption={dueToday === 0 ? t('maint.noDueToday') : t('maint.needsAttention')} />
+            <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<CalendarDays />} tone="amber"
+              label={t('maint.dueThisWeek')} value={dueWeek}
+              caption={dueWeek === 0 ? t('maint.noDueWeek') : undefined} />
+            <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<AlertTriangle />} tone="red" valueTone={overdue > 0 ? 'red' : 'default'}
+              label={t('maint.overdue')} value={overdue}
+              caption={overdue > 0 ? t('maint.needsAttention') : undefined} />
+            <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<CheckCircle2 />} tone="green"
+              label={t('maint.completedMtd')} value={closedPeriodicMTD}
+              caption={t('maint.completedThisMonth')} />
           </div>
-          <div className="card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
-            <div className="text-base font-bold mb-1">{t('maint.periodicScheduleTitle')}</div>
-            <div className="text-xs text-slate-500 mb-4">{t('maint.periodicScheduleSub')}</div>
+
+          <FilterBar
+            className="mb-4"
+            search={fltQ} onSearch={setFltQ} searchPlaceholder={t('maint.filterSearchPlaceholder')}
+            onReset={resetFilters}
+          >
+            <FilterSelect icon={<Building2 />} value={fltPlant} onChange={setFltPlant} options={plantFilterOptions} />
+            <FilterSelect icon={<Activity />} value={fltStatus} onChange={setFltStatus} options={statusFilterOptions} />
+          </FilterBar>
+
+          <SectionCard
+            flush
+            title={t('maint.periodicScheduleTitle')}
+            subtitle={t('maint.periodicScheduleSub')}
+          >
             <div className="overflow-x-auto scroll-x">
-              <table className="dt">
+              <table className="dt2">
                 <thead>
                   <tr>
                     <Th sortKey="task" s={periodicSort}>{t('maint.colTask')}</Th><Th sortKey="equipment" s={periodicSort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={periodicSort}>{t('common.plant')}</Th><Th sortKey="frequency" s={periodicSort}>{t('maint.colFrequency')}</Th>
@@ -2432,7 +2486,7 @@ export function Maintenance() {
                   </tr>
                 </thead>
                 <tbody>
-                  {schedules.length === 0 && (
+                  {periodicSort.sorted.length === 0 && (
                     <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">
                       {!isTechnician ? t('maint.noSchedulesAddSelf') : t('maint.noSchedulesAdmin')}
                     </td></tr>
@@ -2460,12 +2514,12 @@ export function Maintenance() {
                           <td>
                             {awaitingVerify ? (
                               (isUnitHead || isAdmin)
-                                ? <button onClick={() => setVerifyingTicket(linkedTicket!)} className="pill px-3 py-1.5 font-semibold text-xs" style={{ background: '#7C3AED', color: '#fff', border: 'none', cursor: 'pointer' }}>Verify</button>
+                                ? <ButtonV2 size="sm" onClick={() => setVerifyingTicket(linkedTicket!)} className="bg-[#7C3AED] text-white border-none hover:bg-[#6D28D9]">Verify</ButtonV2>
                                 : <span className="text-xs" style={{ color: '#7C3AED' }}>Awaiting verify</span>
                             ) : (linkedTicket || (days !== null && days <= 0)) ? (
-                              <button onClick={() => setCompletingSchedule(s)} className="btn-accent pill px-3 py-1.5 font-semibold text-xs">
+                              <ButtonV2 size="sm" variant="primary" onClick={() => setCompletingSchedule(s)}>
                                 {t('maint.markComplete')}
-                              </button>
+                              </ButtonV2>
                             ) : (
                               <span className="text-xs text-slate-400">{t('maint.notDue')}</span>
                             )}
@@ -2477,61 +2531,60 @@ export function Maintenance() {
                 </tbody>
               </table>
             </div>
-            <TablePagination controls={periodicPg.controls} />
-          </div>
+            <TablePaginationV2 controls={periodicPg.controls} label={t('maint.tasksNoun')} />
+          </SectionCard>
         </>
       )}
 
       {/* ── EMERGENCY TAB ─────────────────────────────────────────────────── */}
       {tab === 'emergency' && (
         <>
-          <div className="grid grid-cols-12 gap-5 mb-5">
-            <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.openTickets')}</div>
-              <div className="text-[28px] font-extrabold mt-1 num text-red-600">{openEmergency}</div>
-            </div>
-            <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.pendingStoreApproval')}</div>
-              <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{pendingStore}</div>
-            </div>
-            <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.purchaseHandover')}</div>
-              <div className="text-[28px] font-extrabold mt-1 num text-purple-600">{pendingPurchase}</div>
-            </div>
-            <div className="col-span-12 lg:col-span-3 card p-5">
-              <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('maint.closedMtd')}</div>
-              <div className="text-[28px] font-extrabold mt-1 num text-green-600">{closedMTD}</div>
-            </div>
+          <div className="grid grid-cols-12 gap-4 mb-4">
+            <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<AlertTriangle />} tone="red" valueTone={openEmergency > 0 ? 'red' : 'default'}
+              label={t('maint.openTickets')} value={openEmergency}
+              caption={openEmergency > 0 ? t('maint.needsAttention') : undefined} />
+            <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<Hourglass />} tone="amber"
+              label={t('maint.pendingStoreApproval')} value={pendingStore} />
+            <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<ShoppingCart />} tone="purple"
+              label={t('maint.purchaseHandover')} value={pendingPurchase} />
+            <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<CheckCircle2 />} tone="green"
+              label={t('maint.closedMtd')} value={closedMTD}
+              caption={t('maint.completedThisMonth')} />
           </div>
-          <div className="card p-6" style={{ background: 'var(--red-soft)', border: '1px solid #fecaca' }}>
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-              <div>
-                <div className="text-base font-bold">{t('maint.emergencyTitle')}</div>
-                <div className="text-xs text-slate-500">{t('maint.emergencySub')}</div>
-              </div>
-              <div className="flex items-center gap-2">
+
+          <FilterBar
+            className="mb-4"
+            search={fltQ} onSearch={setFltQ} searchPlaceholder={t('maint.filterSearchPlaceholder')}
+            onReset={resetFilters}
+          >
+            <FilterSelect icon={<Building2 />} value={fltPlant} onChange={setFltPlant} options={plantFilterOptions} />
+            <FilterSelect icon={<Activity />} value={fltStatus} onChange={setFltStatus} options={statusFilterOptions} />
+          </FilterBar>
+
+          <SectionCard
+            flush
+            title={t('maint.emergencyTitle')}
+            subtitle={t('maint.emergencySub')}
+            actions={
+              <>
                 {isAdmin && emergencyTickets.length > 0 && (
-                  <button
-                    className="chip"
-                    onClick={handleDeleteAllEmergency}
-                    disabled={deletingAll}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: '#DC2626', borderColor: '#FECACA' }}
-                  >
-                    🗑 {deletingAll ? t('maint.deleting') : t('maint.deleteAll', { count: emergencyTickets.length })}
-                  </button>
+                  <ButtonV2 variant="outline" icon={<Trash2 />} onClick={handleDeleteAllEmergency} disabled={deletingAll} className="text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300">
+                    {deletingAll ? t('maint.deleting') : t('maint.deleteAll', { count: emergencyTickets.length })}
+                  </ButtonV2>
                 )}
                 {(isAdmin || isUnitHead) && (
-                  <button className="chip" onClick={() => setShowReport(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                    📄 {t('maint.createReport')}
-                  </button>
+                  <ButtonV2 variant="outline" icon={<FileText />} onClick={() => setShowReport(true)}>
+                    {t('maint.createReport')}
+                  </ButtonV2>
                 )}
-                <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setShowRaisePanel(true)}>
-                  + {t('maint.raiseTicket')}
-                </button>
-              </div>
-            </div>
+                <ButtonV2 variant="primary" icon={<Plus />} onClick={() => setShowRaisePanel(true)}>
+                  {t('maint.raiseTicket')}
+                </ButtonV2>
+              </>
+            }
+          >
             <div className="overflow-x-auto scroll-x">
-              <table className="dt">
+              <table className="dt2">
                 <thead>
                   <tr>
                     <Th sortKey="ticket" s={emergencySort}>{t('maint.colTicketNo')}</Th><Th sortKey="equipment" s={emergencySort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={emergencySort}>{t('common.plant')}</Th><Th sortKey="issue" s={emergencySort}>{t('maint.colIssue')}</Th>
@@ -2540,7 +2593,7 @@ export function Maintenance() {
                   </tr>
                 </thead>
                 <tbody>
-                  {emergencyTickets.length === 0 && (
+                  {emergencySort.sorted.length === 0 && (
                     <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noEmergencyTickets')}</td></tr>
                   )}
                   {emergencyPg.pageRows.map(t => (
@@ -2566,31 +2619,29 @@ export function Maintenance() {
                 </tbody>
               </table>
             </div>
-            <TablePagination controls={emergencyPg.controls} />
-          </div>
+            <TablePaginationV2 controls={emergencyPg.controls} label={t('maint.ticketsNoun')} />
+          </SectionCard>
         </>
       )}
 
       {/* ── SCHEDULE SETUP TAB ─────────────────────────────────────────────── */}
       {tab === 'schedule' && !isTechnician && !isStoreManager && (
-        <div className="card p-6">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-            <div>
-              <div className="text-base font-bold">{t('maint.schedulesTitle')}</div>
-              <div className="text-xs text-slate-500">{t('maint.schedulesSub')}</div>
-            </div>
-            {(isAdmin || isUnitHead) && (
-              <div className="flex items-center gap-2">
-                <button className="chip" onClick={() => setShowPMImport(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>⬆ Import PM workbook</button>
-                <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={openAddSchedule}>
-                  {t('maint.addSchedule')}
-                </button>
-              </div>
-            )}
-          </div>
+        <SectionCard
+          flush
+          title={t('maint.schedulesTitle')}
+          subtitle={t('maint.schedulesSub')}
+          actions={(isAdmin || isUnitHead) && (
+            <>
+              <ButtonV2 variant="outline" icon={<Upload />} onClick={() => setShowPMImport(true)}>Import PM workbook</ButtonV2>
+              <ButtonV2 variant="accent" icon={<Plus />} onClick={openAddSchedule}>
+                {t('maint.addSchedule')}
+              </ButtonV2>
+            </>
+          )}
+        >
           {/* Each plant maintains its own PM workbook — filter the register by plant. */}
           {schedulePlants.length > 1 && (
-            <div className="flex gap-2 mb-3 flex-wrap">
+            <div className="flex gap-2 mb-3 flex-wrap px-5">
               <button onClick={() => setSchedPlantFilter([])} className={`chip${schedPlantFilter.length === 0 ? ' active' : ''}`}>All plants</button>
               {schedulePlants.map(p => (
                 <button key={p.id} onClick={() => setSchedPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])} className={`chip${schedPlantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
@@ -2599,7 +2650,7 @@ export function Maintenance() {
             </div>
           )}
           <div className="overflow-x-auto scroll-x">
-            <table className="dt">
+            <table className="dt2">
               <thead>
                 <tr>
                   <Th sortKey="task" s={scheduleSort}>{t('maint.colTaskTitle')}</Th><Th sortKey="equipment" s={scheduleSort}>{t('maint.colEquipment')}</Th><Th sortKey="plant" s={scheduleSort}>{t('common.plant')}</Th><Th sortKey="frequency" s={scheduleSort}>{t('maint.colFrequency')}</Th>
@@ -2641,8 +2692,8 @@ export function Maintenance() {
               </tbody>
             </table>
           </div>
-          <TablePagination controls={schedulePg.controls} />
-        </div>
+          <TablePaginationV2 controls={schedulePg.controls} label={t('maint.tasksNoun')} />
+        </SectionCard>
       )}
 
       </>

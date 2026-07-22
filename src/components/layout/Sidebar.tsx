@@ -15,6 +15,9 @@ interface SidebarProps {
   mobileOpen?: boolean;
   /** Close the mobile drawer (called after navigation). */
   onClose?: () => void;
+  /** v2 collapsed rail (md+ only — the mobile drawer always renders full). */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 /** A sidebar dropdown child. `nav` overrides the click target when it must differ
@@ -31,8 +34,8 @@ type NavItem = { key: string; path: string; nav?: string; children?: NavItem[] }
  */
 const FACTORY_ITEMS: NavItem[] = [
   { key: 'nav.far', path: '/dashboard/purchase/far', children: [
-    { key: 'nav.fixedAssets', path: '/dashboard/purchase/far' },
-    { key: 'nav.qrCode',      path: '/dashboard/purchase/qr'  },
+    { key: 'nav.asset',   path: '/dashboard/purchase/far' },
+    { key: 'nav.qrCodes', path: '/dashboard/purchase/qr'  },
   ] },
   { key: 'nav.maintenance',    path: '/dashboard/purchase/maint'    },
   { key: 'nav.activityLog',    path: '/dashboard/purchase/activity' },
@@ -184,7 +187,7 @@ function IconShield() {
 
 function SectionHeader({ label }: { label: string }) {
   return (
-    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-6 mb-2 px-3">
+    <div className="sb-hide text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-6 mb-2 px-3">
       {label}
     </div>
   );
@@ -192,7 +195,7 @@ function SectionHeader({ label }: { label: string }) {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
-export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: SidebarProps) {
+export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapsed = false, onToggleCollapse }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
@@ -357,28 +360,36 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
 
   return (
     <aside
-      className={`fixed left-0 top-0 bottom-0 bg-white border-r border-slate-100 p-5 overflow-y-auto z-50 transition-transform duration-200 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
-      style={{ width: '260px' }}
+      className={`sidebar-v2 ${collapsed ? 'collapsed ' : ''}fixed left-0 top-0 bottom-0 p-5 overflow-y-auto z-50 flex flex-col transition-[transform,width] duration-200 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
+      style={{ width: 'var(--sidebar-width, 260px)' }}
+      onClickCapture={(e) => {
+        // Collapsed rail: any click (except the collapse toggle itself) expands
+        // the sidebar first so accordions/labels are visible again.
+        if (collapsed && !(e.target as HTMLElement).closest('[data-collapse-btn]')) {
+          onToggleCollapse?.();
+        }
+      }}
     >
       {/* Logo */}
-      <div className="flex items-center gap-3 mb-7">
-        <div className="w-11 h-11 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-extrabold text-lg shadow-sm">
+      <div className="flex items-center gap-3 mb-7 shrink-0">
+        <div className="w-11 h-11 rounded-2xl bg-[#F47651] text-white flex items-center justify-center font-extrabold text-lg shadow-sm shrink-0">
           S°
         </div>
-        <div>
-          <div className="font-extrabold text-[15px] leading-tight">Suntek Group</div>
-          <div className="text-slate-400 text-[11px]">CaratSense · v0.2</div>
+        <div className="sb-hide">
+          <div className="font-extrabold text-[15px] leading-tight text-white">Suntek Group</div>
+          <div className="text-slate-400 text-[11px]">CaratSense • v2.0</div>
         </div>
       </div>
 
       {/* Quick Search */}
       <button
-        className="btn-accent pill px-4 py-2.5 font-semibold text-[13px] flex items-center gap-2 mb-2 w-full justify-center"
+        className="btn-accent rounded-[10px] px-4 py-2.5 font-semibold text-[13px] flex items-center gap-2 mb-2 w-full justify-center shrink-0"
+        title={`${t('nav.quickSearch')} (⌘K)`}
         onClick={() => { openPalette(); onClose?.(); }}
       >
         <IconSearch />
-        <span>{t('nav.quickSearch')}</span>
-        <kbd className="bg-white/15 border-white/15 text-white">⌘ K</kbd>
+        <span className="sb-hide">{t('nav.quickSearch')}</span>
+        <kbd className="sb-hide bg-white/15 border-white/15 text-white">⌘ K</kbd>
       </button>
 
       {/* ── WORKSPACE ─────────────────────────────────────────────────────── */}
@@ -405,7 +416,7 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
             <IconCheckSquare />
             <span>{t('nav.todo')}</span>
             {todoCount > 0 && (
-              <span className="pill-count" style={{ background: '#FFF7ED', color: '#EA580C' }}>
+              <span className="pill-count" style={{ background: '#F97316', color: '#fff' }}>
                 {todoCount > 9 ? '9+' : todoCount}
               </span>
             )}
@@ -753,7 +764,7 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
       )}
 
       {/* ── User card — shows active profile, not real auth user ──────────── */}
-      <div className="mt-6 p-3 rounded-2xl bg-slate-50">
+      <div className="sb-hide mt-6 p-3 rounded-xl bg-white/5">
         <div className="flex items-center gap-2.5">
           <div
             className={[
@@ -768,15 +779,15 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
             {activeProfile.initials}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[13px] font-semibold leading-tight truncate">
+            <div className="text-[13px] font-semibold leading-tight truncate text-white">
               {activeProfile.name}
             </div>
-            <div className="text-[11px] text-slate-500">{activeProfile.roleLabel}</div>
+            <div className="text-[11px] text-slate-400">{activeProfile.roleLabel}</div>
             {activeProfile.plant && (
-              <div className="text-[10px] text-slate-400">📍 {activeProfile.plant}</div>
+              <div className="text-[10px] text-slate-500">📍 {activeProfile.plant}</div>
             )}
             {activeProfile.accessNote && (
-              <div className="text-[9px] text-slate-400 truncate mt-0.5" title={activeProfile.accessNote}>
+              <div className="text-[9px] text-slate-500 truncate mt-0.5" title={activeProfile.accessNote}>
                 {activeProfile.accessNote}
               </div>
             )}
@@ -784,6 +795,24 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose }: Sideba
         </div>
         {/* Sign out lives in the top-right avatar menu (ProfileSwitcher), not here. */}
       </div>
+
+      {/* ── Collapse toggle — pinned to the bottom, md+ only ──────────────── */}
+      <button
+        data-collapse-btn
+        className="nav-link hidden md:flex mt-auto pt-4 shrink-0 w-full"
+        style={{ marginTop: 'auto' }}
+        title={t('nav.collapseMenu')}
+        onClick={() => onToggleCollapse?.()}
+      >
+        <svg
+          width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          className="transition-transform duration-200 shrink-0"
+          style={{ transform: collapsed ? 'rotate(180deg)' : undefined }}
+        >
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        <span className="sb-hide">{t('nav.collapseMenu')}</span>
+      </button>
     </aside>
   );
 }

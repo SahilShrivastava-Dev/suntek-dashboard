@@ -426,6 +426,28 @@
   @media (min-width: 768px) {
     .app-shell[data-sidebar-collapsed='true'] { --sidebar-width: 72px; }
   }
+
+  /* ── v2 dark sidebar — recolors the existing .nav-link idiom without
+     touching the light-theme classes other screens may reuse. ── */
+  .sidebar-v2 {
+    background: var(--sb-bg);
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--sb-text);
+  }
+  .sidebar-v2 .nav-link { color: var(--sb-text); }
+  .sidebar-v2 .nav-link:hover { color: #fff; background: var(--sb-hover); }
+  .sidebar-v2 .nav-link.active { background: var(--sb-active); color: #fff; }
+  .sidebar-v2 .nav-sub { border-left-color: rgba(255, 255, 255, 0.10); }
+  .sidebar-v2 .nav-link.active .pill-count { background: rgba(255,255,255,0.18); color: #fff; }
+
+  /* Collapsed rail (md+ only — the mobile drawer always renders full). */
+  @media (min-width: 768px) {
+    .sidebar-v2.collapsed { padding-left: 14px; padding-right: 14px; }
+    .sidebar-v2.collapsed .sb-hide { display: none; }
+    .sidebar-v2.collapsed .nav-sub { display: none; }
+    .sidebar-v2.collapsed .nav-link { justify-content: center; padding: 10px; }
+    .sidebar-v2.collapsed .nav-link > *:not(:first-child) { display: none; }
+  }
 }
 
 /* ── Global (layer-free) animations ── */

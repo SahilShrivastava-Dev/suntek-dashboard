@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
-import { insertRows } from '../../../lib/db';
+import { insertRows, updateRows } from '../../../lib/db';
+import { useRoleContext } from '../../../contexts/RoleContext';
+import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
@@ -11,7 +13,7 @@ import { useSortable } from '../../../components/ui/useSortable';
 import { StatCard, SectionCard, ButtonV2, SegmentTabs, TablePaginationV2, ThV2 as Th } from '../../../components/v2';
 import { Boxes, ShieldCheck, Wrench, Camera, Download, Upload, Plus } from 'lucide-react';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
-import { uploadWorkflowFile } from '../../../lib/cloudinary';
+import { uploadWorkflowFile, uploadWorkflowImage } from '../../../lib/cloudinary';
 import * as XLSX from 'xlsx';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
@@ -140,24 +142,64 @@ const MAINT_CSV_COLUMNS: CsvColumn[] = [
   { header: 'Cost (INR)', key: 'cost' },
 ];
 
-function PicBadge({ has }: { has: boolean }) {
+/**
+ * PIC cell — camera badge per asset. No photo yet (gray) → click opens the
+ * file/camera picker and uploads the machine photo (Cloudinary → photo_url).
+ * Photo on file (green) → click opens it in the lightbox. The same photo_url
+ * feeds the Asset Profile header (QR landing), which shows the image instead
+ * of the default 🏭 icon once one exists.
+ */
+function PicCell({ asset, onUpload, onView }: {
+  asset: AssetRow;
+  onUpload: (asset: AssetRow, file: File) => Promise<void>;
+  onView: (asset: AssetRow) => void;
+}) {
   const { t } = useTranslation();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const has = !!asset.photo_url;
+
   return (
-    <span
-      className={`pic-badge${has ? '' : ' missing'}`}
-      title={has ? t('far.picOnFile') : t('far.noPicYet')}
-    >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-        <circle cx="12" cy="13" r="4"/>
-      </svg>
-    </span>
+    <>
+      <button
+        type="button"
+        className={`pic-badge${has ? '' : ' missing'}`}
+        title={busy ? 'Uploading…' : has ? `${t('far.picOnFile')} — click to view` : `${t('far.noPicYet')} — click to add a photo`}
+        disabled={busy}
+        onClick={() => (has ? onView(asset) : inputRef.current?.click())}
+        style={{ cursor: busy ? 'wait' : 'pointer', border: 'none', padding: 0, opacity: busy ? 0.5 : 1 }}
+      >
+        {busy ? (
+          <span className="inline-block w-3 h-3 rounded-full border-2 border-slate-300 border-t-slate-500 animate-spin" />
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+        )}
+      </button>
+      <input
+        ref={inputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+        onChange={async e => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (!f) return;
+          setBusy(true);
+          try { await onUpload(asset, f); } finally { setBusy(false); }
+        }}
+      />
+    </>
   );
 }
 
 /** Per-group expanded asset list — extracted so it can own its own sort state
  *  (hooks can't run inside the group .map()). */
-function AssetDetailTable({ assets, showPlant }: { assets: AssetRow[]; showPlant: boolean }) {
+function AssetDetailTable({ assets, showPlant, onUploadPic, onViewPic }: {
+  assets: AssetRow[];
+  showPlant: boolean;
+  onUploadPic: (asset: AssetRow, file: File) => Promise<void>;
+  onViewPic: (asset: AssetRow) => void;
+}) {
   const s = useSortable(assets, {
     mark: a => a.identification_mark,
     make: a => a.make,
@@ -183,7 +225,7 @@ function AssetDetailTable({ assets, showPlant }: { assets: AssetRow[]; showPlant
               <td className="num text-xs">{a.year || '—'}</td>
               <td className="num text-xs font-semibold">{a.value ? `₹ ${Number(a.value).toLocaleString('en-IN')}` : '—'}</td>
               {showPlant && <td className="text-slate-500 text-xs">{a.plants?.name || '—'}</td>}
-              <td><PicBadge has={!!a.photo_url} /></td>
+              <td><PicCell asset={a} onUpload={onUploadPic} onView={onViewPic} /></td>
             </tr>
           ))}
         </tbody>
@@ -198,7 +240,31 @@ const ACCOUNT_HEADS = ['Plant & Machinery', 'Electrical Equipment', 'Vehicles', 
 export function FAR() {
   const { t } = useTranslation();
   const toast = useToast();
+  const { activeProfile } = useRoleContext();
   const { scopeQuery, allowedPlants } = usePlantScope();
+  // Machine-photo lightbox (PIC column → view).
+  const [picView, setPicView] = useState<LightboxImage[] | null>(null);
+
+  /** PIC column upload: Cloudinary → fixed_assets.photo_url → local state.
+   *  The same photo then appears on the Asset Profile (QR landing) header. */
+  async function handleAssetPicUpload(asset: AssetRow, file: File) {
+    try {
+      const up = await uploadWorkflowImage(file, {
+        workflow: 'general', subfolder: 'far-assets', kind: 'asset-pic',
+        entityId: asset.id, plant: asset.plants?.name ?? undefined, creator: activeProfile.name,
+      });
+      const { error } = await updateRows('fixed_assets', { photo_url: up.secure_url }).eq('id', asset.id);
+      if (error) throw error;
+      setAssets(prev => prev.map(x => x.id === asset.id ? { ...x, photo_url: up.secure_url } : x));
+      toast.success('Machine photo saved');
+    } catch (e) {
+      toast.error(`Photo upload failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  function handleAssetPicView(asset: AssetRow) {
+    if (!asset.photo_url) return;
+    setPicView([{ url: asset.photo_url, label: `${asset.name}${asset.identification_mark ? ` · ${asset.identification_mark}` : ''}` }]);
+  }
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -762,7 +828,7 @@ export function FAR() {
                             {open && (
                               <tr>
                                 <td colSpan={8} style={{ background: '#F8FAFC', padding: 0 }}>
-                                  <AssetDetailTable assets={g.assets} showPlant={plantsInFar.length > 1} />
+                                  <AssetDetailTable assets={g.assets} showPlant={plantsInFar.length > 1} onUploadPic={handleAssetPicUpload} onViewPic={handleAssetPicView} />
                                 </td>
                               </tr>
                             )}
@@ -893,6 +959,9 @@ export function FAR() {
           );
         })()}
       </SlidePanel>
+
+      {/* Machine-photo viewer (PIC column) */}
+      <ImageLightbox images={picView || []} open={!!picView} onClose={() => setPicView(null)} />
     </>
   );
 }

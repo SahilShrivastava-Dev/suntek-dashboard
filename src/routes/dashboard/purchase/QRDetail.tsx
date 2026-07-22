@@ -11,7 +11,8 @@ import { useToast } from '../../../components/ui/toast';
 import { ErrorState } from '../../../components/ui/states';
 import { AssetQRCard } from '../../../components/AssetQRCard';
 import { ButtonV2, StatusPill, InfoBanner } from '../../../components/v2';
-import { assetQrUrl, downloadDataUrl, printQrLabel, safeFileName } from '../../../lib/far/qr';
+import { assetQrUrl, downloadDataUrl, printQrLabel, safeFileName, makeQrToken } from '../../../lib/far/qr';
+import { updateRows } from '../../../lib/db';
 import type { Database } from '../../../lib/database.types';
 
 type AssetRow = Database['public']['Tables']['fixed_assets']['Row'] & { plants?: { name: string | null } | null };
@@ -165,8 +166,6 @@ export function QRDetail() {
                       if (!window.confirm('Regenerate this QR code?\n\nThe current printed code will STOP working and must be reprinted and re-attached.')) return;
                       setBusy(true);
                       try {
-                        const { makeQrToken } = await import('../../../lib/far/qr');
-                        const { updateRows } = await import('../../../lib/db');
                         const patch = { qr_token: makeQrToken(), qr_generated_at: new Date().toISOString(), qr_generated_by: activeProfile.name };
                         await updateRows('fixed_assets', patch).eq('id', asset.id);
                         setAsset(a => a ? { ...a, ...patch } : a);

@@ -19,7 +19,7 @@ import {
 import { DSOGauge, RingProgress, MiniBarChart, BulletCompare, DeltaBadge, OverdueAgingBar } from '../../components/charts/AnalyticsViz';
 import { KpiInfoButton } from '../../components/KpiInfoButton';
 import { StockSnapshot } from '../../components/overview/StockSnapshot';
-import { ButtonV2, SectionCard, StatusPill } from '../../components/v2';
+import { ButtonV2, SectionCard, StatusPill, WorkCard } from '../../components/v2';
 
 /** Fallback source→route map for older alert rows without an explicit `route`. */
 const ALERT_ROUTE: Record<string, string> = {
@@ -53,35 +53,6 @@ function SectionLabel({ n, children, right }: { n: number; children: React.React
 }
 
 /** One "Today's Work" mini-card: icon square, label, big number, caption. */
-function WorkCard({ icon, label, value, caption, captionTone = 'slate', onClick }: {
-  icon: React.ReactNode;
-  label: string;
-  value: React.ReactNode;
-  caption?: React.ReactNode;
-  captionTone?: 'slate' | 'orange' | 'green';
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-left border border-slate-200 rounded-[10px] p-4 bg-white hover:border-slate-300 hover:shadow-sm transition flex-1 min-w-[150px]"
-      style={{ fontFamily: 'inherit', cursor: onClick ? 'pointer' : 'default' }}
-    >
-      <span className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 text-slate-500 inline-flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4 mb-3">
-        {icon}
-      </span>
-      <div className="text-[12.5px] text-slate-600 leading-snug">{label}</div>
-      <div className="text-[26px] font-bold text-slate-900 leading-tight num">{value}</div>
-      {caption && (
-        <div className={`text-[11.5px] mt-0.5 ${captionTone === 'orange' ? 'text-orange-600 font-medium' : captionTone === 'green' ? 'text-green-600' : 'text-slate-400'}`}>
-          {caption}
-        </div>
-      )}
-    </button>
-  );
-}
-
 /** One "Business KPIs" column: gray label, big value, colored delta line. */
 function KpiBlock({ label, value, delta, deltaTone = 'slate', info }: {
   label: string;
@@ -205,6 +176,7 @@ export function Overview() {
             <SectionLabel n={1}>{t('overview.todaysWork', "Today's Work")}</SectionLabel>
             <div className="flex gap-3 flex-wrap">
               <WorkCard
+                className="flex-1 min-w-[150px]"
                 icon={<ClipboardCheck />}
                 label={t('overview.pendingApprovals', 'Pending Approvals')}
                 value={pendingStoreReq ?? '…'}
@@ -213,6 +185,7 @@ export function Overview() {
                 onClick={() => navigate('/dashboard/purchase/storereq')}
               />
               <WorkCard
+                className="flex-1 min-w-[150px]"
                 icon={<Wrench />}
                 label={t('overview.openMaintenance', 'Open Maintenance')}
                 value={openMaint ?? '…'}
@@ -221,6 +194,7 @@ export function Overview() {
                 onClick={() => navigate('/dashboard/purchase/maint')}
               />
               <WorkCard
+                className="flex-1 min-w-[150px]"
                 icon={<Timer />}
                 label={t('overview.activeBatches', 'Active Batches')}
                 value={activeBatchCount ?? '…'}
@@ -228,6 +202,7 @@ export function Overview() {
                 onClick={() => navigate('/dashboard/batches')}
               />
               <WorkCard
+                className="flex-1 min-w-[150px]"
                 icon={<BellRing />}
                 label={t('overview.openAlerts', 'Open Alerts')}
                 value={alerts.length}

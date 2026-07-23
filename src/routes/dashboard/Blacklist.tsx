@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ShieldBan, UserX, Car, Building2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
@@ -11,7 +12,7 @@ import { NotesButton } from '../../components/mentions';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
 import { useSortable } from '../../components/ui/useSortable';
-import { ThV2 as Th } from '../../components/v2';
+import { ThV2 as Th, WorkCard } from '../../components/v2';
 import type { BlacklistEntry } from '../../contexts/BlacklistContext';
 import type { Database } from '../../lib/database.types';
 
@@ -426,28 +427,23 @@ export function Blacklist() {
 
   return (
     <>
-      {/* ── KPI row ──────────────────────────────────────────────────────── */}
+      {/* ── KPI row — same format as the Overview "Today's Work" cards ──── */}
       <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('blacklist.kpiActive')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-red-600">{active.length}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{t('blacklist.kpiActiveSub', { count: entries.filter(e => !e.is_active).length })}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('blacklist.kpiPersons')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{persons}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{t('blacklist.kpiPersonsSub')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('blacklist.kpiVehicles')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{vehicles}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{t('blacklist.kpiVehiclesSub')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('blacklist.kpiVendorsOther')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{others}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{t('blacklist.kpiVendorsOtherSub')}</div>
-        </div>
+        {[
+          { icon: <ShieldBan />,   label: t('blacklist.kpiActive'),      value: active.length, sub: t('blacklist.kpiActiveSub', { count: entries.filter(e => !e.is_active).length }) },
+          { icon: <UserX />,       label: t('blacklist.kpiPersons'),     value: persons,       sub: t('blacklist.kpiPersonsSub') },
+          { icon: <Car />,         label: t('blacklist.kpiVehicles'),    value: vehicles,      sub: t('blacklist.kpiVehiclesSub') },
+          { icon: <Building2 />,   label: t('blacklist.kpiVendorsOther'), value: others,       sub: t('blacklist.kpiVendorsOtherSub') },
+        ].map((k, i) => (
+          <WorkCard
+            key={i}
+            className="col-span-12 lg:col-span-3"
+            icon={k.icon}
+            label={k.label}
+            value={k.value}
+            caption={k.sub}
+          />
+        ))}
       </div>
 
       {/* ── Table card ───────────────────────────────────────────────────── */}

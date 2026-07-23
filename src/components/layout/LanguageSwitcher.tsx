@@ -58,7 +58,7 @@ export function LanguageSwitcher() {
         onClick={() => setOpen((v) => !v)}
         title={t('topbar.language')}
         aria-label={t('topbar.language')}
-        className={`w-10 h-10 rounded-[10px] border flex items-center justify-center ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+        className={`w-9 h-9 max-[390px]:w-8 max-[390px]:h-8 md:w-10 md:h-10 shrink-0 rounded-[10px] border flex items-center justify-center ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="10" />

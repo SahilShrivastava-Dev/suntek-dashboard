@@ -72,7 +72,7 @@ export function ProfileSwitcher() {
       {/* Trigger chip */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors"
+        className="flex items-center gap-1.5 pl-1.5 pr-2 py-1 md:gap-2.5 md:pl-2 md:pr-3 md:py-1.5 shrink-0 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors"
       >
         <ProfileAvatar profile={activeProfile} size="sm" />
         <div className="text-left hidden md:block">

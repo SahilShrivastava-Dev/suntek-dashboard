@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { ShieldCheck, RefreshCw, Activity, Download, Cpu, Sparkles, Database, Check, Info, AlertCircle, AlertTriangle, Flame } from 'lucide-react';
-import { StatCard, SectionCard, ButtonV2, type StatTone } from '../../components/v2';
+import { WorkCard, SectionCard, ButtonV2 } from '../../components/v2';
 import { SlidePanel } from '../../components/SlidePanel';
 import { useAnomalies } from '../../contexts/AnomalyContext';
 import { useExportFeatures } from '../../lib/anomaly/useAnomalies';
@@ -14,8 +14,7 @@ import { AnomalyAnalyticsGrid } from '../../components/anomaly/AnomalyAnalyticsG
 import { LEVEL_LABEL, LEVEL_ORDER } from '../../lib/anomaly/levels';
 import type { AnomalyFinding, Level } from '../../lib/anomaly/types';
 
-/** Severity tier → v2 StatCard tone + icon (mild → extreme). */
-const TIER_TONE: Record<Level, StatTone> = { mild: 'blue', moderate: 'amber', heavy: 'orange', extreme: 'red' };
+/** Severity tier → icon (mild → extreme). */
 const TIER_ICON: Record<Level, React.ReactNode> = {
   mild: <Info />, moderate: <AlertCircle />, heavy: <AlertTriangle />, extreme: <Flame />,
 };
@@ -73,21 +72,14 @@ export function AnomalyDashboard() {
       {/* Severity tiers (extreme → mild) — click a tier to view its anomalies */}
       <div className="grid grid-cols-12 gap-4 mb-1.5">
         {LEVEL_ORDER.map(l => (
-          <button
+          <WorkCard
             key={l}
-            type="button"
+            className={`col-span-12 sm:col-span-6 lg:col-span-3 h-full ${tierModal === l ? 'ring-2 ring-slate-300' : ''}`}
+            icon={TIER_ICON[l]}
+            label={LEVEL_LABEL[l]}
+            value={levels[l]}
             onClick={() => setTierModal(l)}
-            className="col-span-12 sm:col-span-6 lg:col-span-3 text-left cursor-pointer group"
-          >
-            <StatCard
-              className={`h-full transition-shadow group-hover:shadow-md ${tierModal === l ? 'ring-2 ring-slate-300' : ''}`}
-              icon={TIER_ICON[l]}
-              tone={TIER_TONE[l]}
-              valueTone={levels[l] > 0 ? TIER_TONE[l] : 'default'}
-              label={LEVEL_LABEL[l]}
-              value={levels[l]}
-            />
-          </button>
+          />
         ))}
       </div>
       <div className="text-[11px] text-slate-400 mb-5">{t('anomaly.clickTierHint')}</div>

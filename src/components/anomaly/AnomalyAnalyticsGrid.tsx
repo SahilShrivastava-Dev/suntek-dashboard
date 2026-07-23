@@ -9,7 +9,7 @@ import type { AnalyticsResult, Level } from '../../lib/anomaly/types';
 // ── Card shell ────────────────────────────────────────────────────────────────
 function Panel({ title, sub, children, span = 1, infoKey }: { title: string; sub?: string; children: React.ReactNode; span?: number; infoKey?: string }) {
   return (
-    <div style={{ gridColumn: `span ${span}`, position: 'relative', background: '#fff', border: '1px solid #EEF2F6', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: `${span} 1 300px`, minWidth: 300, position: 'relative', background: '#fff', border: '1px solid #EEF2F6', borderRadius: 18, padding: '16px 18px', display: 'flex', flexDirection: 'column' }}>
       {infoKey && TILE_INFO[infoKey] && <KpiInfoButton info={TILE_INFO[infoKey]} />}
       <div style={{ marginBottom: 12, paddingRight: 22 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{title}</div>
@@ -186,7 +186,8 @@ export function AnomalyAnalyticsGrid() {
     return <div style={{ padding: '40px 0', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>Building analytics…</div>;
   }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
+    // Flex-wrap so a short last row stretches to fill the width — no empty slot
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
       <Panel title="Margin health" sub="speedometer · red <10% · amber <20% · green ≥20%" infoKey="marginGauge"><MarginGauge margin={data.margin} /></Panel>
       <Panel title="Severity mix" sub="all detected anomalies by tier" infoKey="severityMix"><SeverityDonut radar={data.radar} timeline={data.timeline} /></Panel>
       <Panel title="Sales vs Purchase" sub="weekly — the margin squeeze" infoKey="salesVsPurchase"><DualArea data={data.salesPurchase} /></Panel>

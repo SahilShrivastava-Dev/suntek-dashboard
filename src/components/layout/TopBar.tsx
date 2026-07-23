@@ -145,8 +145,9 @@ export function TopBar({ title, breadcrumb, subtitle, onMenu }: TopBarProps) {
         </div>
       </div>
 
-      {/* Right: live indicator + notifications + profile switcher */}
-      <div className="flex items-center gap-2 flex-wrap justify-end w-full md:w-auto" style={{ position: 'relative' }}>
+      {/* Right: live indicator + notifications + profile switcher.
+          Single line at every width — buttons shrink on small screens instead of wrapping. */}
+      <div className="flex items-center gap-1.5 max-[390px]:gap-1 md:gap-2 flex-nowrap justify-end w-full md:w-auto" style={{ position: 'relative' }}>
         {/* Live sync pill */}
         <div className="hidden md:flex items-center gap-2 px-3.5 py-2.5 bg-white border border-slate-200 rounded-[10px] text-[12px]">
           <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
@@ -159,7 +160,7 @@ export function TopBar({ title, breadcrumb, subtitle, onMenu }: TopBarProps) {
           onClick={() => openPalette()}
           title={`${t('nav.quickSearch')} (⌘K)`}
           aria-label={t('nav.quickSearch')}
-          className="w-10 h-10 rounded-[10px] bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
+          className="w-9 h-9 max-[390px]:w-8 max-[390px]:h-8 md:w-10 md:h-10 shrink-0 rounded-[10px] bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
         >
           <Search size={16} />
         </button>
@@ -176,7 +177,7 @@ export function TopBar({ title, breadcrumb, subtitle, onMenu }: TopBarProps) {
             title={t('nav.todo')}
             aria-label={t('nav.todo')}
             onClick={() => navigate('/dashboard/todo')}
-            className="w-10 h-10 rounded-[10px] bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
+            className="w-9 h-9 max-[390px]:w-8 max-[390px]:h-8 md:w-10 md:h-10 shrink-0 rounded-[10px] bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="9 11 12 14 22 4" />
@@ -199,7 +200,7 @@ export function TopBar({ title, breadcrumb, subtitle, onMenu }: TopBarProps) {
         {/* Bell button */}
         <button
           ref={btnRef}
-          className={`w-10 h-10 rounded-[10px] border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+          className={`w-9 h-9 max-[390px]:w-8 max-[390px]:h-8 md:w-10 md:h-10 shrink-0 rounded-[10px] border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
           onClick={() => setOpen(v => !v)}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -359,7 +360,7 @@ export function TopBar({ title, breadcrumb, subtitle, onMenu }: TopBarProps) {
         )}
 
         {/* Account controls — separated from the info icons */}
-        <div className="flex items-center gap-2 ml-1 pl-2 border-l border-slate-200">
+        <div className="flex items-center gap-1.5 ml-0.5 pl-1.5 md:gap-2 md:ml-1 md:pl-2 border-l border-slate-200 shrink-0">
           {/* Role preview switcher (admin only) — ⇅ icon */}
           <RoleSwitchButton />
           {/* Personal account menu (Settings · Sign out) */}

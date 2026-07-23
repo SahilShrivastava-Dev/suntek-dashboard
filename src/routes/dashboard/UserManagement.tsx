@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Users, UserCheck, Shield } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
 import { createLogin, updateLogin } from '../../lib/adminUsers';
@@ -13,7 +14,7 @@ import { logUserAccountEvent, LANGUAGE_OPTIONS } from '../../lib/userEvents';
 import { SlidePanel, PanelField, PanelInput, PanelPasswordInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
 import { usePagination } from '../../components/ui/usePagination';
-import { TablePaginationV2 as TablePagination } from '../../components/v2';
+import { TablePaginationV2 as TablePagination, WorkCard } from '../../components/v2';
 import { useSortable } from '../../components/ui/useSortable';
 import { ThV2 as Th } from '../../components/v2';
 
@@ -584,32 +585,32 @@ export function UserManagement() {
 
   return (
     <>
-      {/* KPI row */}
+      {/* KPI row — same format as the Overview "Today's Work" cards */}
       <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('userMgmt.totalUsers')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{total}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('userMgmt.allRolesSub')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('userMgmt.active')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-green-600">{activeCount}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{t('userMgmt.inactiveCount', { count: total - activeCount })}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-6 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-3">{t('userMgmt.byRole')}</div>
+        <WorkCard
+          className="col-span-12 lg:col-span-3"
+          icon={<Users />}
+          label={t('userMgmt.totalUsers')}
+          value={total}
+          caption={t('userMgmt.allRolesSub')}
+        />
+        <WorkCard
+          className="col-span-12 lg:col-span-3"
+          icon={<UserCheck />}
+          label={t('userMgmt.active')}
+          value={activeCount}
+          caption={t('userMgmt.inactiveCount', { count: total - activeCount })}
+        />
+        <WorkCard className="col-span-12 lg:col-span-6" icon={<Shield />} label={<span className="inline-block mb-2">{t('userMgmt.byRole')}</span>}>
           <div className="flex flex-wrap gap-2">
             {roleBreakdown.length === 0 && <div className="text-[11px] text-slate-400">{t('userMgmt.noUsersYet')}</div>}
-            {roleBreakdown.map(r => {
-              const lvl = LEVEL_COLOR[r.level] || { bg: '#F1F5F9', color: '#64748B' };
-              return (
-                <span key={r.id} className="badge" style={{ background: lvl.bg, color: lvl.color, fontSize: 10.5 }}>
-                  {r.label} · {r.count}
-                </span>
-              );
-            })}
+            {roleBreakdown.map(r => (
+              <span key={r.id} className="badge bg-slate-100 text-slate-600" style={{ fontSize: 10.5 }}>
+                {r.label} · {r.count}
+              </span>
+            ))}
           </div>
-        </div>
+        </WorkCard>
       </div>
 
       {/* User table */}

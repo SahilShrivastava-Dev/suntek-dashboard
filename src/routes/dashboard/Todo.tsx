@@ -1,6 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import {
+  ClipboardCheck, Receipt, Package, Wrench, Undo2, CalendarClock,
+  Moon, AlertTriangle, Siren, Inbox,
+} from 'lucide-react';
+import { WorkCard } from '../../components/v2';
 import { useTodo } from '../../contexts/TodoContext';
 import { useRoleContext } from '../../contexts/RoleContext';
 import type { TodoTone, TodoItem, TodoCell } from '../../lib/todo/sections';
@@ -23,6 +28,20 @@ const TONE: Record<TodoTone, { bg: string; color: string }> = {
   green:  { bg: '#DCFCE7', color: '#16A34A' },
   purple: { bg: '#EDE9FE', color: '#7C3AED' },
   slate:  { bg: '#F1F5F9', color: '#475569' },
+};
+
+/** Line icon per section, matching the Overview "Today's Work" card style. */
+const SECTION_ICONS: Record<string, React.ReactNode> = {
+  'approvals':         <ClipboardCheck />,
+  'purchase-bill':     <Receipt />,
+  'store-checks':      <Package />,
+  'my-tickets':        <Wrench />,
+  'changes-requested': <Undo2 />,
+  'pm-due':            <CalendarClock />,
+  'night-duty':        <Moon />,
+  'anomalies':         <AlertTriangle />,
+  'urgent-alerts':     <Siren />,
+  'my-requests':       <Inbox />,
 };
 
 type SortMode = 'priority' | 'newest' | 'oldest' | 'az' | 'za';
@@ -199,43 +218,33 @@ export function Todo() {
         </div>
       ) : (
         <>
-        {/* ── Section tiles — one per work bucket; click jumps to its table ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
-          {view.map((s) => {
-            const tone = TONE[s.tone];
-            return (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => document.getElementById(`todo-sec-${s.key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                className="card2 p-4 text-left hover:shadow-md hover:-translate-y-0.5 transition-all"
-                style={{ fontFamily: 'inherit', cursor: 'pointer', borderTop: `3px solid ${tone.color}` }}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="w-9 h-9 rounded-[10px] inline-flex items-center justify-center text-[17px]" style={{ background: tone.bg }}>
-                    {s.icon}
-                  </span>
-                  <span className="text-[24px] font-bold num" style={{ color: tone.color }}>{s.items.length}</span>
-                </div>
-                <div className="text-[12px] font-semibold text-slate-700 leading-snug">{t(s.titleKey)}</div>
-              </button>
-            );
-          })}
+        {/* ── Section tiles — one per work bucket; click jumps to its table.
+               Format mirrors the Overview "Today's Work" WorkCard. ── */}
+        <div className="flex gap-3 flex-wrap mb-4">
+          {view.map((s) => (
+            <WorkCard
+              key={s.key}
+              className="flex-1 min-w-[150px]"
+              icon={SECTION_ICONS[s.key] ?? s.icon}
+              label={t(s.titleKey)}
+              value={s.items.length}
+              onClick={() => document.getElementById(`todo-sec-${s.key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            />
+          ))}
         </div>
 
         <div className="flex flex-col gap-4">
           {view.map((s) => {
-            const tone = TONE[s.tone];
             const total = s.items.length;
             const pageCount = Math.ceil(total / PAGE_SIZE);
             const page = Math.min(pages[s.key] ?? 0, pageCount - 1);
             const start = page * PAGE_SIZE;
             const pageItems = s.items.slice(start, start + PAGE_SIZE);
             return (
-              <div key={s.key} id={`todo-sec-${s.key}`} className="card2 overflow-hidden" style={{ scrollMarginTop: 16, borderLeft: `3px solid ${tone.color}` }}>
+              <div key={s.key} id={`todo-sec-${s.key}`} className="card2 overflow-hidden" style={{ scrollMarginTop: 16 }}>
                 {/* Section header — tone icon square, title, per-section sort, count */}
                 <div className="flex items-center gap-2.5 px-5 py-3" style={{ borderBottom: '1px solid #F1F5F9' }}>
-                  <span className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[15px] shrink-0" style={{ background: tone.bg }}>{s.icon}</span>
+                  <span className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 text-slate-500 inline-flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4 shrink-0">{SECTION_ICONS[s.key] ?? s.icon}</span>
                   <div className="font-bold text-[14px] text-slate-800 font-heading">{t(s.titleKey)}</div>
                   <div className="ml-auto flex items-center gap-2">
                     <select
@@ -248,7 +257,7 @@ export function Todo() {
                       <option value="">{t('todo.optDefault')}</option>
                       {sortOptions}
                     </select>
-                    <span className="pill-count" style={{ background: tone.bg, color: tone.color }}>{total}</span>
+                    <span className="pill-count bg-slate-100 text-slate-600">{total}</span>
                   </div>
                 </div>
 

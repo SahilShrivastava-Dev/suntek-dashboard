@@ -5,13 +5,14 @@ import { KpiInfoButton } from '../KpiInfoButton';
 import { TILE_INFO } from '../../lib/anomaly/tileInfo';
 
 /**
- * Mirrors the main dashboard KPI grid but visually flags KPIs that have an active
- * anomaly. Problem tiles glow red/amber like the main dashboard's red/yellow tiles;
- * healthy tiles render muted so the eye goes straight to the problems.
+ * Mirrors the main dashboard KPI grid in the neutral "Today's Work" card format.
+ * KPIs with an active anomaly carry a small FLAGGED chip; the card itself stays
+ * neutral so the page reads as one system.
  */
 export function ProblemKpiGrid({ kpis }: { kpis: AnomalyKpi[] }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
+    // Flex-wrap (not grid) so a short last row stretches to fill — no orphan gap
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
       {kpis.map(k => {
         const problem = k.problem;
         // For pct/inr KPIs, compute a simple delta vs baseline for the trend arrow
@@ -19,16 +20,10 @@ export function ProblemKpiGrid({ kpis }: { kpis: AnomalyKpi[] }) {
           ? ((k.trend - k.baseline) / Math.abs(k.baseline)) * 100
           : null;
         const up = (delta ?? 0) >= 0;
-        const bg = problem ? '#FEF2F2' : '#fff';
-        const border = problem ? '#FECACA' : '#EEF2F6';
-        const valueColor = problem ? '#991B1B' : '#0F172A';
         return (
-          <div key={k.key} style={{
-            background: bg, border: `1px solid ${border}`, borderRadius: 16, padding: '16px 18px',
-            position: 'relative',
-          }}>
+          <div key={k.key} className="relative border border-slate-200 rounded-[10px] p-4 bg-white" style={{ flex: '1 1 210px', minWidth: 210 }}>
             {TILE_INFO[k.key] && <KpiInfoButton info={TILE_INFO[k.key]} />}
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.04em', paddingRight: 22, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="text-[12.5px] text-slate-600 leading-snug flex items-center gap-1.5" style={{ paddingRight: 22 }}>
               {k.label}
               {problem && (
                 <span style={{
@@ -37,15 +32,11 @@ export function ProblemKpiGrid({ kpis }: { kpis: AnomalyKpi[] }) {
                 }}>⚠ flagged</span>
               )}
             </div>
-            <div style={{ fontSize: 26, fontWeight: 800, color: valueColor, marginTop: 6, lineHeight: 1 }}>
+            <div className="text-[26px] font-bold text-slate-900 leading-tight num">
               {k.value}
             </div>
             {delta != null && (
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 8,
-                fontSize: 11, fontWeight: 700,
-                color: problem ? (up ? '#16A34A' : '#DC2626') : (up ? '#16A34A' : '#DC2626'),
-              }}>
+              <div className={`inline-flex items-center gap-1 mt-0.5 text-[11.5px] font-medium ${up ? 'text-green-600' : 'text-red-600'}`}>
                 {up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                 {up ? '+' : ''}{delta.toFixed(1)}% vs prior
               </div>

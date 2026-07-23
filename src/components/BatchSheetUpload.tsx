@@ -91,7 +91,7 @@ export function BatchSheetUpload({ channel = 'batch', reviewing, onReset, docLab
           <circle cx="12" cy="12" r="10" stroke="#e2e8f0" strokeWidth="3" />
           <path d="M12 2 A10 10 0 0 1 22 12" stroke="#7c3aed" strokeWidth="3" strokeLinecap="round" />
         </svg>
-        <div className="text-sm font-bold text-slate-700 text-center">Analyzing batch sheet…</div>
+        <div className="text-sm font-bold font-heading text-slate-700 text-center">Analyzing batch sheet…</div>
         <div className="text-xs text-slate-400 text-center">Reading the table · safe to switch tabs</div>
       </div>
     );
@@ -130,7 +130,7 @@ export function BatchSheetUpload({ channel = 'batch', reviewing, onReset, docLab
                 <circle cx="12" cy="13" r="4" />
               </svg>
             </div>
-            <div className="text-sm font-bold text-slate-700">
+            <div className="text-sm font-bold font-heading text-slate-700">
               {isDragging ? 'Drop sheet here' : `Upload ${docLabel}`}
             </div>
             <div className="text-xs text-slate-400">Tap to select · JPG PNG HEIC</div>

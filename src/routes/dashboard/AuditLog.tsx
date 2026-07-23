@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Activity, Users, Globe, RefreshCw, ShieldCheck, Check, Plus, Pencil, Fingerprint } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { StatCard, SectionCard, FilterBar, ButtonV2, StatusPill } from '../../components/v2';
 
 interface AuditLogEntry {
   id: string;
@@ -100,89 +102,55 @@ export function AuditLog() {
   }
 
   return (
-    <div style={{ fontFamily: 'Inter, sans-serif' }}>
-      {/* Action bar (title is shown by the TopBar) */}
-      <div className="flex items-center justify-end gap-4 mb-6 flex-wrap">
-        <button
-          onClick={loadData}
-          className="subtab flex items-center gap-1.5 font-semibold text-xs py-2 px-3 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-          </svg>
-          {t('audit.syncLogs')}
-        </button>
+    <div>
+      {/* KPI row */}
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <StatCard className="col-span-12 md:col-span-4" icon={<Activity />}
+          label={t('audit.totalActivities')} value={logs.length}
+          caption={t('audit.totalActivitiesSub')} />
+        <StatCard className="col-span-12 md:col-span-4" icon={<Users />} tone="blue" valueTone="blue"
+          label={t('audit.activeSessions')} value={activeSessionsCount}
+          caption={t('audit.activeSessionsSub')} />
+        <StatCard className="col-span-12 md:col-span-4" icon={<Globe />}
+          label={t('audit.clientIp')}
+          value={<span className="font-mono text-[22px] font-bold text-slate-700 truncate block">{clientIp}</span>}
+          caption={t('audit.clientIpSub')} />
       </div>
 
-      {/* KPI Info Cards */}
-      <div className="grid grid-cols-12 gap-5 mb-6">
-        <div className="col-span-12 md:col-span-4 card p-5" style={{ background: '#fff', border: '1px solid var(--border)' }}>
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('audit.totalActivities')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num">{logs.length}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{t('audit.totalActivitiesSub')}</div>
-        </div>
-        <div className="col-span-12 md:col-span-4 card p-5" style={{ background: '#fff', border: '1px solid var(--border)' }}>
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('audit.activeSessions')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-blue-600">{activeSessionsCount}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{t('audit.activeSessionsSub')}</div>
-        </div>
-        <div className="col-span-12 md:col-span-4 card p-5" style={{ background: '#fff', border: '1px solid var(--border)' }}>
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('audit.clientIp')}</div>
-          <div className="text-[22px] font-extrabold mt-2 font-mono text-slate-700 truncate">{clientIp}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{t('audit.clientIpSub')}</div>
-        </div>
-      </div>
+      {/* Search */}
+      <FilterBar
+        className="mb-4"
+        search={searchQuery} onSearch={setSearchQuery}
+        searchPlaceholder={t('audit.searchPlaceholder')}
+        onReset={() => setSearchQuery('')}
+      />
 
-      {/* Main card */}
-      <div
-        className="card p-6"
-        style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}
+      {/* Audit trail */}
+      <SectionCard
+        title={
+          <span className="inline-flex items-center gap-2">
+            {t('audit.auditTrailTitle')}
+            <StatusPill tone="amber" icon={<ShieldCheck />} label={t('audit.secured')} />
+          </span>
+        }
+        subtitle={t('audit.auditTrailSubtitle')}
+        actions={
+          <ButtonV2 variant="outline" icon={<RefreshCw />} onClick={loadData}>
+            {t('audit.syncLogs')}
+          </ButtonV2>
+        }
       >
-        {/* Header row and Search */}
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-          <div>
-            <div className="text-base font-bold flex items-center gap-2">
-              {t('audit.auditTrailTitle')}
-              <span
-                className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                style={{ background: '#FEF3C7', color: '#D97706' }}
-              >
-                {t('audit.secured')}
-              </span>
-            </div>
-            <div className="text-xs text-slate-500">
-              {t('audit.auditTrailSubtitle')}
-            </div>
-          </div>
-
-          <div className="relative w-full max-w-xs">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder={t('audit.searchPlaceholder')}
-              className="w-full pl-9 pr-4 py-2 border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm font-medium bg-white"
-            />
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <circle cx="11" cy="11" r="8"/>
-                <path d="m21 21-4.3-4.3"/>
-              </svg>
-            </span>
-          </div>
-        </div>
-
         {/* Timeline viewer */}
         {loading ? (
-          <div className="text-center py-12 text-slate-500 font-bold text-sm">
+          <div className="text-center py-12 text-slate-500 font-semibold text-sm">
             <span className="inline-block animate-pulse">{t('audit.synchronizing')}</span>
           </div>
         ) : filteredLogs.length === 0 ? (
-          <div className="text-center py-12 text-slate-500 font-bold text-sm border-2 border-dashed border-slate-200 rounded-2xl bg-white/50">
+          <div className="text-center py-12 text-slate-400 font-semibold text-sm border-2 border-dashed border-slate-200 rounded-[10px]">
             {t('audit.noLogsFound', { query: searchQuery })}
           </div>
         ) : (
-          <div className="relative pl-6 border-l-2 border-slate-300/60 ml-3 space-y-6">
+          <div className="relative pl-6 border-l-2 border-slate-200 ml-3 space-y-5">
             {filteredLogs.map((log) => {
               const isCreate = log.action_type === 'create_batch';
               return (
@@ -190,38 +158,25 @@ export function AuditLog() {
                   {/* Timeline bullet dot */}
                   <span
                     className="absolute -left-[33px] top-1.5 w-4.5 h-4.5 rounded-full border-2 border-white flex items-center justify-center shadow-sm z-10 transition-transform group-hover:scale-125"
-                    style={{
-                      background: isCreate ? '#2563EB' : '#10B981',
-                      boxShadow: isCreate ? '0 0 10px rgba(37,99,235,0.4)' : '0 0 10px rgba(16,185,129,0.4)',
-                    }}
+                    style={{ background: isCreate ? '#2563EB' : '#10B981' }}
                   >
                     {isCreate ? (
-                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="4">
-                        <path d="M12 5v14M5 12h14"/>
-                      </svg>
+                      <Plus size={9} strokeWidth={4} className="text-white" />
                     ) : (
-                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="4">
-                        <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-                      </svg>
+                      <Pencil size={8} strokeWidth={3.5} className="text-white" />
                     )}
                   </span>
 
                   {/* Log Content Card */}
-                  <div className="card p-4 bg-white/70 backdrop-blur-sm shadow-sm border border-slate-200/50 hover:border-slate-300 transition-all rounded-2xl">
+                  <div className="card2 p-4 hover:border-slate-300 transition-colors">
                     <div className="flex items-start justify-between flex-wrap gap-2 mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900">
+                        <span className="font-semibold text-slate-900">
                           {t('audit.batchPrefix')}{log.batch_no}
                         </span>
-                        <span
-                          className="text-[10px] font-bold uppercase px-2 py-0.5 rounded"
-                          style={{
-                            background: isCreate ? '#DBEAFE' : '#D1FAE5',
-                            color: isCreate ? '#2563EB' : '#065F46',
-                          }}
-                        >
-                          {isCreate ? t('audit.startedBatch') : t('audit.loggedReading')}
-                        </span>
+                        {isCreate
+                          ? <StatusPill tone="blue" label={t('audit.startedBatch')} />
+                          : <StatusPill tone="green" label={t('audit.loggedReading')} />}
                       </div>
                       <div className="text-[11px] font-semibold text-slate-400 flex items-center gap-1.5">
                         <span>{formatDate(log.created_at)}</span>
@@ -236,7 +191,7 @@ export function AuditLog() {
                           {t('audit.operatorInitiatedPre')} <span className="font-bold text-slate-800">{log.details.recipe} {t('audit.density')}</span> {t('audit.targetLoadOf')} <span className="font-bold text-slate-800">{log.details.target_qty} kg</span>.
                         </div>
                       ) : (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[13px] bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[13px] bg-slate-50 p-2.5 rounded-[10px] border border-slate-100">
                           {log.details.temp !== undefined && (
                             <div>
                               <span className="text-slate-400 text-xs font-semibold">{t('audit.temp')}</span>{' '}
@@ -261,20 +216,13 @@ export function AuditLog() {
                       {/* Security details footer */}
                       <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-100 flex-wrap gap-2">
                         <div className="flex items-center gap-1">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 0 1 4 4v2M12 11a4 4 0 0 1-4-4V7"/>
-                          </svg>
+                          <Fingerprint size={12} strokeWidth={2.5} />
                           <span>{t('audit.ipAddress')}</span>{' '}
-                          <span className="font-mono font-semibold text-slate-600 bg-slate-100/80 px-1 py-0.5 rounded border border-slate-200/30">
+                          <span className="font-mono font-semibold text-slate-600 bg-slate-100 px-1 py-0.5 rounded border border-slate-200/50">
                             {log.ip_address || t('audit.localSandbox')}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1 font-semibold text-[10px] uppercase text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3"/>
-                          </svg>
-                          {t('audit.verifiedChecksum')}
-                        </div>
+                        <StatusPill tone="green" icon={<Check strokeWidth={3} />} label={t('audit.verifiedChecksum')} className="uppercase text-[10px]" />
                       </div>
                     </div>
                   </div>
@@ -283,7 +231,7 @@ export function AuditLog() {
             })}
           </div>
         )}
-      </div>
+      </SectionCard>
 
       {/* Footer */}
       <div className="text-center text-[11px] text-slate-400 mt-8">

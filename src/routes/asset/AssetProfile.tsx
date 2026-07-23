@@ -1,9 +1,17 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { QRCodeCanvas } from 'qrcode.react';
+import {
+  ArrowLeft, Printer, Download, Pencil, Wrench, AlertTriangle, ShieldCheck, CalendarDays,
+  Clock, PackageSearch, Hourglass, History, FileText, ScrollText, ChevronRight,
+} from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { statusBadge } from '../dashboard/purchase/maintenance/shared';
 import { matchAsset } from '../../lib/far/assets';
+import { ButtonV2, StatusPill } from '../../components/v2';
+import { ImageLightbox, type LightboxImage } from '../../components/ui/ImageLightbox';
+import { assetQrUrl, downloadDataUrl, printQrLabel, safeFileName } from '../../lib/far/qr';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell,
 } from 'recharts';
@@ -11,22 +19,25 @@ import type { Database } from '../../lib/database.types';
 
 // ── Small presentational helpers (theme-matched) ───────────────────────────────
 
-/** Section card title — bold, with an accent tick, consistent across the page. */
+/** Section card title — bold, with a green accent tick (per v2 mockup). */
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 mb-4">
-      <span style={{ width: 4, height: 15, borderRadius: 2, background: 'var(--accent)' }} />
-      <h2 className="text-[15px] font-bold text-slate-900">{children}</h2>
+      <span style={{ width: 4, height: 15, borderRadius: 2, background: '#22C55E' }} />
+      <h2 className="text-[15px] font-bold font-heading text-slate-900 font-heading">{children}</h2>
     </div>
   );
 }
 
-/** A KPI tile — big number, uppercase caption, tinted surface. */
-function Stat({ label, value, color, bg, small }: { label: string; value: React.ReactNode; color: string; bg: string; small?: boolean }) {
+/** v2 KPI tile — big number left, small muted icon right, gray label below. */
+function Stat({ label, value, color, icon, small }: { label: string; value: React.ReactNode; color?: string; icon?: React.ReactNode; small?: boolean }) {
   return (
-    <div className="rounded-2xl p-4" style={{ background: bg }}>
-      <div className="font-extrabold leading-none" style={{ color, fontSize: small ? 15 : 24 }}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mt-2 leading-tight">{label}</div>
+    <div className="card2 p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-bold leading-none" style={{ color: color || '#0F172A', fontSize: small ? 15 : 24, paddingTop: small ? 5 : 0 }}>{value}</div>
+        {icon && <span className="text-slate-300 inline-flex [&>svg]:w-4 [&>svg]:h-4">{icon}</span>}
+      </div>
+      <div className="text-[11px] text-slate-500 font-medium mt-2.5 leading-tight">{label}</div>
     </div>
   );
 }
@@ -55,9 +66,9 @@ const fmtDateTime = (d: string | null | undefined) => d ? new Date(d).toLocaleSt
 function Screen({ emoji, title, sub }: { emoji: string; title: string; sub: string }) {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'var(--bg)' }}>
-      <div className="card p-8" style={{ textAlign: 'center', maxWidth: 400 }}>
+      <div className="card2 p-8" style={{ textAlign: 'center', maxWidth: 400 }}>
         <div style={{ fontSize: 44, marginBottom: 12 }}>{emoji}</div>
-        <div className="serif" style={{ fontSize: 26, color: '#0F172A', lineHeight: 1.1 }}>{title}</div>
+        <div className="font-heading font-semibold" style={{ fontSize: 26, color: '#0F172A', lineHeight: 1.1 }}>{title}</div>
         <div style={{ fontSize: 13, color: '#64748B', marginTop: 8, lineHeight: 1.5 }}>{sub}</div>
       </div>
     </div>
@@ -77,6 +88,8 @@ export function AssetProfile() {
   const { can, authResolved } = useRoleContext();
 
   const [loading, setLoading] = useState(true);
+  const qrCanvasRef = useRef<HTMLDivElement>(null);
+  const [photoView, setPhotoView] = useState<LightboxImage[] | null>(null);
   const [asset, setAsset] = useState<AssetRow | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [tickets, setTickets] = useState<TicketRow[]>([]);
@@ -186,56 +199,103 @@ export function AssetProfile() {
   if (notFound || !asset) return <Screen emoji="🏷️" title="QR not recognised" sub="This QR code isn't valid or has been regenerated. Ask an administrator for a fresh code." />;
 
   const rupees = asset.value != null ? `₹ ${Number(asset.value).toLocaleString('en-IN')}` : '—';
+  const heroLabel = `${asset.name}${asset.identification_mark ? ` (${asset.identification_mark})` : ''}`;
+
+  function qrPng(): string | null {
+    const canvas = qrCanvasRef.current?.querySelector('canvas');
+    return canvas ? canvas.toDataURL('image/png') : null;
+  }
+  function downloadQr() {
+    const png = qrPng();
+    if (png) downloadDataUrl(png, `QR-${safeFileName(heroLabel)}.png`);
+  }
+  function printQr() {
+    const png = qrPng();
+    if (png && asset) printQrLabel({ pngDataUrl: png, title: heroLabel, subtitle: asset.plants?.name || '', footer: `Asset #${asset.id.slice(0, 8)} · scan to open the digital profile` });
+  }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <div style={{ minHeight: '100vh', background: '#F8FAFC' }}>
+      {/* Hidden hi-res QR canvas powering Print QR / Download QR */}
+      {asset.qr_token && (
+        <div ref={qrCanvasRef} style={{ position: 'absolute', left: -99999, top: -99999 }} aria-hidden>
+          <QRCodeCanvas value={assetQrUrl(asset.qr_token)} size={512} level="M" marginSize={2} />
+        </div>
+      )}
       <div className="mx-auto px-4 sm:px-6 py-6 sm:py-8" style={{ maxWidth: 1120 }}>
 
-        {/* ── Hero ──────────────────────────────────────────────────────────── */}
-        <div
-          className="card overflow-hidden mb-4 sm:mb-5"
-          style={{ background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 100%)', color: '#fff' }}
-        >
-          <div className="p-5 sm:p-7 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
+        {/* ── Breadcrumb + back ─────────────────────────────────────────────── */}
+        <div className="text-[12px] text-slate-400 flex items-center gap-1.5 flex-wrap mb-3">
+          <span>Factory</span><span className="text-slate-300">›</span>
+          <span>FAR</span><span className="text-slate-300">›</span>
+          <span>QR Code</span><span className="text-slate-300">›</span>
+          <span className="text-slate-600 font-medium">Asset Profile</span>
+        </div>
+        <div className="mb-4">
+          <ButtonV2 variant="outline" icon={<ArrowLeft />} onClick={() => navigate('/dashboard/purchase/far')}>
+            Back to Assets
+          </ButtonV2>
+        </div>
+
+        {/* ── Header card ───────────────────────────────────────────────────── */}
+        <div className="card2 p-5 sm:p-6 mb-4 sm:mb-5">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5 flex-wrap">
             {asset.photo_url
-              ? <img src={asset.photo_url} alt="" style={{ width: 64, height: 64, borderRadius: 16, objectFit: 'cover', flexShrink: 0 }} />
-              : <div style={{ width: 64, height: 64, borderRadius: 16, background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, flexShrink: 0 }}>🏭</div>}
+              ? (
+                <button
+                  type="button"
+                  onClick={() => setPhotoView([{ url: asset.photo_url as string, label: heroLabel }])}
+                  title="View full photo"
+                  className="shrink-0 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:ring-2 hover:ring-slate-300 transition"
+                  style={{ padding: 0, lineHeight: 0, cursor: 'zoom-in' }}
+                >
+                  <img src={asset.photo_url} alt={heroLabel} className="w-20 h-20 object-cover block" />
+                </button>
+              )
+              : <div className="w-20 h-20 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-[28px] shrink-0">🏭</div>}
             <div className="min-w-0 flex-1">
-              <div className="serif" style={{ fontSize: 30, lineHeight: 1.05 }}>{asset.name}</div>
-              <div style={{ fontSize: 13.5, color: '#CBD5E1', marginTop: 4 }}>
-                {asset.identification_mark ? <strong style={{ color: '#fff' }}>{asset.identification_mark}</strong> : null}
-                {asset.plants?.name ? `${asset.identification_mark ? '  ·  ' : ''}${asset.plants.name}` : ''}
+              <div className="font-heading font-semibold text-[26px] leading-tight">{asset.name}</div>
+              <div className="text-[13.5px] text-slate-500 mt-0.5">
+                {asset.identification_mark ? <strong className="text-slate-700">{asset.identification_mark}</strong> : null}
+                {asset.plants?.name ? `${asset.identification_mark ? '  •  ' : ''}${asset.plants.name}` : ''}
               </div>
-              <div className="flex gap-2 mt-3 flex-wrap">
-                <span style={{ fontSize: 11.5, fontWeight: 700, padding: '4px 11px', borderRadius: 999, background: stats.openCount ? 'rgba(251,191,36,0.16)' : 'rgba(34,197,94,0.16)', color: stats.openCount ? '#FCD34D' : '#4ADE80' }}>
-                  {stats.openCount ? '🔧 Under maintenance' : '✓ Operational'}
-                </span>
-                <span style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 11px', borderRadius: 999, background: 'rgba(255,255,255,0.08)', color: '#CBD5E1' }}>
-                  Asset #{asset.id.slice(0, 8)}
-                </span>
+              <div className="flex gap-2 mt-2.5 flex-wrap">
+                {stats.openCount
+                  ? <StatusPill tone="amber" dot label="Under maintenance" />
+                  : <StatusPill tone="green" dot label="Operational" />}
+                <StatusPill tone="slate" label={`Asset #${asset.id.slice(0, 8)}`} />
               </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {asset.qr_token && (
+                <>
+                  <ButtonV2 variant="outline" icon={<Printer />} onClick={printQr}>Print QR</ButtonV2>
+                  <ButtonV2 variant="outline" icon={<Download />} onClick={downloadQr}>Download QR</ButtonV2>
+                </>
+              )}
+              <ButtonV2 variant="outline" icon={<Pencil />} onClick={() => navigate('/dashboard/purchase/far')}>Edit Asset</ButtonV2>
             </div>
           </div>
         </div>
 
         {/* ── KPI strip ─────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4 sm:mb-5">
-          <Stat label="Total maintenance" value={stats.total} color="#0F172A" bg="#FFFFFF" />
-          <Stat label="Emergency" value={stats.emergency} color="#DC2626" bg="var(--red-soft)" />
-          <Stat label="Preventive" value={stats.periodic} color="#2563EB" bg="var(--blue-soft)" />
-          <Stat label="Avg gap (days)" value={stats.avgDays ?? '—'} color="#7C3AED" bg="var(--purple-soft)" />
-          <Stat label="Last maintenance" value={fmtDate(stats.last)} color="#16A34A" bg="var(--green-soft)" small />
-          <Stat label="Next scheduled" value={fmtDate(stats.nextDue)} color="#B45309" bg="var(--amber-soft)" small />
-          <Stat label="Parts requested" value={parts.length} color="#C5421F" bg="var(--accent-soft)" />
-          <Stat label="Open tickets" value={stats.openCount} color={stats.openCount ? '#D97706' : '#16A34A'} bg="#FFFFFF" />
+          <Stat label="Total Maintenance" value={stats.total} icon={<Wrench />} />
+          <Stat label="Emergency" value={stats.emergency} color={stats.emergency ? '#DC2626' : undefined} icon={<AlertTriangle />} />
+          <Stat label="Preventive" value={stats.periodic} color={stats.periodic ? '#2563EB' : undefined} icon={<ShieldCheck />} />
+          <Stat label="Avg Gap (Days)" value={stats.avgDays ?? '—'} icon={<CalendarDays />} />
+          <Stat label="Last Maintenance" value={fmtDate(stats.last)} icon={<Clock />} small />
+          <Stat label="Next Scheduled" value={fmtDate(stats.nextDue)} icon={<CalendarDays />} small />
+          <Stat label="Parts Requested" value={parts.length} icon={<PackageSearch />} />
+          <Stat label="Open Tickets" value={stats.openCount} color={stats.openCount ? '#D97706' : undefined} icon={<Hourglass />} />
         </div>
 
-        {/* ── Details + Trends (2-col on desktop, stacks on mobile) ──────────── */}
+        {/* ── Details + Maintenance overview (2-col on desktop, stacks on mobile) ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mb-4 sm:mb-5">
 
           {/* Asset spec sheet */}
-          <div className={`card p-5 sm:p-6 ${showAnalytics && stats.total > 0 && typeSplit.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
-            <SectionTitle>Asset details</SectionTitle>
+          <div className="card2 p-5 sm:p-6 lg:col-span-2">
+            <SectionTitle>Asset Details</SectionTitle>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6">
               <Field label="Equipment type" value={asset.name} />
               <Field label="Identification mark" value={asset.identification_mark} />
@@ -254,9 +314,62 @@ export function AssetProfile() {
             </div>
           </div>
 
+          {/* Maintenance overview + quick actions (right column, per mockup) */}
+          <div className="lg:col-span-1 flex flex-col gap-4">
+            <div className="card2 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-[15px] font-bold font-heading text-slate-900 font-heading">Maintenance Overview</h2>
+                <button
+                  onClick={() => navigate(`/dashboard/purchase/maint`)}
+                  className="text-[12px] font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
+                >
+                  View All →
+                </button>
+              </div>
+              <div className="text-[11.5px] text-slate-400 font-medium">Last Maintenance</div>
+              <div className="text-[13px] font-semibold text-slate-800 mt-0.5 mb-3 flex items-center gap-1.5">
+                <CalendarDays size={13} className="text-slate-400" /> {fmtDate(stats.last)}
+              </div>
+              <div className="text-[11.5px] text-slate-400 font-medium">Next Maintenance</div>
+              <div className="text-[13px] font-semibold text-slate-800 mt-0.5 mb-4 flex items-center gap-1.5">
+                <CalendarDays size={13} className="text-slate-400" /> {fmtDate(stats.nextDue)}
+              </div>
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                <span className="text-[12px] text-slate-500">Maintenance Status</span>
+                {stats.openCount
+                  ? <StatusPill tone="amber" label="Under maintenance" />
+                  : <StatusPill tone="slate" label="Operational" />}
+              </div>
+
+              <div className="mt-5">
+                <div className="text-[13px] font-bold text-slate-900 mb-1 font-heading">Quick Actions</div>
+                {[
+                  { icon: <History size={14} />, label: 'View Maintenance History', to: `/dashboard/purchase/maint` },
+                  { icon: <FileText size={14} />, label: 'View Documents', to: `/dashboard/purchase/far` },
+                  { icon: <ScrollText size={14} />, label: 'View Activity Log', to: `/dashboard/purchase/activity` },
+                ].map(a => (
+                  <button
+                    key={a.label}
+                    onClick={() => navigate(a.to)}
+                    className="w-full flex items-center gap-2.5 py-2.5 text-left text-[13px] text-slate-700 hover:text-slate-900 border-b border-slate-100 last:border-0"
+                    style={{ background: 'none', border: 'none', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', fontFamily: 'inherit' }}
+                  >
+                    <span className="text-slate-400">{a.icon}</span>
+                    <span className="flex-1">{a.label}</span>
+                    <ChevronRight size={14} className="text-slate-300" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Analytics: type split donut ──────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 mb-0">
           {/* Type split donut (analytics) */}
           {showAnalytics && stats.total > 0 && typeSplit.length > 0 && (
-            <div className="card p-5 sm:p-6 lg:col-span-1">
+            <div className="card2 p-5 sm:p-6 lg:col-span-1 mb-4 sm:mb-5">
               <SectionTitle>Maintenance mix</SectionTitle>
               <div className="flex items-center justify-center" style={{ position: 'relative', height: 176 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -285,11 +398,10 @@ export function AssetProfile() {
               </div>
             </div>
           )}
-        </div>
 
         {/* ── Maintenance-per-month bar chart (analytics) ────────────────────── */}
         {showAnalytics && stats.total > 0 && (
-          <div className="card p-5 sm:p-6 mb-4 sm:mb-5">
+          <div className="card2 p-5 sm:p-6 mb-4 sm:mb-5 lg:col-span-2">
             <SectionTitle>Maintenance over time</SectionTitle>
             <div style={{ width: '100%', height: 240 }}>
               <ResponsiveContainer>
@@ -313,9 +425,10 @@ export function AssetProfile() {
             </div>
           </div>
         )}
+        </div>
 
         {/* ── Maintenance history ────────────────────────────────────────────── */}
-        <div className="card p-5 sm:p-6">
+        <div className="card2 p-5 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <SectionTitle>Maintenance history</SectionTitle>
             <span className="pill-count" style={{ background: 'var(--bg-soft)', color: '#64748B' }}>{tickets.length}</span>
@@ -361,8 +474,10 @@ export function AssetProfile() {
           )}
         </div>
 
-        <div className="text-center text-[11px] text-slate-400 mt-6">Suntek · CaratSense · Asset profile</div>
+        <div className="text-center text-[11px] text-slate-400 mt-6">All asset information is automatically updated from the system.</div>
       </div>
+
+      <ImageLightbox images={photoView || []} open={!!photoView} onClose={() => setPhotoView(null)} />
     </div>
   );
 }

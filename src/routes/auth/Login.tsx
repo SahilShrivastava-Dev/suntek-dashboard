@@ -55,7 +55,7 @@ export function Login() {
           <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm">
             <span className="text-white text-xl font-extrabold">S°</span>
           </div>
-          <h1 className="serif text-[28px] leading-tight">Suntek Group</h1>
+          <h1 className="font-heading font-semibold text-[28px] leading-tight">Suntek Group</h1>
           <p className="text-sm text-slate-500 mt-1">{tf('login.subtitle')}</p>
         </div>
 

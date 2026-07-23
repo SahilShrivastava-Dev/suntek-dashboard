@@ -422,7 +422,7 @@ export function BatchLogger({ embedded = false }: BatchLoggerProps) {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <div className="text-sm font-bold">{t('batchEntry.operatorLabel')}: Shyam</div>
+              <div className="text-sm font-bold font-heading">{t('batchEntry.operatorLabel')}: Shyam</div>
               <div className="text-xs text-slate-400">{t('batchEntry.shiftLabel')}: 6 AM – 2 PM</div>
             </div>
           </div>

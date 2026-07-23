@@ -65,7 +65,7 @@ export function SlidePanel({ open, onClose, title, subtitle, children, locked = 
                 {subtitle}
               </div>
             )}
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#0F172A' }}>{title}</div>
+            <div className="font-heading" style={{ fontSize: 18, fontWeight: 600, color: '#0F172A' }}>{title}</div>
           </div>
           <button
             onClick={locked ? undefined : onClose}

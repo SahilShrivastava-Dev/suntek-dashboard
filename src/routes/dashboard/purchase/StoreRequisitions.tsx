@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ListChecks, Package, Recycle, Plus, FileText, Hourglass, PackageCheck, Zap } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
@@ -11,8 +12,8 @@ import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState, EmptyState } from '../../../components/ui/states';
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { usePagination } from '../../../components/ui/usePagination';
-import { TablePagination } from '../../../components/ui/TablePagination';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { useSortable } from '../../../components/ui/useSortable';
+import { SegmentTabs, StatCard, SectionCard, ButtonV2, TablePaginationV2, ThV2 as Th } from '../../../components/v2';
 import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
@@ -59,10 +60,19 @@ const STATUS_STAGE: Record<string, { bg: string; color: string; label: string }>
   rejected:   { bg: '#FEE2E2', color: '#DC2626', label: 'REJECTED' },
 };
 
+type StoreTab = 'requirements' | 'stock' | 'scrap';
+
 export function StoreRequisitions() {
   const { t } = useTranslation();
   const toast = useToast();
   const navigate = useNavigate();
+  // ?tab= keeps the active tab deep-linkable (single route → no RBAC change).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab');
+  const tab: StoreTab = rawTab === 'stock' || rawTab === 'scrap' ? rawTab : 'requirements';
+  const setTab = (k: StoreTab) => {
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.set('tab', k); return p; }, { replace: true });
+  };
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
   const { scopeQuery, allowedPlants } = usePlantScope();
@@ -74,7 +84,14 @@ export function StoreRequisitions() {
   const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState('');
   const [lightbox, setLightbox] = useState<LightboxImage[] | null>(null);
+  // Row click → requisition detail panel (rows with a linked ticket jump straight to it).
+  const [detailReq, setDetailReq] = useState<ReqRow | null>(null);
   const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
+
+  function openRow(r: ReqRow) {
+    if (r.ticket_id) navigate(`/dashboard/purchase/maint?ticket=${r.ticket_id}`);
+    else setDetailReq(r);
+  }
 
   const filtered = useTextFilter(items, search, r => [r.item, r.plants?.name, r.id.slice(0, 8), r.status, r.ticket_id ? r.ticket_id.slice(0, 8) : '']);
   const reqSort = useSortable(filtered, {
@@ -167,39 +184,77 @@ export function StoreRequisitions() {
 
   function handleClose() { setOpen(false); setSaved(false); }
 
+  // Summary tiles for the Requirements tab (computed from the loaded rows).
+  const pendingCount   = items.filter(r => r.status === 'pending').length;
+  const readyCount     = items.filter(r => ['approved', 'dispatched'].includes(r.status)).length;
+  const urgentCount    = items.filter(r => ['high', 'plant_stopper'].includes(r.urgency ?? '')).length;
+
   return (
     <>
+      {/* Tab bar — Requirements · Stock Register · Scrap */}
+      <SegmentTabs
+        className="mb-5"
+        items={[
+          { key: 'requirements', label: t('storereq.tab_requirements', 'Requirements'), icon: <ListChecks /> },
+          { key: 'stock',        label: t('storereq.tab_stock', 'Stock Register'),      icon: <Package /> },
+          { key: 'scrap',        label: t('storereq.tab_scrap', 'Repair/Scrap'),        icon: <Recycle /> },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+
       {/* ── Consolidated stock register (uploaded file + live usage) ────────── */}
-      <StockRegister />
+      {tab === 'stock' && <StockRegister />}
 
       {/* ── Repair & scrap tracking (post-maintenance asset movement) ───────── */}
-      <RepairScrapPanel />
+      {tab === 'scrap' && <RepairScrapPanel />}
 
-      {/* Table — green-soft */}
-      <div className="card p-6" style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0', position: 'relative' }}>
+      {tab === 'requirements' && (
+      <>
+      {/* Summary tiles */}
+      <div className="grid grid-cols-12 gap-4 mb-4">
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<FileText />} tone="blue"
+          label={t('storereq.stat_total', 'Total Requirements')} value={String(items.length).padStart(2, '0')}
+          caption={t('storereq.stat_total_sub', 'Open requests')} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<Hourglass />} tone="amber"
+          label={t('storereq.stat_pending', 'Pending Approval')} value={String(pendingCount).padStart(2, '0')}
+          caption={t('storereq.stat_pending_sub', 'Awaiting approval')} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<PackageCheck />} tone="green"
+          label={t('storereq.stat_ready', 'Ready to Fulfil')} value={String(readyCount).padStart(2, '0')}
+          caption={t('storereq.stat_ready_sub', 'Approved & in progress')} />
+        <StatCard className="col-span-12 sm:col-span-6 lg:col-span-3" icon={<Zap />} tone="purple" valueTone={urgentCount > 0 ? 'orange' : 'default'}
+          label={t('storereq.stat_urgent', 'Urgent')} value={String(urgentCount).padStart(2, '0')}
+          caption={t('storereq.stat_urgent_sub', 'High priority requests')} />
+      </div>
+
+      {/* Requirements table */}
+      <div className="relative">
         <KpiInfoButton info={{ title: 'Open Store Requirements', what: 'All active store requisitions raised by plant/store keepers across SHD, Rehla, Ganjam, and HQ. Each row shows the approval stage, decision, and photo proof status. New requests are submitted via the "+ Raise request" button.', source: 'Mock data', formLabel: 'Raise request form', formPath: '/dashboard/purchase/storereq', note: 'Currently uses STORE_REQ mock data. Future: Supabase store_reqs table.' }} />
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <div>
-            <div className="text-base font-bold">{t('storereq.open_req_title')}</div>
-            <div className="text-xs text-slate-500">{t('storereq.open_req_subtitle')}</div>
-          </div>
-          <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setOpen(true)}>
-            + {t('storereq.raise_request_btn')}
-          </button>
-        </div>
+      <SectionCard
+        flush
+        title={t('storereq.open_req_title')}
+        subtitle={t('storereq.open_req_subtitle')}
+        actions={
+          <ButtonV2 variant="primary" icon={<Plus />} onClick={() => setOpen(true)}>
+            {t('storereq.raise_request_btn')}
+          </ButtonV2>
+        }
+      >
         {loadError ? (
-          <ErrorState title={t('storereq.load_error_title')} message={t('storereq.load_error_msg')}
-            onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
+          <div className="px-5 pb-5">
+            <ErrorState title={t('storereq.load_error_title')} message={t('storereq.load_error_msg')}
+              onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
+          </div>
         ) : loading ? (
-          <SkeletonRows rows={6} />
+          <div className="px-5 pb-5"><SkeletonRows rows={6} /></div>
         ) : (
         <>
-          <TableSearch value={search} onChange={setSearch} placeholder={t('storereq.search_ph', 'Search item, plant, ticket…')} />
+          <div className="px-5 pb-4"><TableSearch value={search} onChange={setSearch} placeholder={t('storereq.search_ph', 'Search item, plant, ticket…')} /></div>
           {filtered.length === 0 ? (
-            <EmptyState title={t('storereq.open_req_empty')} message={search ? t('common.noMatches', 'No rows match your search.') : undefined} />
+            <div className="px-5 pb-5"><EmptyState title={t('storereq.open_req_empty')} message={search ? t('common.noMatches', 'No rows match your search.') : undefined} /></div>
           ) : (
             <div className="overflow-x-auto scroll-x">
-              <table className="dt">
+              <table className="dt2">
                 <thead>
                   <tr>
                     <Th sortKey="reqno" s={reqSort}>{t('storereq.col_req_no')}</Th><Th sortKey="ticket" s={reqSort}>{t('storereq.col_ticket', 'Ticket #')}</Th><Th sortKey="item" s={reqSort}>{t('storereq.col_item')}</Th><Th sortKey="plant" s={reqSort}>{t('storereq.col_plant')}</Th><Th sortKey="qty" s={reqSort} firstDir="desc" className="num">{t('storereq.col_qty')}</Th>
@@ -211,11 +266,16 @@ export function StoreRequisitions() {
                     const s = STATUS_STAGE[r.status] || STATUS_STAGE.pending;
                     const stageKey = STATUS_STAGE[r.status] ? r.status : 'pending';
                     return (
-                      <tr key={r.id}>
+                      <tr
+                        key={r.id}
+                        onClick={() => openRow(r)}
+                        style={{ cursor: 'pointer' }}
+                        title={r.ticket_id ? t('storereq.open_ticket', 'Open maintenance ticket') : t('storereq.open_detail', 'View request details')}
+                      >
                         <td className="font-bold text-xs text-slate-400">{r.id.slice(0, 8)}</td>
                         <td>
                           {r.ticket_id
-                            ? <button type="button" onClick={() => navigate(`/dashboard/purchase/maint?ticket=${r.ticket_id}`)} className="num text-xs" style={{ color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }} title={t('storereq.open_ticket', 'Open maintenance ticket')}>#{r.ticket_id.slice(0, 8)}</button>
+                            ? <span className="num text-xs text-blue-600 font-semibold">#{r.ticket_id.slice(0, 8)}</span>
                             : <span className="text-slate-300">—</span>}
                         </td>
                         <td>{r.item}</td>
@@ -226,18 +286,21 @@ export function StoreRequisitions() {
                         </td>
                         <td className="text-slate-500">{r.status === 'pending' ? t('storereq.awaiting_unit_head') : '—'}</td>
                         <td className="font-semibold">{r.status}</td>
-                        <td><PicBadge url={r.photo_url} onOpen={() => r.photo_url && setLightbox([{ url: r.photo_url, label: r.item }])} /></td>
+                        <td onClick={e => e.stopPropagation()}><PicBadge url={r.photo_url} onOpen={() => r.photo_url && setLightbox([{ url: r.photo_url, label: r.item }])} /></td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              <TablePagination controls={controls} />
+              <TablePaginationV2 controls={controls} label="requirements" />
             </div>
           )}
         </>
         )}
+      </SectionCard>
       </div>
+      </>
+      )}
 
       {/* Slide panel */}
       <SlidePanel open={open} onClose={handleClose} title={t('storereq.panel_title')} subtitle={t('storereq.panel_subtitle')}>
@@ -305,6 +368,47 @@ export function StoreRequisitions() {
           disabled={!form.item.trim() || !form.qty}
           requiredHint={t('storereq.required_hint')}
         />
+      </SlidePanel>
+
+      {/* ── PANEL: Requisition detail (rows without a linked ticket) ─────── */}
+      <SlidePanel
+        open={!!detailReq}
+        onClose={() => setDetailReq(null)}
+        title={detailReq?.item || t('storereq.detail_title', 'Requisition')}
+        subtitle={detailReq ? `#${detailReq.id.slice(0, 8)} · ${detailReq.plants?.name || '—'}` : ''}
+      >
+        {detailReq && (() => {
+          const s = STATUS_STAGE[detailReq.status] || STATUS_STAGE.pending;
+          const Row = ({ k, v }: { k: string; v: React.ReactNode }) => (
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 0', borderBottom: '1px solid #F1F5F9' }}>
+              <span style={{ fontSize: 12, color: '#94A3B8' }}>{k}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#0F172A', textAlign: 'right' }}>{v}</span>
+            </div>
+          );
+          return (
+            <div>
+              <Row k={t('storereq.col_req_no')} v={`#${detailReq.id.slice(0, 8)}`} />
+              <Row k={t('storereq.col_item')} v={detailReq.item} />
+              <Row k={t('storereq.col_plant')} v={detailReq.plants?.name || '—'} />
+              <Row k={t('storereq.col_qty')} v={String(detailReq.qty)} />
+              <Row k={t('storereq.field_priority')} v={detailReq.urgency === 'high' || detailReq.urgency === 'plant_stopper' ? t('storereq.opt_urgent') : t('storereq.opt_normal')} />
+              <Row k={t('storereq.col_stage')} v={<span className="badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>} />
+              <Row k={t('storereq.col_decision')} v={detailReq.status} />
+              {detailReq.remarks && <Row k={t('storereq.field_reason')} v={detailReq.remarks} />}
+              <Row k={t('storereq.detail_requested', 'Requested on')} v={detailReq.created_at ? new Date(detailReq.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'} />
+              {detailReq.photo_url && (
+                <button
+                  type="button"
+                  onClick={() => setLightbox([{ url: detailReq.photo_url as string, label: detailReq.item }])}
+                  style={{ marginTop: 14, padding: 0, border: '1px solid #E2E8F0', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', background: 'none', lineHeight: 0, width: '100%' }}
+                  title={t('storereq.pic_on_file')}
+                >
+                  <img src={detailReq.photo_url} alt={detailReq.item} style={{ width: '100%', maxHeight: 220, objectFit: 'cover', display: 'block' }} />
+                </button>
+              )}
+            </div>
+          );
+        })()}
       </SlidePanel>
 
       <ImageLightbox images={lightbox || []} open={!!lightbox} onClose={() => setLightbox(null)} />

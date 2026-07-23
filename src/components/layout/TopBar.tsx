@@ -55,11 +55,13 @@ function CheckIcon() {
 interface TopBarProps {
   title: string;
   breadcrumb: string;
+  /** v2: gray one-liner under the title ("Plan, track and complete machine maintenance."). */
+  subtitle?: string;
   /** Open the mobile sidebar drawer (shown only below md). */
   onMenu?: () => void;
 }
 
-export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
+export function TopBar({ title, breadcrumb, subtitle, onMenu }: TopBarProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { openPalette } = useSearchPalette();
@@ -122,22 +124,31 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
         <button
           onClick={onMenu}
           aria-label="Menu"
-          className="md:hidden w-10 h-10 shrink-0 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
+          className="md:hidden w-10 h-10 shrink-0 rounded-[10px] bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
         <div className="min-w-0">
-          <div className="text-[12px] text-slate-500">{breadcrumb}</div>
-          <h1 className="serif text-[22px] md:text-[34px] leading-[1.05] md:leading-[1] mt-0.5">{title}</h1>
+          {/* Breadcrumb — "Factory › FAR › Fixed Assets" (parts come '·'-separated) */}
+          <div className="text-[12px] text-slate-400 flex items-center gap-1.5 flex-wrap">
+            {breadcrumb.split(' · ').map((part, i, arr) => (
+              <React.Fragment key={i}>
+                {i > 0 && <span className="text-slate-300">›</span>}
+                <span className={i === arr.length - 1 ? 'text-slate-600 font-medium' : undefined}>{part}</span>
+              </React.Fragment>
+            ))}
+          </div>
+          <h1 className="font-heading font-semibold text-[22px] md:text-[28px] leading-[1.15] mt-0.5 truncate">{title}</h1>
+          {subtitle && <div className="text-[13px] text-slate-500 mt-0.5">{subtitle}</div>}
         </div>
       </div>
 
       {/* Right: live indicator + notifications + profile switcher */}
       <div className="flex items-center gap-2 flex-wrap justify-end w-full md:w-auto" style={{ position: 'relative' }}>
         {/* Live sync pill */}
-        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-full text-[12px]">
+        <div className="hidden md:flex items-center gap-2 px-3.5 py-2.5 bg-white border border-slate-200 rounded-[10px] text-[12px]">
           <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
           <span className="font-medium">{t('topbar.live')}</span>
           <span className="text-slate-400">· {t('topbar.lastSync')}</span>
@@ -148,7 +159,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
           onClick={() => openPalette()}
           title={`${t('nav.quickSearch')} (⌘K)`}
           aria-label={t('nav.quickSearch')}
-          className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
+          className="w-10 h-10 rounded-[10px] bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
         >
           <Search size={16} />
         </button>
@@ -165,7 +176,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
             title={t('nav.todo')}
             aria-label={t('nav.todo')}
             onClick={() => navigate('/dashboard/todo')}
-            className="w-10 h-10 rounded-full bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
+            className="w-10 h-10 rounded-[10px] bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center relative"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="9 11 12 14 22 4" />
@@ -188,7 +199,7 @@ export function TopBar({ title, breadcrumb, onMenu }: TopBarProps) {
         {/* Bell button */}
         <button
           ref={btnRef}
-          className={`w-10 h-10 rounded-full border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+          className={`w-10 h-10 rounded-[10px] border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
           onClick={() => setOpen(v => !v)}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

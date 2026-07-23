@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { Footer } from './Footer';
 import { RestrictedAccess } from './RestrictedAccess';
 import { useAuth } from '../../hooks/useAuth';
 import { useRoleContext } from '../../contexts/RoleContext';
@@ -62,16 +63,16 @@ function BlacklistedOverlay({ entry, onBack }: { entry: BlacklistEntry; onBack: 
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': 'Operations dashboard',
-  '/dashboard/todo': 'To-Do · your work queue',
-  '/dashboard/sales': 'Sales · contracts & dispatch',
-  '/dashboard/stock': 'CP and Stock · tanks, drums, items',
-  '/dashboard/batches': 'Batch Sheet · production',
+  '/dashboard': 'Operations Dashboard',
+  '/dashboard/todo': 'To-Do',
+  '/dashboard/sales': 'Sales',
+  '/dashboard/stock': 'CP and Stock',
+  '/dashboard/batches': 'Batch Sheet',
   '/dashboard/customers': 'Customer History',
-  '/dashboard/night-manager': 'Night Manager · GPS + photos',
-  '/dashboard/oil-ratio': 'Oil Ratio Table · the brain',
-  '/dashboard/audit': 'Audit log · security logs',
-  '/dashboard/anomalies': 'Anomaly Detection · live risk radar',
+  '/dashboard/night-manager': 'Night Manager',
+  '/dashboard/oil-ratio': 'Oil Ratio Table',
+  '/dashboard/audit': 'Audit Log',
+  '/dashboard/anomalies': 'Anomaly Detection',
   '/dashboard/anomaly-center': 'Anomaly Operations Center',
   '/dashboard/cost-intelligence': 'Cost & Margin Intelligence',
   '/dashboard/benchmarking': 'Multi-Plant Benchmarking',
@@ -81,7 +82,9 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard/night-entry':     'Night Check-in',
   '/dashboard/batch-entry':     'Batch Logger',
   '/dashboard/warehouse-entry': 'Warehouse Console',
-  '/dashboard/blacklist':       'Blacklist · restricted entities',
+  '/dashboard/blacklist':       'Blacklist',
+  '/dashboard/users':           'User Management',
+  '/dashboard/daily-log':       'Daily Unit Log',
 };
 
 const BREADCRUMBS: Record<string, string> = {
@@ -95,22 +98,60 @@ const BREADCRUMBS: Record<string, string> = {
   '/dashboard/oil-ratio': 'Reference · Oil Ratio',
   '/dashboard/audit': 'Reference · Audit Log',
   '/dashboard/anomalies': 'Monitoring · Anomaly Detection',
+  '/dashboard/anomaly-center': 'Monitoring · Anomaly Center',
+  '/dashboard/cost-intelligence': 'Monitoring · Cost & Margin',
+  '/dashboard/benchmarking': 'Monitoring · Benchmarking',
+  '/dashboard/predictive-qc': 'Monitoring · Predictive QC',
+  '/dashboard/working-capital': 'Monitoring · Working Capital',
+  '/dashboard/owner': 'Monitoring · Owner Intelligence',
+  '/dashboard/users': 'Admin · User Management',
+  '/dashboard/blacklist': 'Admin · Blacklist',
+  '/dashboard/daily-log': 'Reference · Daily Unit Log',
   '/dashboard/night-entry':     'Workspace · Night Check-in',
   '/dashboard/batch-entry':     'Workspace · Batch Logger',
   '/dashboard/warehouse-entry': 'Workspace · Warehouse Console',
 };
 
-/** Per-sub-page titles/breadcrumbs for the Factory dropdown's Purchase routes. */
-const FACTORY_SUBPAGES: Record<string, { title: string; breadcrumb: string }> = {
-  '/dashboard/purchase/far':      { title: 'Fixed Asset Register (FAR)', breadcrumb: 'Factory · FAR · Fixed Assets' },
-  '/dashboard/purchase/qr':       { title: 'Asset QR Codes',             breadcrumb: 'Factory · FAR · QR Codes' },
-  '/dashboard/purchase/maint':    { title: 'Maintenance',                breadcrumb: 'Factory · Maintenance' },
-  '/dashboard/purchase/activity': { title: 'Activity Log',               breadcrumb: 'Factory · Activity Log' },
-  '/dashboard/purchase/storereq': { title: 'Store Requisition',          breadcrumb: 'Factory · Store Requisition' },
-  '/dashboard/purchase/purchase': { title: 'Purchase Order',             breadcrumb: 'Factory · Purchase Order' },
-  '/dashboard/purchase/marine':   { title: 'Marine Insurance',           breadcrumb: 'Factory · Marine Insurance' },
-  '/dashboard/purchase/labour':   { title: 'Labour',                     breadcrumb: 'Factory · Labour' },
+/** Per-sub-page titles/breadcrumbs/subtitles for the Factory dropdown's Purchase routes. */
+const FACTORY_SUBPAGES: Record<string, { title: string; breadcrumb: string; subtitle?: string }> = {
+  '/dashboard/purchase/far':      { title: 'Asset',             breadcrumb: 'Factory · FAR · Asset',    subtitle: 'Fixed Asset Register — every factory asset with its financial record.' },
+  '/dashboard/purchase/qr':       { title: 'QR Codes',          breadcrumb: 'Factory · FAR · QR Codes', subtitle: 'Generate and print QR codes for factory assets.' },
+  '/dashboard/purchase/maint':    { title: 'Maintenance',       breadcrumb: 'Factory · Maintenance',    subtitle: 'Plan, track and complete machine maintenance.' },
+  '/dashboard/purchase/activity': { title: 'Activity Log',      breadcrumb: 'Factory · Activity Log',   subtitle: 'Every purchase-linked event, in one stream.' },
+  '/dashboard/purchase/storereq': { title: 'Store Requisition', breadcrumb: 'Factory · Store Requisition', subtitle: 'Request materials, track approvals, manage stock and scrap.' },
+  '/dashboard/purchase/purchase': { title: 'Purchase Order',    breadcrumb: 'Factory · Purchase Order', subtitle: 'Raise and track purchase orders.' },
+  '/dashboard/purchase/marine':   { title: 'Marine Insurance',  breadcrumb: 'Factory · Marine Insurance' },
+  '/dashboard/purchase/labour':   { title: 'Labour',            breadcrumb: 'Factory · Labour' },
 };
+
+/** v2 subtitles for non-purchase pages (rendered under the TopBar title). */
+const PAGE_SUBTITLES: Record<string, string> = {
+  '/dashboard': "Today's work, business KPIs and approvals across all plants.",
+  '/dashboard/todo': 'Everything pending your action — updates live as work moves on.',
+  '/dashboard/night-manager': 'Manage night duty schedules and employee check-ins.',
+  '/dashboard/sales': 'Contracts, dispatches and HCL/acid tracking.',
+  '/dashboard/stock': 'Tanks, drums and store items across plants.',
+  '/dashboard/batches': 'Live production batches, QC and oil-ratio variance.',
+  '/dashboard/customers': 'Ledger, density and payment history per customer.',
+  '/dashboard/oil-ratio': 'The production brain — density ↔ oil-ratio reference.',
+  '/dashboard/audit': 'Security and change logs across the workspace.',
+  '/dashboard/anomalies': 'Live risk radar across plants and modules.',
+  '/dashboard/anomaly-center': 'Investigate, assign and resolve anomalies.',
+  '/dashboard/users': 'All staff registered in CaratSense — roles and access.',
+  '/dashboard/blacklist': 'Restricted persons, vehicles and vendors.',
+  '/dashboard/daily-log': 'OCR-read daily unit sheets per plant.',
+};
+
+/**
+ * Normalize dynamic detail paths to their parent list route before the
+ * exact-match profileCanAccess() check (and title lookups). Semantics are
+ * unchanged: the QR detail used to be an in-page panel on the list route, so
+ * list access has always implied detail access.
+ */
+function guardPath(p: string): string {
+  if (p.startsWith('/dashboard/purchase/qr/')) return '/dashboard/purchase/qr';
+  return p;
+}
 
 /** Purchase tab paths — used to check if a restricted profile has any purchase access */
 const PURCHASE_TAB_PATHS = [
@@ -133,6 +174,14 @@ export function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Close the drawer whenever the route changes.
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+  // v2 collapsed rail (md+ only), persisted per device.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('suntek.sidebarCollapsed') === '1'; } catch { return false; }
+  });
+  const toggleCollapsed = () => setCollapsed(c => {
+    try { localStorage.setItem('suntek.sidebarCollapsed', c ? '0' : '1'); } catch { /* private mode */ }
+    return !c;
+  });
 
   // Detect if the currently previewed profile is blacklisted
   const blacklistEntry = blacklistReady ? isPersonBlacklisted(activeProfile.name) : null;
@@ -169,7 +218,7 @@ export function DashboardLayout() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-          <div className="w-11 h-11 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-extrabold text-lg shadow-sm">S°</div>
+          <div className="w-11 h-11 rounded-2xl bg-[#F47651] text-white flex items-center justify-center font-extrabold text-lg shadow-sm">S°</div>
           <div className="animate-spin" style={{ width: 22, height: 22, border: '2.5px solid #E2E8F0', borderTopColor: '#F47651', borderRadius: '50%' }} />
         </div>
       </div>
@@ -177,10 +226,14 @@ export function DashboardLayout() {
   }
 
   const path = location.pathname;
+  // Dynamic detail paths (e.g. /purchase/qr/:key) resolve titles + access via
+  // their parent list route.
+  const lookupPath = guardPath(path);
 
   // ── Page titles & breadcrumbs ──────────────────────────────────────────────
-  let title = PAGE_TITLES[path] ?? 'Operations dashboard';
-  let breadcrumb = BREADCRUMBS[path] ?? 'Workspace · Overview';
+  let title = PAGE_TITLES[lookupPath] ?? 'Operations dashboard';
+  let breadcrumb = BREADCRUMBS[lookupPath] ?? 'Workspace · Overview';
+  let subtitle: string | undefined = PAGE_SUBTITLES[lookupPath];
 
   if (path.startsWith('/dashboard/purchase')) {
     // The horizontal sub-tab strip is gone; show the specific Factory sub-page.
@@ -191,10 +244,12 @@ export function DashboardLayout() {
     if (viaOps) {
       title = 'Purchase';
       breadcrumb = 'Operations · Purchase';
+      subtitle = undefined;
     } else {
-      const sub = FACTORY_SUBPAGES[path] ?? FACTORY_SUBPAGES['/dashboard/purchase/far'];
+      const sub = FACTORY_SUBPAGES[lookupPath] ?? FACTORY_SUBPAGES['/dashboard/purchase/far'];
       title = sub.title;
       breadcrumb = sub.breadcrumb;
+      subtitle = sub.subtitle;
     }
   }
 
@@ -218,8 +273,8 @@ export function DashboardLayout() {
   const canAccessRoute =
     !activeProfile.standaloneOnly &&
     (isPurchaseRoot ? hasSomePurchaseAccess
-      : isUserMgmt ? (can('manage_users') || can('manage_roles') || profileCanAccess(activeProfile, path))
-      : profileCanAccess(activeProfile, path));
+      : isUserMgmt ? (can('manage_users') || can('manage_roles') || profileCanAccess(activeProfile, lookupPath))
+      : profileCanAccess(activeProfile, lookupPath));
 
   // Post-login landing: a locked user who hits the Overview ('/dashboard') they
   // can't see is sent straight to their own home section, instead of bouncing
@@ -236,8 +291,15 @@ export function DashboardLayout() {
 
   return (
     <SearchPaletteProvider>
-    <div style={{ minHeight: '100vh' }}>
-      <Sidebar user={user} onSignOut={signOut} mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+    <div className="app-shell" data-sidebar-collapsed={collapsed ? 'true' : undefined} style={{ minHeight: '100vh' }}>
+      <Sidebar
+        user={user}
+        onSignOut={signOut}
+        mobileOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        collapsed={collapsed}
+        onToggleCollapse={toggleCollapsed}
+      />
 
       {/* Mobile drawer backdrop */}
       {sidebarOpen && (
@@ -248,9 +310,9 @@ export function DashboardLayout() {
         />
       )}
 
-      <main className="min-h-screen p-4 md:p-7 ml-0 md:ml-[260px]">
+      <main className="min-h-screen p-4 md:p-7 ml-0 md:ml-[var(--sidebar-width,260px)] transition-[margin] duration-200">
         <div className="max-w-[1500px] mx-auto">
-          <TopBar title={title} breadcrumb={breadcrumb} onMenu={() => setSidebarOpen(true)} />
+          <TopBar title={title} breadcrumb={breadcrumb} subtitle={subtitle} onMenu={() => setSidebarOpen(true)} />
 
           {/* "Viewing as" banner — appears when not in Admin mode */}
           {isViewingAs && (
@@ -304,6 +366,8 @@ export function DashboardLayout() {
               )
             : <RestrictedAccess />
           }
+
+          <Footer />
         </div>
       </main>
     </div>

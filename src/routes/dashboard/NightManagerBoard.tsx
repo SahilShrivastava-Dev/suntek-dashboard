@@ -6,6 +6,7 @@ import { useToast } from '../../components/ui/toast';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { NightDutyScheduler } from './NightDutyScheduler';
 import { MyNightDuty } from './MyNightDuty';
+
 import type { Database } from '../../lib/database.types';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -129,7 +130,7 @@ const createCustomIcon = (initials: string, status: string) => {
 export function NightManagerBoard() {
   const { t } = useTranslation();
   const toast = useToast();
-  const { can } = useRoleContext();
+  const { can, roles } = useRoleContext();
   const [liveDuty, setLiveDuty] = useState<CheckInLog[]>([]);
   const [deviceMappings, setDeviceMappings] = useState<DeviceMappingRow[]>([]);
   const [selectedCheckIn, setSelectedCheckIn] = useState<CheckInLog | null>(null);
@@ -165,17 +166,44 @@ export function NightManagerBoard() {
 
       const logs = logsData || [];
 
+      // 2b. Night-duty check-ins carry no profiles row — resolve the person via
+      //     shift_logs.night_duty_id → night_duty.technician_id → user_accounts.
+      const dutyIds = [...new Set(logs.map(l => (l as { night_duty_id?: string | null }).night_duty_id).filter(Boolean))] as string[];
+      const dutyTech = new Map<string, string>(); // night_duty_id → technician account id
+      const acctName = new Map<string, { name: string; role_id: string | null }>();
+      if (dutyIds.length) {
+        const { data: dutyRows } = await supabase.from('night_duty').select('id, technician_id').in('id', dutyIds)
+          .returns<{ id: string; technician_id: string }[]>();
+        (dutyRows ?? []).forEach(d => dutyTech.set(d.id, d.technician_id));
+        const techIds = [...new Set((dutyRows ?? []).map(d => d.technician_id))];
+        if (techIds.length) {
+          const { data: acctRows } = await supabase.from('user_accounts').select('id, name, role_id').in('id', techIds)
+            .returns<{ id: string; name: string; role_id: string | null }[]>();
+          (acctRows ?? []).forEach(a => acctName.set(a.id, { name: a.name, role_id: a.role_id }));
+        }
+      }
+      const roleLabelOf = (roleId: string | null) => roles.find(r => r.id === roleId)?.label ?? 'Technician';
+
       // 3. Format shift logs with mapping resolution
       const formatted = logs.map((row, index: number) => {
         const isGuest = !row.employee_id;
         const ip = row.ip_address;
-        
+
         let name = row.profiles?.name || t('nightBoard.liveCheckIn');
         let role = row.profiles?.role || 'L1';
         let phone = row.profiles?.phone || null;
         let isMapped = false;
 
-        if (isGuest && ip) {
+        // Night-duty check-in → real person from the duty roster.
+        const dutyId = (row as { night_duty_id?: string | null }).night_duty_id;
+        if (dutyId && dutyTech.has(dutyId)) {
+          const acct = acctName.get(dutyTech.get(dutyId)!);
+          if (acct) {
+            name = acct.name;
+            role = roleLabelOf(acct.role_id);
+            isMapped = true;
+          }
+        } else if (isGuest && ip) {
           const mapping = activeMappings.find((m) => m.ip_address === ip);
           if (mapping) {
             name = mapping.name;
@@ -298,39 +326,22 @@ export function NightManagerBoard() {
       {/* The allocator's own night duty (if they're also assigned any). */}
       <MyNightDuty />
 
-      {/* KPIs */}
-      <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.onDutyNow')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.filter(d => d.status === 'green').length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('nightBoard.acrossFactories', { count: new Set(liveDuty.map(d => d.plant)).size || 0 })}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.geoTaggedCheckins')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">{liveDuty.length}</div>
-          <div className="text-[11px] text-slate-500 mt-1">{t('nightBoard.today')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.outOfZone')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-amber-600">{liveDuty.filter(d => d.status === 'red').length}</div>
-          <div className="text-[11px] text-amber-600 mt-1">{t('nightBoard.flagged')}</div>
-        </div>
-        <div className="col-span-12 lg:col-span-3 card p-5">
-          <div className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">{t('nightBoard.photoProofPct')}</div>
-          <div className="text-[28px] font-extrabold mt-1 num text-slate-900">
-            {liveDuty.length > 0 ? Math.round((liveDuty.filter(d => d.photo_url).length / liveDuty.length) * 100) : 0}%
-          </div>
-        </div>
-      </div>
-
-      {/* Map + duty list */}
+      {/* Map + duty list. (The duty KPI cards live in the scheduler above; the
+          map header carries the geo-compliance stats to avoid a duplicate row.) */}
       <div className="grid grid-cols-12 gap-5">
         {/* Map - Leaflet container */}
-        <div className="col-span-12 lg:col-span-7 card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
-          <div className="flex items-center justify-between mb-2">
+        <div className="col-span-12 lg:col-span-7 card2 p-6">
+          <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
             <div>
-              <div className="text-base font-bold text-slate-900">{t('nightBoard.liveCheckinMap')}</div>
-              <div className="text-xs text-slate-500">{t('nightBoard.mapSubtitle')}</div>
+              <div className="text-base font-bold font-heading text-slate-900 font-heading">{t('nightBoard.liveCheckinMap')}</div>
+              <div className="text-xs text-slate-500">
+                {t('nightBoard.mapSubtitle')}
+                {' · '}{liveDuty.length} {t('nightBoard.geoTaggedCheckins').toLowerCase()}
+                {liveDuty.filter(d => d.status === 'red').length > 0 && (
+                  <span className="text-amber-600 font-semibold"> · {liveDuty.filter(d => d.status === 'red').length} {t('nightBoard.outOfZone').toLowerCase()}</span>
+                )}
+                {' · '}{liveDuty.length > 0 ? Math.round((liveDuty.filter(d => d.photo_url).length / liveDuty.length) * 100) : 0}% {t('nightBoard.photoProofPct').toLowerCase()}
+              </div>
             </div>
             {selectedCheckIn && (
               <button 
@@ -439,8 +450,8 @@ export function NightManagerBoard() {
         </div>
 
         {/* Duty list */}
-        <div className="col-span-12 lg:col-span-5 card p-6" style={{ background: 'var(--amber-soft)', border: '1px solid #fde68a' }}>
-          <div className="text-base font-bold mb-1 text-slate-900 font-serif serif text-lg">{t('nightBoard.onDutyCurrentShift')}</div>
+        <div className="col-span-12 lg:col-span-5 card2 p-6">
+          <div className="text-base font-bold font-heading mb-1 text-slate-900">{t('nightBoard.onDutyCurrentShift')}</div>
           <div className="text-[11px] text-slate-500 mb-4">{t('nightBoard.dutyListSubtitle')}</div>
           
           <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">

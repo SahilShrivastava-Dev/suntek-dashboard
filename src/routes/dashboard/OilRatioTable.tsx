@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Pencil, Check, X, Plus, FlaskConical, Droplets, TestTube2, Package, BarChart3 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useRoleContext } from '../../contexts/RoleContext';
+import { SectionCard, SegmentTabs, ButtonV2, StatusPill } from '../../components/v2';
 
 type Variant = 'suntek' | 'manav';
 
@@ -111,180 +113,151 @@ export function OilRatioTable() {
     await load();
   }
 
+  const editInputCls = 'px-2 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:border-slate-400 transition-colors';
+
   return (
     <div>
       <div className="grid grid-cols-12 gap-5">
         {/* Main table card */}
-        <div
-          className={`card p-6 ${selectedRow ? 'col-span-12 lg:col-span-8' : 'col-span-12'}`}
-          style={{ background: 'var(--green-soft)', border: '1px solid #bbf7d0' }}
-        >
-          {/* Header row */}
-          <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
-            <div>
-              <div className="text-base font-bold flex items-center gap-2">
-                {t('oilRatio.title')}{' '}
-                <span
-                  className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={{ background: 'var(--accent-soft)', color: 'var(--accent-deep)' }}
-                >
-                  {t('oilRatio.theBrain')}
-                </span>
-              </div>
-              <div className="text-xs text-slate-500">
-                {t('oilRatio.subtitle')}
-              </div>
-            </div>
-
-            {/* Variant chips + admin edit controls */}
+        <SectionCard
+          flush
+          className={selectedRow ? 'col-span-12 lg:col-span-8' : 'col-span-12'}
+          title={
+            <span className="inline-flex items-center gap-2">
+              {t('oilRatio.title')}
+              <StatusPill tone="orange" label={t('oilRatio.theBrain')} />
+            </span>
+          }
+          subtitle={t('oilRatio.subtitle')}
+          actions={
             <div className="flex items-center gap-2 flex-wrap">
-              {(['suntek', 'manav'] as Variant[]).map(v => (
-                <button
-                  key={v}
-                  onClick={() => { setVariant(v); setSelectedDensity(null); }}
-                  disabled={editing}
-                  className="subtab"
-                  style={variant === v ? {
-                    background: 'var(--dark)',
-                    color: '#fff',
-                    border: '1px solid var(--dark)',
-                  } : {
-                    background: '#fff',
-                    color: 'var(--muted)',
-                    border: '1px solid var(--border)',
-                  }}
-                >
-                  {v === 'suntek' ? t('oilRatio.suntekBaseline') : t('oilRatio.manavKgFeb')}
-                </button>
-              ))}
+              {/* Variant tabs (view switch) + admin edit controls */}
+              <SegmentTabs<Variant>
+                items={[
+                  { key: 'suntek', label: t('oilRatio.suntekBaseline') },
+                  { key: 'manav',  label: t('oilRatio.manavKgFeb') },
+                ]}
+                value={variant}
+                onChange={v => {
+                  if (editing) return; // variant locked while editing (matches old disabled chips)
+                  setVariant(v);
+                  setSelectedDensity(null);
+                }}
+              />
 
               {isAdmin && !editing && (
-                <button
-                  onClick={startEdit}
-                  className="subtab"
-                  style={{ background: '#fff', color: 'var(--accent-deep)', border: '1px solid var(--accent)' }}
-                >
+                <ButtonV2 variant="outline" icon={<Pencil />} onClick={startEdit}>
                   Edit
-                </button>
+                </ButtonV2>
               )}
               {isAdmin && editing && (
                 <>
-                  <button
-                    onClick={saveEdit}
-                    disabled={saving}
-                    className="subtab"
-                    style={{ background: 'var(--dark)', color: '#fff', border: '1px solid var(--dark)' }}
-                  >
+                  <ButtonV2 variant="primary" icon={<Check />} onClick={saveEdit} disabled={saving}>
                     {saving ? 'Saving…' : 'Save'}
-                  </button>
-                  <button
-                    onClick={cancelEdit}
-                    disabled={saving}
-                    className="subtab"
-                    style={{ background: '#fff', color: 'var(--muted)', border: '1px solid var(--border)' }}
-                  >
+                  </ButtonV2>
+                  <ButtonV2 variant="outline" icon={<X />} onClick={cancelEdit} disabled={saving}>
                     Cancel
-                  </button>
+                  </ButtonV2>
                 </>
               )}
             </div>
-          </div>
-
+          }
+        >
           {/* Table */}
           {loading ? (
             <div className="py-10 text-center text-sm text-slate-400">Loading…</div>
           ) : editing ? (
             /* ── Admin edit grid ── */
-            <div className="overflow-x-auto">
-              <table className="dt w-full">
-                <thead>
-                  <tr>
-                    <th>{t('oilRatio.colDensity')}</th>
-                    <th>{t('oilRatio.colNp')}</th>
-                    <th>{t('oilRatio.colWaxol')}</th>
-                    <th>{t('oilRatio.colCl2')}</th>
-                    <th>{t('oilRatio.colHcl')}</th>
-                    <th>{t('oilRatio.colLastVariance')}</th>
-                    <th>{t('oilRatio.colStatus')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {draft.map((row, idx) => (
-                    <tr key={row.id ?? `new-${idx}`}>
-                      <td>
-                        <input
-                          type="number"
-                          className="w-20 px-2 py-1 rounded border border-slate-200 text-sm"
-                          value={row.density}
-                          onChange={e => updateDraft(idx, { density: Number(e.target.value) })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="w-20 px-2 py-1 rounded border border-slate-200 text-sm"
-                          value={row.np}
-                          onChange={e => updateDraft(idx, { np: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="w-20 px-2 py-1 rounded border border-slate-200 text-sm"
-                          value={row.wx}
-                          onChange={e => updateDraft(idx, { wx: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="w-16 px-2 py-1 rounded border border-slate-200 text-sm"
-                          value={row.cl}
-                          onChange={e => updateDraft(idx, { cl: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="w-16 px-2 py-1 rounded border border-slate-200 text-sm"
-                          value={row.hcl}
-                          onChange={e => updateDraft(idx, { hcl: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          step="0.1"
-                          className="w-16 px-2 py-1 rounded border border-slate-200 text-sm"
-                          value={row.vr}
-                          onChange={e => updateDraft(idx, { vr: Number(e.target.value) })}
-                        />
-                      </td>
-                      <td>
-                        <label className="flex items-center gap-1 text-xs">
-                          <input
-                            type="checkbox"
-                            checked={row.ok}
-                            onChange={e => updateDraft(idx, { ok: e.target.checked })}
-                          />
-                          {t('oilRatio.inTolerance')}
-                        </label>
-                      </td>
+            <>
+              <div className="overflow-x-auto scroll-x">
+                <table className="dt2">
+                  <thead>
+                    <tr>
+                      <th>{t('oilRatio.colDensity')}</th>
+                      <th>{t('oilRatio.colNp')}</th>
+                      <th>{t('oilRatio.colWaxol')}</th>
+                      <th>{t('oilRatio.colCl2')}</th>
+                      <th>{t('oilRatio.colHcl')}</th>
+                      <th>{t('oilRatio.colLastVariance')}</th>
+                      <th>{t('oilRatio.colStatus')}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              <button
-                onClick={addDraftRow}
-                className="mt-3 text-xs font-semibold px-3 py-1.5 rounded-full"
-                style={{ background: 'var(--accent-soft)', color: 'var(--accent-deep)' }}
-              >
-                + Add density row
-              </button>
-            </div>
+                  </thead>
+                  <tbody>
+                    {draft.map((row, idx) => (
+                      <tr key={row.id ?? `new-${idx}`}>
+                        <td>
+                          <input
+                            type="number"
+                            className={`w-20 ${editInputCls}`}
+                            value={row.density}
+                            onChange={e => updateDraft(idx, { density: Number(e.target.value) })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className={`w-20 ${editInputCls}`}
+                            value={row.np}
+                            onChange={e => updateDraft(idx, { np: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className={`w-20 ${editInputCls}`}
+                            value={row.wx}
+                            onChange={e => updateDraft(idx, { wx: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className={`w-16 ${editInputCls}`}
+                            value={row.cl}
+                            onChange={e => updateDraft(idx, { cl: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className={`w-16 ${editInputCls}`}
+                            value={row.hcl}
+                            onChange={e => updateDraft(idx, { hcl: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            step="0.1"
+                            className={`w-16 ${editInputCls}`}
+                            value={row.vr}
+                            onChange={e => updateDraft(idx, { vr: Number(e.target.value) })}
+                          />
+                        </td>
+                        <td>
+                          <label className="flex items-center gap-1 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={row.ok}
+                              onChange={e => updateDraft(idx, { ok: e.target.checked })}
+                            />
+                            {t('oilRatio.inTolerance')}
+                          </label>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-5 py-3 border-t border-slate-100">
+                <ButtonV2 variant="outline" size="sm" icon={<Plus />} onClick={addDraftRow}>
+                  Add density row
+                </ButtonV2>
+              </div>
+            </>
           ) : data.length === 0 ? (
             <div className="py-10 text-center text-sm text-slate-400">
               No oil-ratio data recorded yet.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="dt w-full">
+            <div className="overflow-x-auto scroll-x">
+              <table className="dt2">
                 <thead>
                   <tr>
                     <th>{t('oilRatio.colDensity')}</th>
@@ -320,13 +293,9 @@ export function OilRatioTable() {
                         </td>
                         <td>
                           {row.ok ? (
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#DCFCE7', color: '#16A34A' }}>
-                              {t('oilRatio.inTolerance')}
-                            </span>
+                            <StatusPill tone="green" label={t('oilRatio.inTolerance')} />
                           ) : (
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#FEE2E2', color: '#DC2626' }}>
-                              {t('oilRatio.flag')}
-                            </span>
+                            <StatusPill tone="red" label={t('oilRatio.flag')} />
                           )}
                         </td>
                       </tr>
@@ -337,14 +306,14 @@ export function OilRatioTable() {
             </div>
           )}
 
-          <div className="text-[11px] text-slate-400 mt-4">
+          <div className="text-[11px] text-slate-400 px-5 py-3 border-t border-slate-100">
             {t('oilRatio.clickRowHint')}
           </div>
-        </div>
+        </SectionCard>
 
         {/* Inline detail panel — appears when a row is selected */}
         {selectedRow && !editing && (
-          <div className="col-span-12 lg:col-span-4 card p-6">
+          <div className="col-span-12 lg:col-span-4 card2 p-5">
             <div className="flex items-start justify-between mb-5">
               <div>
                 <div className="text-[10px] font-bold tracking-[0.18em] text-slate-400 uppercase mb-1">
@@ -352,37 +321,33 @@ export function OilRatioTable() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="density-pill text-lg px-3 py-1">{selectedRow.density}</span>
-                  <span
-                    className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                    style={selectedRow.ok
-                      ? { background: '#DCFCE7', color: '#16A34A' }
-                      : { background: '#FEE2E2', color: '#DC2626' }
-                    }
-                  >
-                    {selectedRow.ok ? t('oilRatio.inTolerance') : t('oilRatio.flagged')}
-                  </span>
+                  {selectedRow.ok ? (
+                    <StatusPill tone="green" label={t('oilRatio.inTolerance')} />
+                  ) : (
+                    <StatusPill tone="red" label={t('oilRatio.flagged')} />
+                  )}
                 </div>
               </div>
               <button
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors shrink-0"
+                className="w-7 h-7 rounded-[10px] bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors shrink-0"
                 onClick={() => setSelectedDensity(null)}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M18 6 6 18M6 6l12 12"/>
-                </svg>
+                <X size={13} strokeWidth={2.5} className="text-slate-500" />
               </button>
             </div>
 
             {/* Coefficient cards */}
             <div className="space-y-3">
               {[
-                { label: t('oilRatio.npPerKgCp'), value: selectedRow.np, icon: '🧪', desc: t('oilRatio.npDesc') },
-                { label: t('oilRatio.waxolPerKgCp'), value: selectedRow.wx, icon: '💧', desc: t('oilRatio.waxolDesc') },
-                { label: t('oilRatio.cl2PerKgCp'), value: selectedRow.cl, icon: '⚗️', desc: t('oilRatio.cl2Desc') },
-                { label: t('oilRatio.hclProduced'), value: `${selectedRow.hcl} kg`, icon: '📦', desc: t('oilRatio.hclDesc') },
+                { label: t('oilRatio.npPerKgCp'), value: selectedRow.np, icon: <FlaskConical size={16} />, desc: t('oilRatio.npDesc') },
+                { label: t('oilRatio.waxolPerKgCp'), value: selectedRow.wx, icon: <Droplets size={16} />, desc: t('oilRatio.waxolDesc') },
+                { label: t('oilRatio.cl2PerKgCp'), value: selectedRow.cl, icon: <TestTube2 size={16} />, desc: t('oilRatio.cl2Desc') },
+                { label: t('oilRatio.hclProduced'), value: `${selectedRow.hcl} kg`, icon: <Package size={16} />, desc: t('oilRatio.hclDesc') },
               ].map(item => (
-                <div key={item.label} className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl">
-                  <div className="text-xl w-8 text-center">{item.icon}</div>
+                <div key={item.label} className="flex items-center gap-3 p-3 bg-slate-50 rounded-[10px]">
+                  <div className="w-9 h-9 rounded-[10px] bg-white border border-slate-200 text-slate-500 flex items-center justify-center shrink-0">
+                    {item.icon}
+                  </div>
                   <div className="flex-1">
                     <div className="text-xs text-slate-500">{item.label}</div>
                     <div className="font-bold text-base num">{item.value}</div>
@@ -393,10 +358,12 @@ export function OilRatioTable() {
 
               {/* Variance highlight */}
               <div
-                className="flex items-center gap-3 p-3 rounded-2xl"
+                className="flex items-center gap-3 p-3 rounded-[10px]"
                 style={{ background: `${varianceColor(selectedRow.vr)}18`, border: `1px solid ${varianceColor(selectedRow.vr)}33` }}
               >
-                <div className="text-xl w-8 text-center">📊</div>
+                <div className="w-9 h-9 rounded-[10px] bg-white/70 flex items-center justify-center shrink-0" style={{ color: varianceColor(selectedRow.vr) }}>
+                  <BarChart3 size={16} />
+                </div>
                 <div className="flex-1">
                   <div className="text-xs text-slate-500">{t('oilRatio.lastBatchVariance')}</div>
                   <div className="font-bold text-xl num" style={{ color: varianceColor(selectedRow.vr) }}>
@@ -414,7 +381,7 @@ export function OilRatioTable() {
             </div>
 
             {/* Compare note */}
-            <div className="mt-4 p-3 bg-orange-50 rounded-2xl text-xs text-orange-700">
+            <div className="mt-4 p-3 bg-orange-50 rounded-[10px] text-xs text-orange-700">
               <span className="font-semibold">{t('oilRatio.compareVariant')}</span>{' '}
               <button
                 className="underline hover:text-orange-900"

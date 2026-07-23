@@ -8,7 +8,8 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRo
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
-import { useSortable, Th } from '../../../components/ui/useSortable';
+import { useSortable } from '../../../components/ui/useSortable';
+import { ThV2 as Th } from '../../../components/v2';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import type { Database } from '../../../lib/database.types';
 
@@ -105,7 +106,7 @@ export function MarineInsurance() {
     <>
       {/* Balance + stats */}
       <div className="grid grid-cols-12 gap-5 mb-5">
-        <div className="col-span-12 lg:col-span-6 card p-6" style={{ background: 'var(--red-soft)', border: '1px solid #fecaca', position: 'relative' }}>
+        <div className="col-span-12 lg:col-span-6 card p-6" style={{ position: 'relative' }}>
           <KpiInfoButton info={{ title: 'Marine Insurance Balance', what: 'Running prepaid balance on the open marine insurance policy. Every supplier dispatch auto-deducts the insured value. Balance drops below ₹1 Cr triggers a top-up alert.', source: 'Form entry', formLabel: 'Top-up form', formPath: '/dashboard/purchase/marine', note: 'Top-ups logged manually via the "Top up" slide panel. Auto-deduction is applied per dispatch entry.' }} />
           <div className="flex items-start justify-between">
             <div>
@@ -131,10 +132,10 @@ export function MarineInsurance() {
             {t('marine.autoDeductHint')}
           </div>
           <div className="flex gap-2">
-            <button className="btn-accent pill px-4 py-2 font-semibold text-sm" onClick={() => setPanel('topup')}>
+            <button className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" onClick={() => setPanel('topup')}>
               {t('marine.topUp')}
             </button>
-            <button className="btn-outline pill px-4 py-2 font-semibold text-sm" onClick={() => setPanel('ledger')}>
+            <button className="btn-outline rounded-[10px] px-4 py-2 font-semibold text-sm" onClick={() => setPanel('ledger')}>
               {t('marine.viewLedger')}
             </button>
           </div>
@@ -154,9 +155,9 @@ export function MarineInsurance() {
       </div>
 
       {/* Ledger table */}
-      <div className="card p-6" style={{ position: 'relative' }}>
+      <div className="card2 p-6" style={{ position: 'relative' }}>
         <KpiInfoButton info={{ title: 'Marine Insurance Ledger', what: 'Transaction history of the marine insurance prepaid balance — all top-ups (credits) and dispatch deductions (debits). Running balance is shown per row. New top-ups entered via the "Top up" slide panel; deductions are auto-logged per supplier dispatch.', source: 'Form entry', formLabel: 'Top-up / View ledger panel', formPath: '/dashboard/purchase/marine', note: 'Data from MARINE_LEDGER mock (mockData.ts). Future: Supabase marine_ledger table.' }} />
-        <div className="text-base font-bold mb-3">{t('marine.recentLedger')}</div>
+        <div className="text-base font-bold font-heading mb-3">{t('marine.recentLedger')}</div>
         {loadError ? (
           <ErrorState title={t('marine.loadErrorTitle')} message={t('marine.loadErrorMessage')}
             onRetry={() => { setLoading(true); setLoadError(false); load(); }} />
@@ -164,7 +165,7 @@ export function MarineInsurance() {
           <SkeletonRows rows={6} />
         ) : (
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="date" s={lSort} firstDir="desc">{t('marine.colDate')}</Th><Th sortKey="type" s={lSort}>{t('marine.colType')}</Th><Th sortKey="reference" s={lSort}>{t('marine.colReference')}</Th>

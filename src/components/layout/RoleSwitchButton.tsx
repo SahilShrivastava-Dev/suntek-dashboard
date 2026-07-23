@@ -49,7 +49,7 @@ export function RoleSwitchButton() {
       <button
         title="Switch / preview role"
         onClick={() => setOpen((o) => !o)}
-        className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors ${
+        className={`w-10 h-10 rounded-[10px] border flex items-center justify-center transition-colors ${
           open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'
         }`}
       >

@@ -48,6 +48,7 @@ const PurchaseOrders  = lazy(() => import('./routes/dashboard/purchase/PurchaseO
 const MarineInsurance = lazy(() => import('./routes/dashboard/purchase/MarineInsurance').then(m => ({ default: m.MarineInsurance })));
 const Labour          = lazy(() => import('./routes/dashboard/purchase/Labour').then(m => ({ default: m.Labour })));
 const QRManagement    = lazy(() => import('./routes/dashboard/purchase/QRManagement').then(m => ({ default: m.QRManagement })));
+const QRDetail        = lazy(() => import('./routes/dashboard/purchase/QRDetail').then(m => ({ default: m.QRDetail })));
 
 // Standalone asset profile (QR landing) — full page, no sidebar.
 const AssetProfile    = lazy(() => import('./routes/asset/AssetProfile').then(m => ({ default: m.AssetProfile })));
@@ -99,6 +100,7 @@ function App() {
               <Route path="marine"   element={<MarineInsurance />} />
               <Route path="labour"   element={<Labour />} />
               <Route path="qr"       element={<QRManagement />} />
+              <Route path="qr/:qrKey" element={<QRDetail />} />
             </Route>
 
             {/* Main tabs */}

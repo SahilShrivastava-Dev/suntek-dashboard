@@ -10,7 +10,8 @@ import { useBlacklist } from '../../contexts/BlacklistContext';
 import { NotesButton } from '../../components/mentions';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelFooter } from '../../components/SlidePanel';
 import { useToast } from '../../components/ui/toast';
-import { useSortable, Th } from '../../components/ui/useSortable';
+import { useSortable } from '../../components/ui/useSortable';
+import { ThV2 as Th } from '../../components/v2';
 import type { BlacklistEntry } from '../../contexts/BlacklistContext';
 import type { Database } from '../../lib/database.types';
 
@@ -450,10 +451,10 @@ export function Blacklist() {
       </div>
 
       {/* ── Table card ───────────────────────────────────────────────────── */}
-      <div className="card p-6">
+      <div className="card2 p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <div className="text-base font-bold">{t('blacklist.registryTitle')}</div>
+            <div className="text-base font-bold font-heading">{t('blacklist.registryTitle')}</div>
             <div className="text-xs text-slate-500">{t('blacklist.registrySubtitle')}</div>
           </div>
           <div className="flex items-center gap-2">
@@ -466,11 +467,11 @@ export function Blacklist() {
               📄 {generatingReport ? t('blacklist.generating') : t('blacklist.auditReport')}
             </button>
             <button
-              className="btn-accent pill px-4 py-2 font-semibold text-sm"
+              className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm"
               style={{ background: '#DC2626' }}
               onClick={() => { setForm({ ...BLANK_FORM }); setSaved(false); setShowPanel(true); }}
             >
-              {t('blacklist.addBtn')}
+              + {t('blacklist.addBtn')}
             </button>
           </div>
         </div>
@@ -507,7 +508,7 @@ export function Blacklist() {
         </div>
 
         <div className="overflow-x-auto scroll-x">
-          <table className="dt">
+          <table className="dt2">
             <thead>
               <tr>
                 <Th sortKey="type" s={fSort}>{t('blacklist.colType')}</Th>

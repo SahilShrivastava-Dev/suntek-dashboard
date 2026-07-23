@@ -26,6 +26,8 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         serif: ['Instrument Serif', 'Georgia', 'serif'],
+        // v2 redesign — page/section headings (body stays Inter)
+        heading: ['Poppins', 'Inter', 'system-ui', 'sans-serif'],
       },
       colors: {
         // Red tiles — Busy API financial data (L4)

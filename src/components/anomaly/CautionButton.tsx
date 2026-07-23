@@ -60,7 +60,7 @@ export function CautionButton() {
       <button
         ref={btnRef}
         title="Anomaly detection"
-        className={`w-10 h-10 rounded-full border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+        className={`w-10 h-10 rounded-[10px] border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
         onClick={() => setOpen(v => !v)}
       >
         <AlertTriangle size={16} color={open ? '#fff' : (criticalCount > 0 ? badgeColor : '#64748B')} strokeWidth={2} />

@@ -18,20 +18,29 @@ import { TableSearch, useTextFilter } from '../../../components/ui/TableSearch';
 import { useToast } from '../../../components/ui/toast';
 import { RepairReturnModal } from './RepairReturnModal';
 import { repairPending } from '../../../lib/store/repairReturn';
+import { cleanPartName } from '../../../lib/store/defectiveSplit';
 import type { Database } from '../../../lib/database.types';
 
 type TicketRow = Database['public']['Tables']['maintenance_tickets']['Row'] & { plants?: { name: string | null } | null };
+type DefectivePartRow = Database['public']['Tables']['maintenance_defective_parts']['Row'];
+/** One replaced part line together with the ticket it came from. */
+interface PartItem { part: DefectivePartRow; ticket: TicketRow }
 type ReceiptRow = Database['public']['Tables']['repair_return_receipts']['Row'] & { plants?: { name: string | null } | null };
 type AllocRow = Database['public']['Tables']['repair_return_allocations']['Row'];
 
 const fmtDate = (d: string | null | undefined) =>
   d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
-/** Return progress of a repair ticket: pending / partial / returned. */
-function returnState(t: TicketRow): 'pending' | 'partial' | 'returned' {
-  const ret = Number(t.repair_returned_qty ?? 0);
+/** Units of THIS part line still awaiting return from the vendor. */
+function partPending(p: DefectivePartRow): number {
+  return Math.max(0, Number(p.repair_qty) - Number(p.repair_returned_qty));
+}
+
+/** Return progress of one repaired part line: pending / partial / returned. */
+function partReturnState(p: DefectivePartRow): 'pending' | 'partial' | 'returned' {
+  const ret = Number(p.repair_returned_qty ?? 0);
   if (ret <= 0) return 'pending';
-  return repairPending(t) > 0 ? 'partial' : 'returned';
+  return partPending(p) > 0 ? 'partial' : 'returned';
 }
 
 /**
@@ -49,12 +58,13 @@ export function RepairScrapPanel() {
   const { scopeQuery } = usePlantScope();
   const { activeProfile } = useRoleContext();
   const [rows, setRows] = useState<TicketRow[]>([]);
+  const [parts, setParts] = useState<DefectivePartRow[]>([]);
   const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
   const [allocs, setAllocs] = useState<AllocRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [lightbox, setLightbox] = useState<LightboxImage[] | null>(null);
-  const [returnTicket, setReturnTicket] = useState<TicketRow | null>(null);
+  const [returnItem, setReturnItem] = useState<PartItem | null>(null);
 
   const canReturn = profileHasCapability(activeProfile, 'return_repairs');
   const canReverse = profileHasCapability(activeProfile, 'reverse_repair_return');
@@ -67,7 +77,17 @@ export function RepairScrapPanel() {
         .not('defective_part_decision', 'is', null).order('closed_at', { ascending: false }).returns<TicketRow[]>(),
       'RepairScrap.tickets',
     );
-    setRows(data || []);
+    const ticketRows = data || [];
+    setRows(ticketRows);
+    // Per-part Repair/Scrap split (migration 56). Best-effort: until that
+    // migration runs the table is absent, and the panel falls back to the old
+    // one-decision-per-ticket view rather than showing nothing.
+    try {
+      const { data: dp, error: dpErr } = await scopeQuery(
+        supabase.from('maintenance_defective_parts').select('*'),
+      ).order('created_at', { ascending: false }).returns<DefectivePartRow[]>();
+      setParts(dpErr ? [] : (dp || []));
+    } catch { setParts([]); }
     // Return history (best-effort — tables arrive with migration 55).
     try {
       const { data: rc, error: rcErr } = await withEmbedFallback(
@@ -90,9 +110,36 @@ export function RepairScrapPanel() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = useTextFilter(rows, search, r => [r.equipment, r.plants?.name, r.id.slice(0, 8), r.assigned_to]);
-  const repair = useMemo(() => filtered.filter(r => r.defective_part_decision === 'repair'), [filtered]);
-  const scrap = useMemo(() => filtered.filter(r => r.defective_part_decision === 'scrap'), [filtered]);
+  // Join each part line to its ticket. When migration 56 hasn't run yet, derive
+  // a single synthetic line per ticket from the old enum so the page still works.
+  const partItems = useMemo<PartItem[]>(() => {
+    const byTicket = new Map(rows.map(r => [r.id, r]));
+    if (parts.length) {
+      return parts
+        .map(p => ({ part: p, ticket: byTicket.get(p.ticket_id) }))
+        .filter((x): x is PartItem => !!x.ticket);
+    }
+    return rows.map(r => ({
+      ticket: r,
+      part: {
+        id: `legacy:${r.id}`, ticket_id: r.id, store_request_id: null, plant_id: r.plant_id,
+        part_name: cleanPartName(r.equipment) || cleanPartName(r.title) || 'Defective part',
+        replaced_qty: Number(r.repair_qty ?? 1),
+        repair_qty: r.defective_part_decision === 'repair' ? Number(r.repair_qty ?? 1) : 0,
+        scrap_qty: r.defective_part_decision === 'scrap' ? 1 : 0,
+        repair_returned_qty: Number(r.repair_returned_qty ?? 0),
+        store_item_id: null, photo_url: r.defective_part_photo_url,
+        actor: null, actor_name: null, created_at: r.closed_at || r.created_at,
+      } as DefectivePartRow,
+    }));
+  }, [parts, rows]);
+
+  const filteredItems = useTextFilter(partItems, search,
+    i => [i.part.part_name, i.ticket.equipment, i.ticket.plants?.name, i.ticket.id.slice(0, 8), i.ticket.assigned_to]);
+  // A ticket that repaired 3 and scrapped 2 appears in BOTH lists, each with
+  // its own quantity — which is the whole point of the split.
+  const repair = useMemo(() => filteredItems.filter(i => Number(i.part.repair_qty) > 0), [filteredItems]);
+  const scrap = useMemo(() => filteredItems.filter(i => Number(i.part.scrap_qty) > 0), [filteredItems]);
 
   if (loading) return <div className="card2 p-6" style={{ marginTop: 20 }}><SkeletonRows rows={4} /></div>;
   if (rows.length === 0) return null; // nothing sent to repair/scrap yet → hide the panel entirely
@@ -103,7 +150,7 @@ export function RepairScrapPanel() {
       <div className="text-xs text-slate-500 mb-3">{t('repairScrap.subtitle', 'Assets sent for repair or scrapped at the end of a maintenance job — with photo proof and a link to the ticket.')}</div>
       <TableSearch value={search} onChange={setSearch} placeholder={t('repairScrap.searchPh', 'Search equipment, plant, ticket…')} />
       <RepairScrapTable variant="repair" title={t('repairScrap.repairItems', 'Repair items')} tone="amber" icon={<Wrench size={14} />} rows={repair}
-        canReturn={canReturn} onReturn={setReturnTicket}
+        canReturn={canReturn} onReturn={setReturnItem}
         onOpenTicket={id => navigate(`/dashboard/purchase/maint?ticket=${id}`)} onPhoto={setLightbox} />
       <div style={{ height: 20 }} />
       <RepairScrapTable variant="scrap" title={t('repairScrap.scrapItems', 'Scrap items')} tone="red" icon={<Trash2 size={14} />} rows={scrap}
@@ -118,8 +165,8 @@ export function RepairScrapPanel() {
         </>
       )}
       <ImageLightbox images={lightbox || []} open={!!lightbox} onClose={() => setLightbox(null)} />
-      <RepairReturnModal open={!!returnTicket} focusTicket={returnTicket} tickets={rows}
-        onClose={() => setReturnTicket(null)} onSaved={() => { load(); toast.success(t('repairReturn.saved', 'Repaired items added to inventory.')); }} />
+      <RepairReturnModal open={!!returnItem} focusPart={returnItem?.part ?? null} parts={partItems.map(i => i.part)} tickets={rows}
+        onClose={() => setReturnItem(null)} onSaved={() => { load(); toast.success(t('repairReturn.saved', 'Repaired items added to inventory.')); }} />
     </div>
   );
 }
@@ -129,25 +176,27 @@ function RepairScrapTable({ variant, title, tone, icon, rows, canReturn, onRetur
   title: string;
   tone: 'amber' | 'red';
   icon: React.ReactNode;
-  rows: TicketRow[];
+  rows: PartItem[];
   canReturn: boolean;
-  onReturn: (r: TicketRow) => void;
+  onReturn: (r: PartItem) => void;
   onOpenTicket: (id: string) => void;
   onPhoto: (imgs: LightboxImage[]) => void;
 }) {
   const { t } = useTranslation();
   const isRepair = variant === 'repair';
   const s = useSortable(rows, {
-    equipment: r => r.equipment,
-    plant: r => r.plants?.name,
-    ticket: r => r.id,
-    closed: r => (r.closed_at ? new Date(r.closed_at) : null),
-    status: r => r.status,
-    ...(isRepair ? { pending: (r: TicketRow) => repairPending(r) } : {}),
+    part: i => i.part.part_name,
+    equipment: i => i.ticket.equipment,
+    plant: i => i.ticket.plants?.name,
+    ticket: i => i.ticket.id,
+    closed: i => (i.ticket.closed_at ? new Date(i.ticket.closed_at) : null),
+    status: i => i.ticket.status,
+    qty: i => (isRepair ? Number(i.part.repair_qty) : Number(i.part.scrap_qty)),
+    ...(isRepair ? { pending: (i: PartItem) => partPending(i.part) } : {}),
   }, { key: 'closed', dir: 'desc' });
   const { pageRows, controls } = usePagination(s.sorted, { initialPageSize: 10, resetKey: `${rows.length}|${s.sort.key}|${s.sort.dir}` });
   const iconSq = tone === 'amber' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600';
-  const cols = isRepair ? 9 : 6;
+  const cols = isRepair ? 10 : 7;
   return (
     <div className="border border-slate-200 rounded-[12px] overflow-hidden">
       {/* Section header — icon square + Poppins title + count pill */}
@@ -162,10 +211,12 @@ function RepairScrapTable({ variant, title, tone, icon, rows, canReturn, onRetur
         <div className="overflow-x-auto scroll-x">
           <table className="dt2">
             <thead><tr>
+              <Th sortKey="part" s={s}>{t('repairScrap.colPart', 'Part')}</Th>
               <Th sortKey="equipment" s={s}>{t('repairScrap.colEquipment', 'Equipment')}</Th>
               <Th sortKey="plant" s={s}>{t('repairScrap.colPlant', 'Plant')}</Th>
               <Th sortKey="ticket" s={s}>{t('repairScrap.colTicket', 'Ticket #')}</Th>
               <Th sortKey="closed" s={s} firstDir="desc">{t('repairScrap.colClosed', 'Closed')}</Th>
+              {!isRepair && <Th sortKey="qty" s={s} firstDir="desc" className="num">{t('repairScrap.colScrapped', 'Scrapped')}</Th>}
               {isRepair && <Th sortKey="pending" s={s} firstDir="desc">{t('repairScrap.colReturn', 'Sent · Returned · Pending')}</Th>}
               {isRepair && <th>{t('repairScrap.colReturnStatus', 'Return')}</th>}
               <Th sortKey="status" s={s}>{t('repairScrap.colStatus', 'Status')}</Th>
@@ -173,18 +224,22 @@ function RepairScrapTable({ variant, title, tone, icon, rows, canReturn, onRetur
               {isRepair && <th></th>}
             </tr></thead>
             <tbody>
-              {pageRows.map(r => {
-                const rs = returnState(r);
-                const pending = repairPending(r);
+              {pageRows.map(item => {
+                const r = item.ticket;
+                const p = item.part;
+                const rs = partReturnState(p);
+                const pending = partPending(p);
                 return (
-                  <tr key={r.id} onClick={() => onOpenTicket(r.id)} style={{ cursor: 'pointer' }} title={t('repairScrap.openTicket', 'Open maintenance ticket')}>
-                    <td className="font-semibold">{r.equipment}</td>
+                  <tr key={p.id} onClick={() => onOpenTicket(r.id)} style={{ cursor: 'pointer' }} title={t('repairScrap.openTicket', 'Open maintenance ticket')}>
+                    <td className="font-semibold">{p.part_name}</td>
+                    <td className="text-slate-500">{r.equipment}</td>
                     <td className="text-slate-500">{r.plants?.name || '—'}</td>
                     <td><span className="num text-xs text-blue-600 font-semibold">#{r.id.slice(0, 8)}</span></td>
                     <td className="text-slate-500">{fmtDate(r.closed_at)}</td>
+                    {!isRepair && <td className="num font-bold" style={{ color: '#DC2626' }}>{Number(p.scrap_qty)}</td>}
                     {isRepair && (
                       <td className="num text-xs text-slate-600">
-                        {Number(r.repair_qty ?? 1)} · {Number(r.repair_returned_qty ?? 0)} · <strong style={{ color: pending > 0 ? '#D97706' : '#16A34A' }}>{pending}</strong>
+                        {Number(p.repair_qty)} · {Number(p.repair_returned_qty)} · <strong style={{ color: pending > 0 ? '#D97706' : '#16A34A' }}>{pending}</strong>
                       </td>
                     )}
                     {isRepair && (
@@ -196,14 +251,14 @@ function RepairScrapTable({ variant, title, tone, icon, rows, canReturn, onRetur
                     )}
                     <td><StatusPill tone={r.status === 'closed' ? 'green' : 'slate'} label={r.status} /></td>
                     <td>
-                      {r.defective_part_photo_url ? (
+                      {(p.photo_url || r.defective_part_photo_url) ? (
                         <button
                           type="button"
-                          onClick={e => { e.stopPropagation(); onPhoto([{ url: r.defective_part_photo_url as string, label: r.equipment }]); }}
+                          onClick={e => { e.stopPropagation(); onPhoto([{ url: (p.photo_url || r.defective_part_photo_url) as string, label: p.part_name }]); }}
                           title={t('repairScrap.viewPhoto', 'View photo')}
                           style={{ padding: 0, border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', background: 'none', lineHeight: 0 }}
                         >
-                          <img src={r.defective_part_photo_url} alt={`${r.equipment} photo`} style={{ width: 40, height: 40, objectFit: 'cover', display: 'block' }} loading="lazy" />
+                          <img src={(p.photo_url || r.defective_part_photo_url) as string} alt={`${p.part_name} photo`} style={{ width: 40, height: 40, objectFit: 'cover', display: 'block' }} loading="lazy" />
                         </button>
                       ) : <span className="text-slate-300">—</span>}
                     </td>
@@ -212,7 +267,7 @@ function RepairScrapTable({ variant, title, tone, icon, rows, canReturn, onRetur
                         {canReturn && pending > 0 && (
                           <button
                             type="button"
-                            onClick={e => { e.stopPropagation(); onReturn(r); }}
+                            onClick={e => { e.stopPropagation(); onReturn(item); }}
                             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: '#16A34A', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
                             <PackageCheck size={12} /> {t('repairScrap.returnToInventory', 'Return to Inventory')}
                           </button>

@@ -22,6 +22,11 @@ import { PMScheduleImport } from './PMScheduleImport';
 import { suggestAssets } from '../../../lib/far/assets';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import type { AppNotification } from '../../../contexts/NotificationsContext';
+import { callRpc } from '../../../lib/db';
+import {
+  validateSplit, isSplitValid, splitTotals, unaccounted, defaultReplacedQty, cleanPartName,
+  type DefectiveSplitLine,
+} from '../../../lib/store/defectiveSplit';
 import type { Database } from '../../../lib/database.types';
 import {
   FREQ_OPTIONS, FREQ_LABEL, STATUS_CFG, STAGE_LABELS, STAGE_LABEL_KEYS, INHOUSE_STAGE_LABEL_KEYS,
@@ -516,6 +521,8 @@ export function Maintenance() {
   // All store-request rows (items) for the selected ticket. A ticket can need
   // several parts at once; each row is one item with its own per-item lifecycle.
   const [storeReqs, setStoreReqs] = useState<StoreReqRow[]>([]);
+  const patchDefectiveLine = (i: number, patch: Partial<DefectiveSplitLine>) =>
+    setDefectiveLines(prev => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   const selectedStoreReq = storeReqs[0] ?? null; // kept for the read-only timeline detail
   // The item the user is currently acting on (store check / unit-head / purchase / handover).
   const [actingReqId, setActingReqId] = useState<string | null>(null);
@@ -570,6 +577,10 @@ export function Maintenance() {
   const [supplierName, setSupplierName] = useState(''); // external vendor → recorded as a Purchase Order
   const [purchaseQty, setPurchaseQty] = useState(''); // how many were actually bought (bulk ≥ shortfall)
   const [defectiveDecision, setDefectiveDecision] = useState<'repair' | 'scrap' | ''>('');
+  // Per-replaced-part Repair/Scrap split recorded when the ticket is closed.
+  // Seeded from the ticket's store-request lines (defaulting "replaced" to what
+  // the store actually handed over) and editable before submit.
+  const [defectiveLines, setDefectiveLines] = useState<DefectiveSplitLine[]>([]);
 
   // Upload
   const [completionBlob, setCompletionBlob] = useState<Blob | null>(null);
@@ -721,6 +732,35 @@ export function Maintenance() {
     if (!selectedTicket) { setStoreReqs([]); return; }
     loadStoreReqs(selectedTicket.id);
   }, [selectedTicket?.id, loadStoreReqs]);
+
+  // Seed the defective Repair/Scrap split from the ticket's part lines. Default
+  // "replaced" to what the store ACTUALLY handed over (you can only swap out as
+  // many old parts as you were given new ones) and start the whole quantity as
+  // Repair — the technician adjusts before submitting. An in-house job with no
+  // store request still gets one line so the ticket can be closed.
+  useEffect(() => {
+    if (!selectedTicket) { setDefectiveLines([]); return; }
+    const lines: DefectiveSplitLine[] = storeReqs.length
+      ? storeReqs.map(sr => {
+          const replaced = defaultReplacedQty(sr);
+          return {
+            storeRequestId: sr.id,
+            partName: sr.part_name,
+            replacedQty: replaced,
+            repairQty: replaced,
+            scrapQty: 0,
+            storeItemId: sr.store_item_id ?? null,
+          };
+        })
+      : [{
+          storeRequestId: null,
+          // No store request (in-house fix): fall back to the equipment name.
+          // NEVER the ticket title — that carries the "— Needs part" suffix.
+          partName: cleanPartName(selectedTicket.equipment) || cleanPartName(selectedTicket.title) || 'Defective part',
+          replacedQty: 1, repairQty: 1, scrapQty: 0, storeItemId: null,
+        }];
+    setDefectiveLines(lines);
+  }, [selectedTicket?.id, storeReqs]);
 
   // Load the ticket-plant's stock register → powers the part-name type-ahead.
   useEffect(() => {
@@ -1751,32 +1791,71 @@ export function Maintenance() {
   }
 
   async function submitDefectiveReturn() {
-    if (!selectedTicket || !defectiveBlob || !defectiveDecision) return;
+    if (!selectedTicket || !defectiveBlob) return;
+    // Client-side mirror of the DB rule: every removed part must be accounted
+    // for as either repair or scrap before the ticket can close.
+    const splitErrors = validateSplit(defectiveLines);
+    if (splitErrors.length) {
+      const first = splitErrors[0];
+      toast.error(first.code === 'unbalanced' && first.difference != null
+        ? t('maint.splitErrUnbalanced', {
+            defaultValue: '{{part}}: repair + scrap must equal the {{replaced}} replaced ({{n}} unaccounted for).',
+            part: first.partName ?? '', replaced: defectiveLines[first.index]?.replacedQty ?? 0,
+            n: Math.abs(first.difference),
+          })
+        : t('maint.splitErrInvalid', 'Check the repair / scrap quantities before closing.'));
+      return;
+    }
     setUploading(true);
     try {
       const result = await uploadMaintenancePhoto(defectiveBlob, {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
         photoType: 'defective', creator: activeProfile.name, onProgress: setUploadPct,
       });
-      await updateTicketStatus(selectedTicket.id, 'closed', {
-        defective_part_photo_url: result.secure_url,
-        defective_part_decision: defectiveDecision,
-        closed_at: new Date().toISOString(),
-        assigned_to: activeProfile.name,
+      // One transaction: writes the per-part split, mirrors the ticket totals
+      // and closes it. Replaces the old single-decision ticket update.
+      const totals = splitTotals(defectiveLines);
+      const { error } = await callRpc('record_defective_disposition', {
+        payload: {
+          ticket_id: selectedTicket.id,
+          plant_id: selectedTicket.plant_id,
+          photo_url: result.secure_url,
+          actor_name: activeProfile.name,
+          lines: defectiveLines.map(l => ({
+            store_request_id: l.storeRequestId,
+            part_name: l.partName.trim(),
+            replaced_qty: Number(l.replacedQty),
+            repair_qty: Number(l.repairQty),
+            scrap_qty: Number(l.scrapQty),
+            store_item_id: l.storeItemId ?? null,
+          })),
+        },
       });
+      if (error) throw new Error(friendlyDispositionError(error.message || ''));
+      const summary = `${totals.repair} ${t('maint.toRepair', 'to repair')} · ${totals.scrap} ${t('maint.scrapped', 'scrapped')}`;
       notify({
         target_roles: ['admin', 'unit_head', 'store_manager_maint'],
         title: `Ticket closed: ${selectedTicket.equipment}`,
-        body: `Defective part → ${defectiveDecision} · By ${activeProfile.name}`,
+        body: `Defective parts → ${summary} · By ${activeProfile.name}`,
         type: 'info', route: maintRoute(selectedTicket?.id),
         actor_name: activeProfile.name, actor_role: role, read_by: [],
         plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
       });
-      await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Defective part → ${defectiveDecision} · closed by ${activeProfile.name}.`);
-      setSelectedTicket(null); setDefectiveBlob(null); setDefectiveDecision(''); setUploadPct(0);
+      await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Defective parts → ${summary} · closed by ${activeProfile.name}.`);
+      setSelectedTicket(null); setDefectiveBlob(null); setDefectiveDecision(''); setDefectiveLines([]); setUploadPct(0);
       await loadData();
     } catch (err) { toast.error(t('maint.uploadFailedMsg', { defaultValue: 'Upload failed: {{message}}', message: err instanceof Error ? err.message : String(err) })); }
     finally { setUploading(false); }
+  }
+
+  /** Map record_defective_disposition failures to something a technician can act on. */
+  function friendlyDispositionError(raw: string): string {
+    if (/split_mismatch/i.test(raw)) return t('maint.splitErrInvalid', 'Check the repair / scrap quantities before closing.');
+    if (/disposition_locked/i.test(raw)) return t('maint.splitErrLocked', 'Repaired units have already been returned against this ticket, so the split can no longer be changed.');
+    if (/PGRST202|Could not find the function|schema cache/i.test(raw)) return t('maint.splitErrMigration', 'The defective-parts service is not installed yet — run migration 56_defective_part_split.sql in Supabase, then retry.');
+    if (/forbidden: plant out of scope/i.test(raw)) return t('maint.splitErrScope', 'This plant is outside your data scope.');
+    if (/not_authenticated/i.test(raw)) return t('maint.splitErrAuth', 'Your session has expired — sign in again.');
+    return raw;
   }
 
   const EMPTY_SCHEDULE_FORM = { title: '', equipment: '', plant: '', frequency: 'weekly', description: '', firstDue: today, assignedTo: '', farAssetId: '', equipmentMark: '', until: '', unmatchedReason: '' };
@@ -2125,6 +2204,8 @@ export function Maintenance() {
     const cancelBtn: React.CSSProperties = { flex: 1, padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 12.5, fontFamily: 'inherit' };
     const primaryBtn = (bg: string): React.CSSProperties => ({ padding: '9px 12px', borderRadius: 10, border: 'none', background: bg, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit' });
     const awaitTxt: React.CSSProperties = { fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '10px 0', marginTop: 6 };
+    // Compact numeric input for the defective Repair/Scrap split.
+    const numInput: React.CSSProperties = { width: 68, boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 8, padding: '6px 8px', fontSize: 13, fontFamily: 'inherit', outline: 'none' };
 
     const STAGE_BADGE: Record<ItemStage, { label: string; bg: string; color: string }> = {
       store: { label: t('maint.badgeStoreCheck', 'Store check'), bg: '#FFF7ED', color: '#EA580C' },
@@ -2378,13 +2459,55 @@ export function Maintenance() {
           <div style={{ border: '1px solid #FED7AA', borderRadius: 14, padding: 14, background: '#FFF7ED' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#EA580C', textTransform: 'uppercase', marginBottom: 8 }}>{t('maint.returnDefectiveClose', 'Return defective part & close')}</div>
             <PhotoUploader onBlobReady={setDefectiveBlob} label={t('maint.photoOfDefectivePart', 'Photo of defective part')} hint={t('maint.photoOfDefectivePartHint', 'Clear photo of the old/broken part')} />
-            <div style={{ display: 'flex', gap: 8, margin: '10px 0' }}>
-              {(['repair', 'scrap'] as const).map(d => (
-                <button key={d} onClick={() => setDefectiveDecision(d)} style={{ flex: 1, padding: '10px', borderRadius: 10, border: `2px solid ${defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: defectiveDecision === d ? (d === 'repair' ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', color: defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>{d === 'repair' ? t('maint.defectiveRepair', '🔧 Repair') : t('maint.defectiveScrap', '🗑 Scrap')}</button>
-              ))}
+
+            {/* Per-part disposition. A job that replaced 5 parts must account for
+                all 5 — every removed unit is either repaired or scrapped, so the
+                Repair page and inventory reflect the real quantities. */}
+            <div style={{ margin: '10px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#9A3412' }}>
+                {t('maint.splitHeading', 'How many of each removed part go to Repair vs Scrap?')}
+              </div>
+              {defectiveLines.map((ln, i) => {
+                const left = unaccounted(ln);
+                return (
+                  <div key={ln.storeRequestId ?? i} style={{ border: `1px solid ${left === 0 ? '#BBF7D0' : '#FED7AA'}`, background: '#fff', borderRadius: 10, padding: 9 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>{ln.partName}</div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                      <label style={{ fontSize: 10.5, color: '#64748B', fontWeight: 600 }}>
+                        {t('maint.splitReplaced', 'Replaced')}
+                        <input type="number" min="1" step="any" value={ln.replacedQty}
+                          onChange={e => patchDefectiveLine(i, { replacedQty: Number(e.target.value) })}
+                          style={{ ...numInput, display: 'block', marginTop: 3 }} />
+                      </label>
+                      <span style={{ color: '#CBD5E1', paddingBottom: 8 }}>=</span>
+                      <label style={{ fontSize: 10.5, color: '#16A34A', fontWeight: 700 }}>
+                        🔧 {t('maint.splitRepair', 'Repair')}
+                        <input type="number" min="0" step="any" value={ln.repairQty}
+                          onChange={e => patchDefectiveLine(i, { repairQty: Number(e.target.value) })}
+                          style={{ ...numInput, display: 'block', marginTop: 3, borderColor: '#BBF7D0' }} />
+                      </label>
+                      <span style={{ color: '#CBD5E1', paddingBottom: 8 }}>+</span>
+                      <label style={{ fontSize: 10.5, color: '#DC2626', fontWeight: 700 }}>
+                        🗑 {t('maint.splitScrap', 'Scrap')}
+                        <input type="number" min="0" step="any" value={ln.scrapQty}
+                          onChange={e => patchDefectiveLine(i, { scrapQty: Number(e.target.value) })}
+                          style={{ ...numInput, display: 'block', marginTop: 3, borderColor: '#FECACA' }} />
+                      </label>
+                      <span style={{ fontSize: 11, fontWeight: 700, paddingBottom: 8, color: left === 0 ? '#16A34A' : '#B45309' }}>
+                        {left === 0
+                          ? t('maint.splitBalanced', '✓ all accounted for')
+                          : left > 0
+                            ? t('maint.splitShort', { defaultValue: '{{n}} unaccounted for', n: left })
+                            : t('maint.splitOver', { defaultValue: '{{n}} too many', n: -left })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+
             {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
-            <button onClick={submitDefectiveReturn} disabled={!defectiveBlob || !defectiveDecision || uploading} style={{ ...primaryBtn('#F47651'), width: '100%', opacity: (!defectiveBlob || !defectiveDecision || uploading) ? 0.5 : 1 }}>{uploading ? t('maint.uploadingEllipsis', 'Uploading…') : t('maint.submitCloseTicket', 'Submit & close ticket')}</button>
+            <button onClick={submitDefectiveReturn} disabled={!defectiveBlob || !isSplitValid(defectiveLines) || uploading} style={{ ...primaryBtn('#F47651'), width: '100%', opacity: (!defectiveBlob || !isSplitValid(defectiveLines) || uploading) ? 0.5 : 1 }}>{uploading ? t('maint.uploadingEllipsis', 'Uploading…') : t('maint.submitCloseTicket', 'Submit & close ticket')}</button>
           </div>
         ) : <div style={awaitTxt}>{t('maint.awaitingDefectiveReturn', 'Awaiting technician defective-part return…')}</div>)}
       </div>

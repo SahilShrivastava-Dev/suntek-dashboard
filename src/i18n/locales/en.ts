@@ -493,6 +493,21 @@ const en = {
     qc: { pending: 'PENDING', awaiting: 'AWAITING' },
   },
   maint: {
+    scrapped: "scrapped",
+    toRepair: "to repair",
+    splitHeading: "How many of each removed part go to Repair vs Scrap?",
+    splitReplaced: "Replaced",
+    splitRepair: "Repair",
+    splitScrap: "Scrap",
+    splitBalanced: "✓ all accounted for",
+    splitShort: "{{n}} unaccounted for",
+    splitOver: "{{n}} too many",
+    splitErrUnbalanced: "{{part}}: repair + scrap must equal the {{replaced}} replaced ({{n}} unaccounted for).",
+    splitErrInvalid: "Check the repair / scrap quantities before closing.",
+    splitErrLocked: "Repaired units have already been returned against this ticket, so the split can no longer be changed.",
+    splitErrMigration: "The defective-parts service is not installed yet — run migration 56_defective_part_split.sql in Supabase, then retry.",
+    splitErrScope: "This plant is outside your data scope.",
+    splitErrAuth: "Your session has expired — sign in again.",
     addAnotherItem: "+ Add another item",
     addSchedulePanelTitle: "Add maintenance schedule",
     addedToStoreStock: "{{n}} added to store stock",
@@ -2956,6 +2971,8 @@ const en = {
 
   // ── Repair & Scrap panel ─────────────────────────────────────────────────────
   repairScrap: {
+    colPart: "Part",
+    colScrapped: "Scrapped",
     title: "Repair & scrap tracking",
     subtitle: "Assets sent for repair or scrapped at the end of a maintenance job — with photo proof and a link to the ticket.",
     searchPh: "Search equipment, plant, ticket…",
@@ -2981,6 +2998,9 @@ const en = {
 
   // ── Repair return modal + history ────────────────────────────────────────────
   repairReturn: {
+    errQtyPart: "{{part}}: quantity must be greater than 0.",
+    errPendingPart: "{{part}}: only {{pending}} unit(s) still pending — cannot return {{q}}.",
+    errItemPart: "{{part}}: pick the stock item these units belong to.",
     title: "Return repaired items to inventory",
     subtitle: "one receipt can settle several repair batches (single invoice)",
     batches: "Open repair batches at this plant",

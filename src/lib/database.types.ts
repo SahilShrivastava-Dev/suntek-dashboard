@@ -391,12 +391,36 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['repair_return_receipts']['Insert']>;
       };
 
+      // One replaced part line, split into repair vs scrap quantities
+      // (56_defective_part_split.sql). Source of truth for repair returns.
+      maintenance_defective_parts: {
+        Row: {
+          id: string;
+          ticket_id: string;
+          store_request_id: string | null;
+          plant_id: string | null;
+          part_name: string;
+          replaced_qty: number;
+          repair_qty: number;
+          scrap_qty: number;
+          repair_returned_qty: number;
+          store_item_id: string | null;
+          photo_url: string | null;
+          actor: string | null;
+          actor_name: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_defective_parts']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['maintenance_defective_parts']['Insert']>;
+      };
+
       repair_return_allocations: {
         Row: {
           id: string;
           receipt_id: string;
           plant_id: string;
           ticket_id: string;
+          defective_part_id: string | null;
           store_item_id: string | null;
           item_name: string;
           qty: number;

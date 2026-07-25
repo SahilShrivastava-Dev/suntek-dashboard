@@ -497,6 +497,21 @@ const hi: Translations = {
     qc: { pending: 'पेंडिंग', awaiting: 'अवेटिंग' },
   },
   maint: {
+    scrapped: "स्क्रैप्ड",
+    toRepair: "टु रिपेयर",
+    splitHeading: "हाउ मेनी ऑफ ईच रिमूव्ड पार्ट गो टु रिपेयर वर्सेस स्क्रैप?",
+    splitReplaced: "रिप्लेस्ड",
+    splitRepair: "रिपेयर",
+    splitScrap: "स्क्रैप",
+    splitBalanced: "✓ ऑल अकाउंटेड फॉर",
+    splitShort: "{{n}} अनअकाउंटेड फॉर",
+    splitOver: "{{n}} टू मेनी",
+    splitErrUnbalanced: "{{part}}: रिपेयर + स्क्रैप मस्ट इक्वल द {{replaced}} रिप्लेस्ड ({{n}} अनअकाउंटेड फॉर)।",
+    splitErrInvalid: "चेक द रिपेयर / स्क्रैप क्वांटिटीज़ बिफोर क्लोज़िंग।",
+    splitErrLocked: "रिपेयर्ड यूनिट्स हैव ऑलरेडी बीन रिटर्न्ड अगेंस्ट दिस टिकट, सो द स्प्लिट कैन नो लॉन्गर बी चेंज्ड।",
+    splitErrMigration: "द डिफेक्टिव-पार्ट्स सर्विस इज़ नॉट इंस्टॉल्ड यट — रन माइग्रेशन 56_defective_part_split.sql इन Supabase, देन रीट्राय।",
+    splitErrScope: "दिस प्लांट इज़ आउटसाइड योर डेटा स्कोप।",
+    splitErrAuth: "योर सेशन हैज़ एक्सपायर्ड — साइन इन अगेन।",
     addAnotherItem: "+ ऐड अनदर आइटम",
     addSchedulePanelTitle: "ऐड मेंटेनेंस शेड्यूल",
     addedToStoreStock: "{{n}} ऐडेड टु स्टोर स्टॉक",
@@ -2959,6 +2974,8 @@ const hi: Translations = {
 
   // ── Repair & Scrap panel ─────────────────────────────────────────────────────
   repairScrap: {
+    colPart: "पार्ट",
+    colScrapped: "स्क्रैप्ड",
     title: "रिपेयर एंड स्क्रैप ट्रैकिंग",
     subtitle: "एसेट्स सेंट फॉर रिपेयर ऑर स्क्रैप्ड एट द एंड ऑफ अ मेंटेनेंस जॉब — विद फोटो प्रूफ एंड अ लिंक टु द टिकट।",
     searchPh: "सर्च इक्विपमेंट, प्लांट, टिकट…",
@@ -2984,6 +3001,9 @@ const hi: Translations = {
 
   // ── Repair return modal + history ────────────────────────────────────────────
   repairReturn: {
+    errQtyPart: "{{part}}: क्वांटिटी मस्ट बी ग्रेटर दैन 0।",
+    errPendingPart: "{{part}}: ओनली {{pending}} यूनिट(स) स्टिल पेंडिंग — कैननॉट रिटर्न {{q}}।",
+    errItemPart: "{{part}}: पिक द स्टॉक आइटम दीज़ यूनिट्स बिलॉन्ग टु।",
     title: "रिटर्न रिपेयर्ड आइटम्स टु इन्वेंटरी",
     subtitle: "वन रिसीट कैन सेटल सेवरल रिपेयर बैचेज़ (सिंगल इनवॉइस)",
     batches: "ओपन रिपेयर बैचेज़ एट दिस प्लांट",

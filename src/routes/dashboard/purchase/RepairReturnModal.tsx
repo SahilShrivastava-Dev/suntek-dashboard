@@ -5,13 +5,19 @@ import { callRpc } from '../../../lib/db';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { matchCandidates, type StockLite } from '../../../lib/store/purchaseParse';
-import { repairPending } from '../../../lib/store/repairReturn';
 import type { Database } from '../../../lib/database.types';
 
 type TicketRow = Database['public']['Tables']['maintenance_tickets']['Row'] & { plants?: { name: string | null } | null };
+type DefectivePartRow = Database['public']['Tables']['maintenance_defective_parts']['Row'];
+
+/** Units of this part line still awaiting return from the vendor. */
+function partPending(p: DefectivePartRow): number {
+  return Math.max(0, Number(p.repair_qty) - Number(p.repair_returned_qty));
+}
 
 interface AllocDraft {
-  ticket: TicketRow;
+  part: DefectivePartRow;
+  ticket: TicketRow | undefined;
   include: boolean;
   qty: string;
   itemName: string;
@@ -39,11 +45,13 @@ function localToday(): string {
  * apply_repair_return RPC; repaired units land in the register's SEPARATE
  * repaired-stock bucket. Scrap tickets are rejected server-side.
  */
-export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved }: {
+export function RepairReturnModal({ open, focusPart, parts, tickets, onClose, onSaved }: {
   open: boolean;
-  /** The row whose button opened the modal — preselected. */
-  focusTicket: TicketRow | null;
-  /** All repair-decision tickets (panel data); the modal filters to the focus plant + pending>0. */
+  /** The part line whose button opened the modal — preselected. */
+  focusPart: DefectivePartRow | null;
+  /** Every replaced part line; the modal filters to the focus plant + pending>0. */
+  parts: DefectivePartRow[];
+  /** Tickets, for showing each part's equipment + ticket reference. */
   tickets: TicketRow[];
   onClose: () => void;
   onSaved: () => void;
@@ -51,8 +59,9 @@ export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved
   const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
 
-  const plantId = focusTicket?.plant_id ?? null;
-  const plantName = focusTicket?.plants?.name ?? '';
+  const ticketById = useMemo(() => new Map(tickets.map(tk => [tk.id, tk])), [tickets]);
+  const plantId = focusPart?.plant_id ?? null;
+  const plantName = ticketById.get(focusPart?.ticket_id ?? '')?.plants?.name ?? '';
 
   const [allocs, setAllocs] = useState<AllocDraft[]>([]);
   const [stock, setStock] = useState<(StockLite & { plant_id: string | null })[]>([]);
@@ -69,18 +78,21 @@ export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved
   const [receiptId, setReceiptId] = useState<string>(() => crypto.randomUUID());
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // (Re)build the allocation drafts each time the modal opens on a ticket.
+  // (Re)build the allocation drafts each time the modal opens on a part line.
   useEffect(() => {
-    if (!open || !focusTicket) return;
-    const eligible = tickets.filter(tk =>
-      tk.plant_id === focusTicket.plant_id &&
-      tk.defective_part_decision === 'repair' &&
-      repairPending(tk) > 0);
-    setAllocs(eligible.map(tk => ({
-      ticket: tk,
-      include: tk.id === focusTicket.id,
-      qty: String(repairPending(tk)),
-      itemName: (tk.title || tk.equipment || '').trim(),
+    if (!open || !focusPart) return;
+    // Every part line at this plant that still has repaired units outstanding —
+    // so several batches can be settled on one vendor invoice.
+    const eligible = parts.filter(p =>
+      p.plant_id === focusPart.plant_id &&
+      Number(p.repair_qty) > 0 &&
+      partPending(p) > 0);
+    setAllocs(eligible.map(p => ({
+      part: p,
+      ticket: ticketById.get(p.ticket_id),
+      include: p.id === focusPart.id,
+      qty: String(partPending(p)),
+      itemName: (p.part_name || '').trim(),
       choice: 'new',
     })));
     setVendor(''); setInvoiceNo(''); setReturnDate(localToday());
@@ -91,17 +103,17 @@ export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved
     (async () => {
       const { data: si } = await supabase.from('store_items')
         .select('id, item_name, on_hand, unit, plant_id')
-        .eq('plant_id', focusTicket.plant_id as string)
+        .eq('plant_id', focusPart.plant_id as string)
         .returns<(StockLite & { plant_id: string | null })[]>();
       const rows = si || [];
       setStock(rows);
-      // Auto-pick the best register match per ticket (user can override).
+      // Auto-pick the best register match per part (user can override).
       setAllocs(prev => prev.map(a => {
         const c = matchCandidates(a.itemName, rows);
         return { ...a, choice: c[0] && c[0].score >= 0.6 ? c[0].id : 'new' };
       }));
     })();
-  }, [open, focusTicket?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, focusPart?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Soft duplicate-invoice warning (same plant + invoice no) — never blocks.
   useEffect(() => {
@@ -126,13 +138,13 @@ export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved
     included.length > 0 && comment.trim() !== '' &&
     included.every(a => {
       const q = Number(a.qty);
-      return Number.isFinite(q) && q > 0 && q <= repairPending(a.ticket) && a.itemName.trim() !== '';
+      return Number.isFinite(q) && q > 0 && q <= partPending(a.part) && a.itemName.trim() !== '';
     }), [included, comment]);
 
-  if (!open || !focusTicket) return null;
+  if (!open || !focusPart) return null;
 
   function patchAlloc(id: string, patch: Partial<AllocDraft>) {
-    setAllocs(prev => prev.map(a => a.ticket.id === id ? { ...a, ...patch } : a));
+    setAllocs(prev => prev.map(a => a.part.id === id ? { ...a, ...patch } : a));
   }
 
   function friendly(raw: string): string {
@@ -151,9 +163,9 @@ export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved
     if (!included.length) { setErr(t('repairReturn.errNone', 'Select at least one repair batch to return.')); return; }
     for (const a of included) {
       const q = Number(a.qty);
-      if (!Number.isFinite(q) || q <= 0) { setErr(t('repairReturn.errQty', { defaultValue: 'Ticket #{{id}}: quantity must be greater than 0.', id: a.ticket.id.slice(0, 8) })); return; }
-      if (q > repairPending(a.ticket)) { setErr(t('repairReturn.errPending', { defaultValue: 'Ticket #{{id}}: only {{pending}} unit(s) still pending — cannot return {{q}}.', id: a.ticket.id.slice(0, 8), pending: repairPending(a.ticket), q })); return; }
-      if (!a.itemName.trim()) { setErr(t('repairReturn.errItem', { defaultValue: 'Ticket #{{id}}: pick the stock item these units belong to.', id: a.ticket.id.slice(0, 8) })); return; }
+      if (!Number.isFinite(q) || q <= 0) { setErr(t('repairReturn.errQtyPart', { defaultValue: '{{part}}: quantity must be greater than 0.', part: a.part.part_name })); return; }
+      if (q > partPending(a.part)) { setErr(t('repairReturn.errPendingPart', { defaultValue: '{{part}}: only {{pending}} unit(s) still pending — cannot return {{q}}.', part: a.part.part_name, pending: partPending(a.part), q })); return; }
+      if (!a.itemName.trim()) { setErr(t('repairReturn.errItemPart', { defaultValue: '{{part}}: pick the stock item these units belong to.', part: a.part.part_name })); return; }
     }
     const costN = repairCost.trim() === '' ? null : Number(repairCost);
     if (costN != null && (!Number.isFinite(costN) || costN < 0)) { setErr(t('repairReturn.errCost', 'Repair cost must be a number ≥ 0.')); return; }
@@ -178,8 +190,14 @@ export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved
           repair_cost: costN,
           condition_note: conditionNote.trim() || null,
           actor_name: activeProfile.name,
+          // Send BOTH keys so the payload works against either RPC version:
+          // migration 55 settles by ticket_id, 56 by defective_part_id and
+          // ignores the other. Without this the modal breaks on any database
+          // where 56 hasn't been run yet. `legacy:` ids are the synthetic rows
+          // the panel derives when the parts table is absent — never real uuids.
           allocations: included.map(a => ({
-            ticket_id: a.ticket.id,
+            ticket_id: a.part.ticket_id,
+            defective_part_id: a.part.id.startsWith('legacy:') ? null : a.part.id,
             qty: Number(a.qty),
             item_name: a.itemName.trim(),
             store_item_id: a.choice !== 'new' ? a.choice : null,
@@ -211,26 +229,27 @@ export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved
         <div style={{ ...label, marginTop: 10 }}>{t('repairReturn.batches', 'Open repair batches at this plant')}</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 6 }}>
           {allocs.map(a => {
-            const pending = repairPending(a.ticket);
+            const pending = partPending(a.part);
             const cands = matchCandidates(a.itemName, stock);
             const chosen = a.choice !== 'new' ? stock.find(s => s.id === a.choice) : null;
             const qtyN = Number(a.qty) || 0;
             const overQty = a.include && qtyN > pending;
             return (
-              <div key={a.ticket.id} style={{ border: `1px solid ${a.include ? '#BBF7D0' : '#E2E8F0'}`, background: a.include ? '#F0FDF4' : '#fff', borderRadius: 10, padding: 10 }}>
+              <div key={a.part.id} style={{ border: `1px solid ${a.include ? '#BBF7D0' : '#E2E8F0'}`, background: a.include ? '#F0FDF4' : '#fff', borderRadius: 10, padding: 10 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer', flex: 1, minWidth: 220 }}>
-                    <input type="checkbox" checked={a.include} onChange={e => patchAlloc(a.ticket.id, { include: e.target.checked })} />
+                    <input type="checkbox" checked={a.include} onChange={e => patchAlloc(a.part.id, { include: e.target.checked })} />
                     <span style={{ fontSize: 12.5 }}>
-                      <strong style={{ color: '#334155' }}>{a.ticket.equipment}</strong>
-                      <span style={{ color: '#2563EB', fontWeight: 600 }}> #{a.ticket.id.slice(0, 8)}</span>
-                      <span style={{ color: '#64748B' }}> · {t('repairReturn.sent', 'sent')} {Number(a.ticket.repair_qty ?? 1)} · {t('repairReturn.returned', 'returned')} {Number(a.ticket.repair_returned_qty ?? 0)} · <strong>{pending} {t('repairReturn.pending', 'pending')}</strong></span>
+                      <strong style={{ color: '#334155' }}>{a.part.part_name}</strong>
+                      <span style={{ color: '#64748B' }}> · {a.ticket?.equipment ?? ''}</span>
+                      <span style={{ color: '#2563EB', fontWeight: 600 }}> #{a.part.ticket_id.slice(0, 8)}</span>
+                      <span style={{ color: '#64748B' }}> · {t('repairReturn.sent', 'sent')} {Number(a.part.repair_qty)} · {t('repairReturn.returned', 'returned')} {Number(a.part.repair_returned_qty)} · <strong>{pending} {t('repairReturn.pending', 'pending')}</strong></span>
                     </span>
                   </label>
                   {a.include && (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                       {t('repairReturn.returnNow', 'return now')}
-                      <input type="number" min="0.01" step="any" value={a.qty} onChange={e => patchAlloc(a.ticket.id, { qty: e.target.value })}
+                      <input type="number" min="0.01" step="any" value={a.qty} onChange={e => patchAlloc(a.part.id, { qty: e.target.value })}
                         style={{ ...inputStyle, width: 72, ...(overQty ? { borderColor: '#DC2626' } : {}) }} />
                     </span>
                   )}
@@ -242,17 +261,17 @@ export function RepairReturnModal({ open, focusTicket, tickets, onClose, onSaved
                   <div style={{ marginTop: 8 }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <span style={{ fontSize: 10.5, color: '#94A3B8', textTransform: 'uppercase', fontWeight: 600, whiteSpace: 'nowrap' }}>{t('repairReturn.stockItem', 'Stock item')}</span>
-                      <input value={a.itemName} onChange={e => patchAlloc(a.ticket.id, { itemName: e.target.value, choice: (() => { const c = matchCandidates(e.target.value, stock); return c[0] && c[0].score >= 0.6 ? c[0].id : 'new'; })() })}
+                      <input value={a.itemName} onChange={e => patchAlloc(a.part.id, { itemName: e.target.value, choice: (() => { const c = matchCandidates(e.target.value, stock); return c[0] && c[0].score >= 0.6 ? c[0].id : 'new'; })() })}
                         style={{ ...inputStyle, flex: 1 }} placeholder={t('repairReturn.itemPh', 'item name in the register')} />
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
                       {cands.map(c => (
-                        <button key={c.id} onClick={() => patchAlloc(a.ticket.id, { choice: c.id })}
+                        <button key={c.id} onClick={() => patchAlloc(a.part.id, { choice: c.id })}
                           style={{ ...pill, borderColor: a.choice === c.id ? '#16A34A' : '#E2E8F0', background: a.choice === c.id ? '#F0FDF4' : '#fff', color: a.choice === c.id ? '#16A34A' : '#475569' }}>
                           {c.item_name} · {c.on_hand}
                         </button>
                       ))}
-                      <button onClick={() => patchAlloc(a.ticket.id, { choice: 'new' })}
+                      <button onClick={() => patchAlloc(a.part.id, { choice: 'new' })}
                         style={{ ...pill, borderColor: a.choice === 'new' ? '#7C3AED' : '#E2E8F0', background: a.choice === 'new' ? '#FAF5FF' : '#fff', color: a.choice === 'new' ? '#7C3AED' : '#475569' }}>
                         ＋ {t('repairReturn.createNew', 'Create new')}
                       </button>

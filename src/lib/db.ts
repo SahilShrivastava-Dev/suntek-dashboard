@@ -44,7 +44,8 @@ export function upsertRows<T extends TableName>(
  * lives here and callers stay typed on the result.
  */
 export async function callRpc<T = unknown>(
-  fn: 'apply_stock_purchase' | 'resolve_stock_anomaly' | 'apply_repair_return' | 'reverse_repair_return',
+  fn: 'apply_stock_purchase' | 'resolve_stock_anomaly' | 'apply_repair_return' | 'reverse_repair_return'
+    | 'record_defective_disposition',
   args: Record<string, unknown>,
 ): Promise<{ data: T | null; error: { message: string } | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

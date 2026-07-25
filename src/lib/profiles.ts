@@ -64,6 +64,10 @@ export const CAPABILITIES: { key: string; label: string; description: string }[]
   { key: 'view_asset_profile', label: 'View asset QR profile', description: 'Open an asset’s digital profile (details + maintenance history) by scanning its QR code' },
   { key: 'generate_asset_qr', label: 'Generate & print asset QR', description: 'Generate, regenerate, download and print QR codes for fixed assets' },
   { key: 'view_asset_analytics', label: 'View asset analytics', description: 'See repair statistics and trend charts on an asset profile' },
+  { key: 'add_stock_purchase', label: 'Add purchases to stock', description: 'Record a purchase (vendor, amount, invoice) and add the bought items to the stock register' },
+  { key: 'resolve_stock_anomaly', label: 'Resolve stock anomalies', description: 'Review Stock Register anomalies and mark them confirmed / resolved / false positive (with a mandatory comment)' },
+  { key: 'return_repairs', label: 'Return repaired items', description: 'Record repaired parts coming back from a vendor and add them to repaired stock' },
+  { key: 'reverse_repair_return', label: 'Reverse repair returns', description: 'Reverse a recorded repair return with an offsetting stock movement (history is preserved)' },
 ];
 
 /**

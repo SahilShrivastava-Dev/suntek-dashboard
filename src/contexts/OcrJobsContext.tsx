@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { resizeImageToDataUrl } from '../lib/nvidiaOcr';
 
 /**
@@ -43,6 +44,7 @@ const OcrJobsContext = createContext<OcrJobsContextValue | null>(null);
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function OcrJobsProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   const [jobs, setJobs] = useState<Record<string, OcrJob>>({});
   const imagesRef = useRef<Record<string, string | null>>({}); // resized dataURL per channel
   const idsRef = useRef<Record<string, number>>({});           // monotonic id per channel
@@ -61,7 +63,7 @@ export function OcrJobsProvider({ children }: { children: React.ReactNode }) {
   async function select(key: string, file: File, resizeWidth = 1600) {
     const valid = file.type.startsWith('image/') || /\.(jpe?g|png|heic|webp)$/i.test(file.name);
     if (!valid) {
-      patch(key, { ...BLANK, status: 'error', error: 'Please upload a JPG, PNG, or HEIC image.' });
+      patch(key, { ...BLANK, status: 'error', error: t('ocr.errInvalidImage', 'Please upload a JPG, PNG, or HEIC image.') });
       return;
     }
     const myId = bump(key);
@@ -76,7 +78,7 @@ export function OcrJobsProvider({ children }: { children: React.ReactNode }) {
       imagesRef.current[key] = dataUrl;
     } catch (e) {
       if (idsRef.current[key] !== myId) return;
-      patch(key, { status: 'error', error: `Image processing failed: ${errMsg(e)}` });
+      patch(key, { status: 'error', error: t('ocr.errImageProcessing', { defaultValue: 'Image processing failed: {{msg}}', msg: errMsg(e) }) });
     }
   }
 

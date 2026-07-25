@@ -72,11 +72,11 @@ export function MarineInsurance() {
     if (data) setLedger(prev => [data as LedgerRow, ...prev]);
     await notifyMentions(form.notes, {
       entityType: 'marine_insurance', entityId: (data as LedgerRow | undefined)?.id,
-      entityLabel: 'Marine insurance top-up', route: '/dashboard/purchase/marine',
+      entityLabel: t('marine.entityLabel', 'Marine insurance top-up'), route: '/dashboard/purchase/marine',
     });
     const hits = await screenBlacklist(
-      [{ value: form.reference, label: 'Reference' }, { value: form.notes, label: 'Notes' }],
-      { workflow: 'Marine Insurance', source: 'entry', entityLabel: 'Marine insurance top-up' },
+      [{ value: form.reference, label: t('marine.colReference') }, { value: form.notes, label: t('marine.notesLabel') }],
+      { workflow: 'Marine Insurance', source: 'entry', entityLabel: t('marine.entityLabel', 'Marine insurance top-up') },
     );
     if (hits.length) {
       const h = hits[0];
@@ -201,7 +201,7 @@ export function MarineInsurance() {
       {/* Top-up panel */}
       <SlidePanel open={panel === 'topup'} onClose={handleClose} title={t('marine.topUpPanelTitle')} subtitle={t('marine.topUpPanelSubtitle')}>
         <PanelField label={t('marine.topUpAmountLabel')}>
-          <PanelInput type="number" step="0.01" placeholder="e.g. 0.50" value={form.amount} onChange={e => set('amount', e.target.value)} />
+          <PanelInput type="number" step="0.01" placeholder={t('marine.topUpAmountPlaceholder', 'e.g. 0.50')} value={form.amount} onChange={e => set('amount', e.target.value)} />
         </PanelField>
 
         {newBalance && (
@@ -212,14 +212,14 @@ export function MarineInsurance() {
 
         <PanelRow>
           <PanelField label={t('marine.referenceLabel')}>
-            <PanelInput placeholder="e.g. POL-2026-4421" value={form.reference} onChange={e => set('reference', e.target.value)} />
+            <PanelInput placeholder={t('marine.referencePlaceholder', 'e.g. POL-2026-4421')} value={form.reference} onChange={e => set('reference', e.target.value)} />
           </PanelField>
           <PanelField label={t('marine.paymentModeLabel')}>
             <PanelSelect value={form.mode} onChange={e => set('mode', e.target.value)}>
-              <option>NEFT</option>
-              <option>RTGS</option>
-              <option>Cheque</option>
-              <option>DD</option>
+              <option value="NEFT">NEFT</option>
+              <option value="RTGS">RTGS</option>
+              <option value="Cheque">{t('marine.modeCheque', 'Cheque')}</option>
+              <option value="DD">DD</option>
             </PanelSelect>
           </PanelField>
         </PanelRow>

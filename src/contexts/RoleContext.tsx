@@ -76,6 +76,14 @@ interface RoleContextValue {
   isViewingAs: boolean;
   /** True only when the current user may switch/preview roles (admin or dev bypass). */
   canSwitch: boolean;
+  /**
+   * DEV-ONLY: there is no Supabase session, so the UI is presenting the demo
+   * admin profile. The database still sees an ANONYMOUS caller, so every
+   * RLS-scoped table (tickets, activity, assets, stock…) returns zero rows —
+   * the app looks empty even though the data is there. Surfaced so the shell
+   * can say so out loud instead of looking silently broken.
+   */
+  devBypass: boolean;
   /** Does the active profile hold a privileged capability (admin/'*' = all)?
    * e.g. can('manage_users'), can('manage_roles'). */
   can: (capability: string) => boolean;
@@ -386,6 +394,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         refreshRoles,
         switchProfile,
         canSwitch,
+        devBypass,
         can: (capability: string) => profileHasCapability(activeProfile, capability),
         isViewingAs: activeProfile.id !== selfProfile.id,
       }}

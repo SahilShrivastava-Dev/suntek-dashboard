@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { Footer } from './Footer';
@@ -22,6 +23,7 @@ const SEV_COLORS: Record<string, string> = {
 };
 
 function BlacklistedOverlay({ entry, onBack }: { entry: BlacklistEntry; onBack: () => void }) {
+  const { t } = useTranslation();
   const sevColor = SEV_COLORS[entry.severity] || '#DC2626';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', textAlign: 'center', padding: '40px 20px' }}>
@@ -29,32 +31,32 @@ function BlacklistedOverlay({ entry, onBack }: { entry: BlacklistEntry; onBack: 
         🚫
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, color: '#0F172A', marginBottom: 8 }}>
-        Account Restricted
+        {t('nav.accountRestricted', 'Account Restricted')}
       </div>
       <div style={{ fontSize: 13, color: '#475569', maxWidth: 420, lineHeight: 1.6, marginBottom: 20 }}>
-        This account has been restricted by the administrator. All dashboard data is hidden until the restriction is lifted.
+        {t('nav.accountRestrictedBody', 'This account has been restricted by the administrator. All dashboard data is hidden until the restriction is lifted.')}
       </div>
 
       <div style={{ background: '#FEF2F2', border: `1px solid ${sevColor}30`, borderRadius: 14, padding: '16px 24px', maxWidth: 440, width: '100%', marginBottom: 20, textAlign: 'left' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Reason</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{t('nav.reason', 'Reason')}</div>
         <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.6 }}>{entry.reason}</div>
         <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 20, background: '#FEF2F2', color: sevColor, border: `1px solid ${sevColor}40` }}>
             {entry.severity.toUpperCase()}
           </span>
-          <span style={{ fontSize: 11, color: '#94A3B8' }}>Added by {entry.added_by}</span>
+          <span style={{ fontSize: 11, color: '#94A3B8' }}>{t('nav.addedBy', { defaultValue: 'Added by {{name}}', name: entry.added_by })}</span>
         </div>
       </div>
 
       <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 24 }}>
-        Contact admin to resolve this restriction · <strong style={{ color: '#475569' }}>Sagar Nenwani</strong>
+        {t('nav.contactAdminResolve', 'Contact admin to resolve this restriction')} · <strong style={{ color: '#475569' }}>Sagar Nenwani</strong>
       </div>
 
       <button
         onClick={onBack}
         style={{ padding: '10px 24px', borderRadius: 20, background: '#F1F5F9', border: '1px solid #E2E8F0', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', fontFamily: 'inherit' }}
       >
-        ← Back to Admin view
+        {t('nav.backToAdminView', '← Back to Admin view')}
       </button>
     </div>
   );
@@ -62,84 +64,99 @@ function BlacklistedOverlay({ entry, onBack }: { entry: BlacklistEntry; onBack: 
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': 'Operations Dashboard',
-  '/dashboard/todo': 'To-Do',
-  '/dashboard/sales': 'Sales',
-  '/dashboard/stock': 'CP and Stock',
-  '/dashboard/batches': 'Batch Sheet',
-  '/dashboard/customers': 'Customer History',
-  '/dashboard/night-manager': 'Night Manager',
-  '/dashboard/oil-ratio': 'Oil Ratio Table',
-  '/dashboard/audit': 'Audit Log',
-  '/dashboard/anomalies': 'Anomaly Detection',
-  '/dashboard/anomaly-center': 'Anomaly Operations Center',
-  '/dashboard/cost-intelligence': 'Cost & Margin Intelligence',
-  '/dashboard/benchmarking': 'Multi-Plant Benchmarking',
-  '/dashboard/predictive-qc': 'Live Predictive QC Board',
-  '/dashboard/working-capital': 'Working Capital & Cash',
-  '/dashboard/owner': 'Owner Intelligence',
-  '/dashboard/night-entry':     'Night Check-in',
-  '/dashboard/batch-entry':     'Batch Logger',
-  '/dashboard/warehouse-entry': 'Warehouse Console',
-  '/dashboard/blacklist':       'Blacklist',
-  '/dashboard/users':           'User Management',
-  '/dashboard/daily-log':       'Daily Unit Log',
+/**
+ * i18n note: all map values below are stored as [i18nKey, englishDefault]
+ * tuples (breadcrumbs as a list of segment tuples joined with ' · ') and are
+ * translated at render time inside the component via t(key, default).
+ */
+type L = readonly [string, string];
+
+const PAGE_TITLES: Record<string, L> = {
+  '/dashboard': ['nav.operationsDashboard', 'Operations Dashboard'],
+  '/dashboard/todo': ['nav.todo', 'To-Do'],
+  '/dashboard/sales': ['nav.sales', 'Sales'],
+  '/dashboard/stock': ['nav.cpAndStock', 'CP and Stock'],
+  '/dashboard/batches': ['nav.batchSheet', 'Batch Sheet'],
+  '/dashboard/customers': ['nav.customerHistory', 'Customer History'],
+  '/dashboard/night-manager': ['nav.nightManager', 'Night Manager'],
+  '/dashboard/oil-ratio': ['nav.oilRatioTable', 'Oil Ratio Table'],
+  '/dashboard/audit': ['nav.auditLog', 'Audit Log'],
+  '/dashboard/anomalies': ['nav.anomalyDetection', 'Anomaly Detection'],
+  '/dashboard/anomaly-center': ['nav.anomalyOperationsCenter', 'Anomaly Operations Center'],
+  '/dashboard/cost-intelligence': ['nav.costMarginIntelligence', 'Cost & Margin Intelligence'],
+  '/dashboard/benchmarking': ['nav.multiPlantBenchmarking', 'Multi-Plant Benchmarking'],
+  '/dashboard/predictive-qc': ['nav.livePredictiveQcBoard', 'Live Predictive QC Board'],
+  '/dashboard/working-capital': ['nav.workingCapitalCash', 'Working Capital & Cash'],
+  '/dashboard/owner': ['nav.ownerIntelligence', 'Owner Intelligence'],
+  '/dashboard/night-entry':     ['nav.nightCheckin', 'Night Check-in'],
+  '/dashboard/batch-entry':     ['nav.batchLogger', 'Batch Logger'],
+  '/dashboard/warehouse-entry': ['nav.warehouseConsole', 'Warehouse Console'],
+  '/dashboard/blacklist':       ['nav.blacklist', 'Blacklist'],
+  '/dashboard/users':           ['nav.userManagement', 'User Management'],
+  '/dashboard/daily-log':       ['nav.dailyUnitLog', 'Daily Unit Log'],
 };
 
-const BREADCRUMBS: Record<string, string> = {
-  '/dashboard': 'Workspace · Overview',
-  '/dashboard/todo': 'Workspace · To-Do',
-  '/dashboard/sales': 'Operations · Sales',
-  '/dashboard/stock': 'Operations · CP and Stock',
-  '/dashboard/batches': 'Factory · Batch Sheet',
-  '/dashboard/customers': 'Operations · Customer History',
-  '/dashboard/night-manager': 'Factory · Night Manager',
-  '/dashboard/oil-ratio': 'Reference · Oil Ratio',
-  '/dashboard/audit': 'Reference · Audit Log',
-  '/dashboard/anomalies': 'Monitoring · Anomaly Detection',
-  '/dashboard/anomaly-center': 'Monitoring · Anomaly Center',
-  '/dashboard/cost-intelligence': 'Monitoring · Cost & Margin',
-  '/dashboard/benchmarking': 'Monitoring · Benchmarking',
-  '/dashboard/predictive-qc': 'Monitoring · Predictive QC',
-  '/dashboard/working-capital': 'Monitoring · Working Capital',
-  '/dashboard/owner': 'Monitoring · Owner Intelligence',
-  '/dashboard/users': 'Admin · User Management',
-  '/dashboard/blacklist': 'Admin · Blacklist',
-  '/dashboard/daily-log': 'Reference · Daily Unit Log',
-  '/dashboard/night-entry':     'Workspace · Night Check-in',
-  '/dashboard/batch-entry':     'Workspace · Batch Logger',
-  '/dashboard/warehouse-entry': 'Workspace · Warehouse Console',
+// Breadcrumb section segments (reuse existing section.*/nav.* keys).
+const C_WORKSPACE:  L = ['section.workspace', 'Workspace'];
+const C_OPERATIONS: L = ['section.operations', 'Operations'];
+const C_FACTORY:    L = ['nav.factory', 'Factory'];
+const C_REFERENCE:  L = ['section.reference', 'Reference'];
+const C_MONITORING: L = ['section.monitoring', 'Monitoring'];
+const C_ADMIN:      L = ['section.admin', 'Admin'];
+
+const BREADCRUMBS: Record<string, readonly L[]> = {
+  '/dashboard': [C_WORKSPACE, ['nav.overview', 'Overview']],
+  '/dashboard/todo': [C_WORKSPACE, ['nav.todo', 'To-Do']],
+  '/dashboard/sales': [C_OPERATIONS, ['nav.sales', 'Sales']],
+  '/dashboard/stock': [C_OPERATIONS, ['nav.cpAndStock', 'CP and Stock']],
+  '/dashboard/batches': [C_FACTORY, ['nav.batchSheet', 'Batch Sheet']],
+  '/dashboard/customers': [C_OPERATIONS, ['nav.customerHistory', 'Customer History']],
+  '/dashboard/night-manager': [C_FACTORY, ['nav.nightManager', 'Night Manager']],
+  '/dashboard/oil-ratio': [C_REFERENCE, ['nav.oilRatio', 'Oil Ratio']],
+  '/dashboard/audit': [C_REFERENCE, ['nav.auditLog', 'Audit Log']],
+  '/dashboard/anomalies': [C_MONITORING, ['nav.anomalyDetection', 'Anomaly Detection']],
+  '/dashboard/anomaly-center': [C_MONITORING, ['nav.anomalyCenter', 'Anomaly Center']],
+  '/dashboard/cost-intelligence': [C_MONITORING, ['nav.costMargin', 'Cost & Margin']],
+  '/dashboard/benchmarking': [C_MONITORING, ['nav.benchmarking', 'Benchmarking']],
+  '/dashboard/predictive-qc': [C_MONITORING, ['nav.predictiveQc', 'Predictive QC']],
+  '/dashboard/working-capital': [C_MONITORING, ['nav.workingCapital', 'Working Capital']],
+  '/dashboard/owner': [C_MONITORING, ['nav.ownerIntelligence', 'Owner Intelligence']],
+  '/dashboard/users': [C_ADMIN, ['nav.userManagement', 'User Management']],
+  '/dashboard/blacklist': [C_ADMIN, ['nav.blacklist', 'Blacklist']],
+  '/dashboard/daily-log': [C_REFERENCE, ['nav.dailyUnitLog', 'Daily Unit Log']],
+  '/dashboard/night-entry':     [C_WORKSPACE, ['nav.nightCheckin', 'Night Check-in']],
+  '/dashboard/batch-entry':     [C_WORKSPACE, ['nav.batchLogger', 'Batch Logger']],
+  '/dashboard/warehouse-entry': [C_WORKSPACE, ['nav.warehouseConsole', 'Warehouse Console']],
 };
 
 /** Per-sub-page titles/breadcrumbs/subtitles for the Factory dropdown's Purchase routes. */
-const FACTORY_SUBPAGES: Record<string, { title: string; breadcrumb: string; subtitle?: string }> = {
-  '/dashboard/purchase/far':      { title: 'Asset',             breadcrumb: 'Factory · FAR · Asset',    subtitle: 'Fixed Asset Register — every factory asset with its financial record.' },
-  '/dashboard/purchase/qr':       { title: 'QR Codes',          breadcrumb: 'Factory · FAR · QR Codes', subtitle: 'Generate and print QR codes for factory assets.' },
-  '/dashboard/purchase/maint':    { title: 'Maintenance',       breadcrumb: 'Factory · Maintenance',    subtitle: 'Plan, track and complete machine maintenance.' },
-  '/dashboard/purchase/activity': { title: 'Activity Log',      breadcrumb: 'Factory · Activity Log',   subtitle: 'Every purchase-linked event, in one stream.' },
-  '/dashboard/purchase/storereq': { title: 'Store Requisition', breadcrumb: 'Factory · Store Requisition', subtitle: 'Request materials, track approvals, manage stock and scrap.' },
-  '/dashboard/purchase/purchase': { title: 'Purchase Order',    breadcrumb: 'Factory · Purchase Order', subtitle: 'Raise and track purchase orders.' },
-  '/dashboard/purchase/marine':   { title: 'Marine Insurance',  breadcrumb: 'Factory · Marine Insurance' },
-  '/dashboard/purchase/labour':   { title: 'Labour',            breadcrumb: 'Factory · Labour' },
+const FACTORY_SUBPAGES: Record<string, { title: L; breadcrumb: readonly L[]; subtitle?: L }> = {
+  '/dashboard/purchase/far':      { title: ['nav.asset', 'Asset'],                        breadcrumb: [C_FACTORY, ['nav.far', 'FAR'], ['nav.asset', 'Asset']],    subtitle: ['nav.subFar', 'Fixed Asset Register — every factory asset with its financial record.'] },
+  '/dashboard/purchase/qr':       { title: ['nav.qrCodes', 'QR Codes'],                   breadcrumb: [C_FACTORY, ['nav.far', 'FAR'], ['nav.qrCodes', 'QR Codes']], subtitle: ['nav.subQr', 'Generate and print QR codes for factory assets.'] },
+  '/dashboard/purchase/maint':    { title: ['nav.maintenance', 'Maintenance'],            breadcrumb: [C_FACTORY, ['nav.maintenance', 'Maintenance']],            subtitle: ['nav.subMaint', 'Plan, track and complete machine maintenance.'] },
+  '/dashboard/purchase/activity': { title: ['nav.activityLog', 'Activity Log'],           breadcrumb: [C_FACTORY, ['nav.activityLog', 'Activity Log']],           subtitle: ['nav.subActivity', 'Every purchase-linked event, in one stream.'] },
+  '/dashboard/purchase/storereq': { title: ['nav.storeRequisition', 'Store Requisition'], breadcrumb: [C_FACTORY, ['nav.storeRequisition', 'Store Requisition']], subtitle: ['nav.subStoreReq', 'Request materials, track approvals, manage stock and scrap.'] },
+  '/dashboard/purchase/purchase': { title: ['nav.purchaseOrder', 'Purchase Order'],       breadcrumb: [C_FACTORY, ['nav.purchaseOrder', 'Purchase Order']],       subtitle: ['nav.subPurchaseOrder', 'Raise and track purchase orders.'] },
+  '/dashboard/purchase/marine':   { title: ['nav.marineInsurance', 'Marine Insurance'],   breadcrumb: [C_FACTORY, ['nav.marineInsurance', 'Marine Insurance']] },
+  '/dashboard/purchase/labour':   { title: ['nav.labour', 'Labour'],                      breadcrumb: [C_FACTORY, ['nav.labour', 'Labour']] },
 };
 
 /** v2 subtitles for non-purchase pages (rendered under the TopBar title). */
-const PAGE_SUBTITLES: Record<string, string> = {
-  '/dashboard': "Today's work, business KPIs and approvals across all plants.",
-  '/dashboard/todo': 'Everything pending your action — updates live as work moves on.',
-  '/dashboard/night-manager': 'Manage night duty schedules and employee check-ins.',
-  '/dashboard/sales': 'Contracts, dispatches and HCL/acid tracking.',
-  '/dashboard/stock': 'Tanks, drums and store items across plants.',
-  '/dashboard/batches': 'Live production batches, QC and oil-ratio variance.',
-  '/dashboard/customers': 'Ledger, density and payment history per customer.',
-  '/dashboard/oil-ratio': 'The production brain — density ↔ oil-ratio reference.',
-  '/dashboard/audit': 'Security and change logs across the workspace.',
-  '/dashboard/anomalies': 'Live risk radar across plants and modules.',
-  '/dashboard/anomaly-center': 'Investigate, assign and resolve anomalies.',
-  '/dashboard/users': 'All staff registered in CaratSense — roles and access.',
-  '/dashboard/blacklist': 'Restricted persons, vehicles and vendors.',
-  '/dashboard/daily-log': 'OCR-read daily unit sheets per plant.',
+const PAGE_SUBTITLES: Record<string, L> = {
+  '/dashboard': ['nav.subOverview', "Today's work, business KPIs and approvals across all plants."],
+  '/dashboard/todo': ['nav.subTodo', 'Everything pending your action — updates live as work moves on.'],
+  '/dashboard/night-manager': ['nav.subNightManager', 'Manage night duty schedules and employee check-ins.'],
+  '/dashboard/sales': ['nav.subSales', 'Contracts, dispatches and HCL/acid tracking.'],
+  '/dashboard/stock': ['nav.subStock', 'Tanks, drums and store items across plants.'],
+  '/dashboard/batches': ['nav.subBatches', 'Live production batches, QC and oil-ratio variance.'],
+  '/dashboard/customers': ['nav.subCustomers', 'Ledger, density and payment history per customer.'],
+  '/dashboard/oil-ratio': ['nav.subOilRatio', 'The production brain — density ↔ oil-ratio reference.'],
+  '/dashboard/audit': ['nav.subAudit', 'Security and change logs across the workspace.'],
+  '/dashboard/anomalies': ['nav.subAnomalies', 'Live risk radar across plants and modules.'],
+  '/dashboard/anomaly-center': ['nav.subAnomalyCenter', 'Investigate, assign and resolve anomalies.'],
+  '/dashboard/users': ['nav.subUsers', 'All staff registered in CaratSense — roles and access.'],
+  '/dashboard/blacklist': ['nav.subBlacklist', 'Restricted persons, vehicles and vendors.'],
+  '/dashboard/daily-log': ['nav.subDailyLog', 'OCR-read daily unit sheets per plant.'],
 };
 
 /**
@@ -165,8 +182,9 @@ const PURCHASE_TAB_PATHS = [
 ];
 
 export function DashboardLayout() {
+  const { t } = useTranslation();
   const { user, signOut, session, loading: authLoading } = useAuth();
-  const { isViewingAs, activeProfile, switchProfile, authResolved, can } = useRoleContext();
+  const { isViewingAs, activeProfile, switchProfile, authResolved, can, devBypass } = useRoleContext();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const location = useLocation();
   const navigate = useNavigate();
@@ -231,9 +249,12 @@ export function DashboardLayout() {
   const lookupPath = guardPath(path);
 
   // ── Page titles & breadcrumbs ──────────────────────────────────────────────
-  let title = PAGE_TITLES[lookupPath] ?? 'Operations dashboard';
-  let breadcrumb = BREADCRUMBS[lookupPath] ?? 'Workspace · Overview';
-  let subtitle: string | undefined = PAGE_SUBTITLES[lookupPath];
+  const tl = (l: L) => t(l[0], l[1]);
+  const tCrumb = (segs: readonly L[]) => segs.map(tl).join(' · ');
+
+  let title = tl(PAGE_TITLES[lookupPath] ?? ['nav.operationsDashboard', 'Operations dashboard']);
+  let breadcrumb = tCrumb(BREADCRUMBS[lookupPath] ?? [C_WORKSPACE, ['nav.overview', 'Overview']]);
+  let subtitle: string | undefined = PAGE_SUBTITLES[lookupPath] ? tl(PAGE_SUBTITLES[lookupPath]) : undefined;
 
   if (path.startsWith('/dashboard/purchase')) {
     // The horizontal sub-tab strip is gone; show the specific Factory sub-page.
@@ -242,14 +263,14 @@ export function DashboardLayout() {
     const viaOps = path === '/dashboard/purchase/purchase'
       && new URLSearchParams(location.search).get('ctx') === 'ops';
     if (viaOps) {
-      title = 'Purchase';
-      breadcrumb = 'Operations · Purchase';
+      title = t('nav.purchase', 'Purchase');
+      breadcrumb = tCrumb([C_OPERATIONS, ['nav.purchase', 'Purchase']]);
       subtitle = undefined;
     } else {
       const sub = FACTORY_SUBPAGES[lookupPath] ?? FACTORY_SUBPAGES['/dashboard/purchase/far'];
-      title = sub.title;
-      breadcrumb = sub.breadcrumb;
-      subtitle = sub.subtitle;
+      title = tl(sub.title);
+      breadcrumb = tCrumb(sub.breadcrumb);
+      subtitle = sub.subtitle ? tl(sub.subtitle) : undefined;
     }
   }
 
@@ -314,6 +335,27 @@ export function DashboardLayout() {
         <div className="max-w-[1500px] mx-auto">
           <TopBar title={title} breadcrumb={breadcrumb} subtitle={subtitle} onMenu={() => setSidebarOpen(true)} />
 
+          {/* DEV-ONLY: no Supabase session → the shell shows the demo admin
+              profile, but the database sees an ANONYMOUS caller, so every
+              RLS-scoped table returns zero rows and the app looks empty even
+              though the data is there. Say so loudly: this is otherwise
+              indistinguishable from "the database is broken". */}
+          {devBypass && (
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 mb-5 bg-red-50 border border-red-200 rounded-2xl">
+              <div className="text-[12.5px] text-red-700">
+                <strong>Dev preview — not signed in.</strong> The database is returning no rows because
+                row-level security hides everything from anonymous callers. Sign in to see real data.
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="shrink-0 text-[12.5px] font-semibold px-3 py-1.5 rounded-lg bg-red-600 text-white"
+              >
+                Sign in
+              </button>
+            </div>
+          )}
+
           {/* "Viewing as" banner — appears when not in Admin mode */}
           {isViewingAs && (
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 mb-5 bg-orange-50 border border-orange-200 rounded-2xl">
@@ -332,7 +374,7 @@ export function DashboardLayout() {
                 </div>
                 <div className="text-[13px] leading-tight">
                   <span className="font-semibold text-orange-900">
-                    Viewing as {activeProfile.roleLabel}
+                    {t('nav.viewingAs', { defaultValue: 'Viewing as {{role}}', role: activeProfile.roleLabel })}
                   </span>
                   <span className="text-orange-600"> · {activeProfile.name}</span>
                   {activeProfile.plant && (
@@ -347,7 +389,7 @@ export function DashboardLayout() {
                   navigate('/dashboard');
                 }}
               >
-                ← Back to Admin
+                {t('nav.backToAdmin', '← Back to Admin')}
               </button>
             </div>
           )}

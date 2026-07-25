@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils/cn';
 
 export type StatTone = 'default' | 'amber' | 'red' | 'orange' | 'green' | 'blue' | 'purple';
@@ -51,6 +52,7 @@ export function StatCard({
   viewLabel?: React.ReactNode;
   className?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className={cn('card2 p-5', className)}>
       <div className="flex items-center gap-2.5 mb-3">
@@ -78,7 +80,7 @@ export function StatCard({
           onClick={onView}
           className="text-blue-600 text-xs font-medium mt-2.5 hover:underline flex items-center gap-1"
         >
-          {viewLabel ?? 'View'} →
+          {viewLabel ?? t('common.view', 'View')} →
         </button>
       )}
     </div>

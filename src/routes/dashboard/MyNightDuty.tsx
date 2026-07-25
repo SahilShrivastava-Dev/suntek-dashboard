@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Camera, RotateCcw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { insertRows, updateRows } from '../../lib/db';
@@ -25,7 +26,14 @@ const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
+  const { t } = useTranslation();
   const toast = useToast();
+
+  const weekdayLabels = [
+    t('nightBoard.weekdaySun', 'Sun'), t('nightBoard.weekdayMon', 'Mon'), t('nightBoard.weekdayTue', 'Tue'),
+    t('nightBoard.weekdayWed', 'Wed'), t('nightBoard.weekdayThu', 'Thu'), t('nightBoard.weekdayFri', 'Fri'),
+    t('nightBoard.weekdaySat', 'Sat'),
+  ];
   const { activeProfile } = useRoleContext();
   const [myAccountId, setMyAccountId] = useState<string | null>(null);
   const [duties, setDuties] = useState<Duty[]>([]);
@@ -79,7 +87,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
   async function checkIn(duty: Duty) {
     if (busy) return;
     const blob = photo[duty.id];
-    if (!blob) { toast.error('Take a photo first'); return; }
+    if (!blob) { toast.error(t('checkin.takePhotoFirst', 'Take a photo first')); return; }
     setBusy(duty.id);
     try {
       const plant = duty.plant_id ? plants[duty.plant_id] : undefined;
@@ -99,7 +107,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
         is_on_site: geo?.isOnSite ?? true, distance_m: geo?.distanceM ?? null,
         plant_id: duty.plant_id, night_duty_id: duty.id,
       }).select('id').single();
-      if (logErr) { toast.error(`Check-in failed: ${logErr.message}`); return; }
+      if (logErr) { toast.error(t('checkin.checkinFailed', { defaultValue: 'Check-in failed: {{message}}', message: logErr.message })); return; }
       // 4) mark the duty checked in
       const now = new Date().toISOString();
       await updateRows('night_duty', { status: 'checked_in', checked_in_at: now, shift_log_id: logRow?.id ?? null }).eq('id', duty.id);
@@ -118,11 +126,11 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
         plant_id: duty.plant_id,
         photo_url: up.secure_url,
       }).then(() => {}, () => {});
-      toast.success('Checked in — your unit head has been notified.');
+      toast.success(t('checkin.checkedInNotified', 'Checked in — your unit head has been notified.'));
       clearDutyPhoto(duty.id);
       await load();
     } catch (err) {
-      toast.error(`Check-in failed: ${err instanceof Error ? err.message : 'GPS/photo error'}`);
+      toast.error(t('checkin.checkinFailed', { defaultValue: 'Check-in failed: {{message}}', message: err instanceof Error ? err.message : t('checkin.gpsPhotoError', 'GPS/photo error') }));
     } finally { setBusy(null); }
   }
 
@@ -146,8 +154,8 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
 
   return (
     <div className="card2 p-5 mb-5">
-      <div className="text-base font-bold font-heading mb-1">🌙 My night duty</div>
-      <div className="text-xs text-slate-500 mb-3">Your booked night shifts. You can only check in <strong>on the night itself</strong> — take a photo to check in.</div>
+      <div className="text-base font-bold font-heading mb-1">{t('checkin.myNightDuty', '🌙 My night duty')}</div>
+      <div className="text-xs text-slate-500 mb-3">{t('checkin.myDutyIntro1', 'Your booked night shifts. You can only check in')} <strong>{t('checkin.myDutyIntroStrong', 'on the night itself')}</strong> {t('checkin.myDutyIntro2', '— take a photo to check in.')}</div>
 
       {/* Calendar of my booked nights */}
       <div style={{ maxWidth: 460, marginBottom: 16 }}>
@@ -157,7 +165,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
           <button onClick={() => setMonthCursor(c => new Date(c.getFullYear(), c.getMonth() + 1, 1))} style={{ width: 26, height: 26, borderRadius: 8, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer' }}>›</button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3 }}>
-          {WEEKDAYS.map(w => <div key={w} style={{ textAlign: 'center', fontSize: 9.5, color: '#94A3B8', fontWeight: 700 }}>{w}</div>)}
+          {weekdayLabels.map((w, i) => <div key={WEEKDAYS[i]} style={{ textAlign: 'center', fontSize: 9.5, color: '#94A3B8', fontWeight: 700 }}>{w}</div>)}
           {monthGrid.map((d, i) => {
             if (!d) return <div key={i} />;
             const duty = bookedByDate[d];
@@ -169,19 +177,19 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
                 border: isToday ? '2px solid #2563EB' : '1px solid ' + (duty ? '#818CF8' : '#F1F5F9'),
                 background: done ? '#DCFCE7' : (duty ? '#EEF2FF' : '#fff'),
                 color: done ? '#16A34A' : (duty ? '#4338CA' : '#CBD5E1'),
-              }} title={duty ? `Night duty · ${duty.status}` : ''}>
+              }} title={duty ? t('checkin.nightDutyStatusTitle', { defaultValue: 'Night duty · {{status}}', status: duty.status }) : ''}>
                 {Number(d.slice(-2))}
               </div>
             );
           })}
         </div>
         <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 6, display: 'flex', gap: 12 }}>
-          <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#EEF2FF', border: '1px solid #818CF8', marginRight: 4, verticalAlign: 'middle' }} />Booked</span>
-          <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#DCFCE7', marginRight: 4, verticalAlign: 'middle' }} />Checked in</span>
+          <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#EEF2FF', border: '1px solid #818CF8', marginRight: 4, verticalAlign: 'middle' }} />{t('checkin.booked', 'Booked')}</span>
+          <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#DCFCE7', marginRight: 4, verticalAlign: 'middle' }} />{t('checkin.checkedIn', 'Checked in')}</span>
         </div>
       </div>
 
-      {visible.length === 0 && <div style={{ fontSize: 12.5, color: '#94A3B8' }}>No upcoming night duty assigned.</div>}
+      {visible.length === 0 && <div style={{ fontSize: 12.5, color: '#94A3B8' }}>{t('checkin.noUpcomingAssigned', 'No upcoming night duty assigned.')}</div>}
       <div className="flex flex-col gap-2">
         {visible.map(d => {
           const plant = d.plant_id ? plants[d.plant_id] : undefined;
@@ -191,12 +199,12 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
           return (
             <div key={d.id} style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 160 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{dateLabel}{isToday && <span style={{ marginLeft: 6, fontSize: 10.5, color: '#2563EB', fontWeight: 700 }}>· TONIGHT</span>}</div>
-                <div style={{ fontSize: 11, color: '#94A3B8' }}>{plant?.name || 'Plant'}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{dateLabel}{isToday && <span style={{ marginLeft: 6, fontSize: 10.5, color: '#2563EB', fontWeight: 700 }}>{t('checkin.tonightBadge', '· TONIGHT')}</span>}</div>
+                <div style={{ fontSize: 11, color: '#94A3B8' }}>{plant?.name || t('common.plant', 'Plant')}</div>
               </div>
               {done ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A', fontSize: 11 }}>✓ Checked in {d.checked_in_at ? new Date(d.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                  <span className="badge" style={{ background: '#DCFCE7', color: '#16A34A', fontSize: 11 }}>✓ {t('checkin.checkedIn', 'Checked in')} {d.checked_in_at ? new Date(d.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
                 </div>
               ) : isToday ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -206,7 +214,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
                       <button
                         type="button"
                         onClick={() => setCameraFor(d.id)}
-                        title="Tap to retake"
+                        title={t('checkin.tapToRetake', 'Tap to retake')}
                         style={{ padding: 0, border: '2px solid #86EFAC', borderRadius: 10, overflow: 'hidden', cursor: 'pointer', background: 'none', lineHeight: 0 }}
                       >
                         <img src={previews[d.id]} alt="Check-in photo preview" style={{ width: 52, height: 52, objectFit: 'cover', display: 'block' }} />
@@ -216,7 +224,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
                         onClick={() => setCameraFor(d.id)}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: '#475569', cursor: 'pointer', padding: '6px 10px', border: '1px solid #E2E8F0', borderRadius: 8, background: '#fff', fontFamily: 'inherit' }}
                       >
-                        <RotateCcw size={12} /> Retake
+                        <RotateCcw size={12} /> {t('checkin.retake', 'Retake')}
                       </button>
                     </>
                   ) : (
@@ -225,16 +233,16 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
                       onClick={() => setCameraFor(d.id)}
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer', padding: '6px 10px', border: '1px solid #BFDBFE', borderRadius: 8, background: '#fff', fontFamily: 'inherit' }}
                     >
-                      <Camera size={13} /> Take photo
+                      <Camera size={13} /> {t('checkin.takePhoto', 'Take photo')}
                     </button>
                   )}
                   <button onClick={() => checkIn(d)} disabled={busy === d.id || !photo[d.id]} className="btn-accent rounded-[10px]"
                     style={{ padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: busy === d.id || !photo[d.id] ? 'not-allowed' : 'pointer', opacity: busy === d.id || !photo[d.id] ? 0.5 : 1 }}>
-                    {busy === d.id ? 'Checking in…' : 'Check in'}
+                    {busy === d.id ? t('checkin.checkingIn', 'Checking in…') : t('checkin.checkIn', 'Check in')}
                   </button>
                 </div>
               ) : (
-                <span className="badge" style={{ background: '#EFF6FF', color: '#2563EB', fontSize: 11 }}>Scheduled</span>
+                <span className="badge" style={{ background: '#EFF6FF', color: '#2563EB', fontSize: 11 }}>{t('nightBoard.statusScheduled', 'Scheduled')}</span>
               )}
             </div>
           );
@@ -247,7 +255,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
         open={!!cameraFor}
         onClose={() => setCameraFor(null)}
         onCapture={(blob) => { if (cameraFor) setDutyPhoto(cameraFor, blob); }}
-        title="Check-in photo"
+        title={t('checkin.checkinPhotoTitle', 'Check-in photo')}
       />
     </div>
   );

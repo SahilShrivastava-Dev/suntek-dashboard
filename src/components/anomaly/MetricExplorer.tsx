@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { LineChart, BarChart3, TrendingDown, TrendingUp } from 'lucide-react';
 import { TimeSeriesChart } from './TimeSeriesChart';
 import { useMetricsCatalog, useMetricSeries } from '../../lib/anomaly/useAnomalies';
@@ -8,6 +9,15 @@ import { TILE_INFO } from '../../lib/anomaly/tileInfo';
 import type { Grain, Level } from '../../lib/anomaly/types';
 
 const GRAINS: Grain[] = ['daily', 'weekly', 'monthly'];
+
+/** Granularity / severity tier → i18n key (labels stay in lib/anomaly/levels). */
+const GRAIN_KEY: Record<Grain, string> = {
+  daily: 'anomaly.grainDaily', weekly: 'anomaly.grainWeekly', monthly: 'anomaly.grainMonthly',
+};
+const LEVEL_KEY: Record<Level, string> = {
+  mild: 'anomaly.levelMild', moderate: 'anomaly.levelModerate',
+  heavy: 'anomaly.levelHeavy', extreme: 'anomaly.levelExtreme',
+};
 
 function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { v: T; label: string; icon?: React.ReactNode }[]; onChange: (v: T) => void }) {
   return (
@@ -29,6 +39,7 @@ function Segmented<T extends string>({ value, options, onChange }: { value: T; o
 }
 
 export function MetricExplorer() {
+  const { t } = useTranslation();
   const { data: catalog } = useMetricsCatalog();
   const [metric, setMetric] = useState('sales');
   const [grain, setGrain] = useState<Grain>('daily');
@@ -50,11 +61,11 @@ export function MetricExplorer() {
             style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 13, fontWeight: 700, color: '#0F172A', fontFamily: 'inherit', cursor: 'pointer' }}>
             {catalog?.metrics.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
           </select>
-          <Segmented value={grain} onChange={setGrain} options={GRAINS.map(g => ({ v: g, label: g[0].toUpperCase() + g.slice(1) }))} />
+          <Segmented value={grain} onChange={setGrain} options={GRAINS.map(g => ({ v: g, label: t(GRAIN_KEY[g], g[0].toUpperCase() + g.slice(1)) }))} />
         </div>
         <Segmented value={mode} onChange={setMode} options={[
-          { v: 'line', label: 'Line', icon: <LineChart size={13} /> },
-          { v: 'bar', label: 'Bar', icon: <BarChart3 size={13} /> },
+          { v: 'line', label: t('anomaly.chartLine', 'Line'), icon: <LineChart size={13} /> },
+          { v: 'bar', label: t('anomaly.chartBar', 'Bar'), icon: <BarChart3 size={13} /> },
         ]} />
       </div>
 
@@ -64,7 +75,7 @@ export function MetricExplorer() {
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 12 }}>
         {latest && (
           <div>
-            <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Latest ({latest.label})</div>
+            <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('anomaly.latestLabel', { defaultValue: 'Latest ({{label}})', label: latest.label })}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 18, fontWeight: 800, color: '#0F172A' }}>
               {fmtValue(latest.value, unit)}
               {latest.baseline != null && (latest.value >= latest.baseline
@@ -73,32 +84,32 @@ export function MetricExplorer() {
           </div>
         )}
         <div>
-          <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Anomalies in series</div>
+          <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('anomaly.anomaliesInSeries', 'Anomalies in series')}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
             {byLevel && (['extreme', 'heavy', 'moderate', 'mild'] as Level[]).map(l => byLevel[l] > 0 ? (
               <span key={l} style={{ fontSize: 11, fontWeight: 700, color: LEVEL_COLOR[l], background: `${LEVEL_COLOR[l]}14`, padding: '2px 8px', borderRadius: 20 }}>
-                {byLevel[l]} {LEVEL_LABEL[l]}
+                {byLevel[l]} {t(LEVEL_KEY[l], LEVEL_LABEL[l])}
               </span>
             ) : null)}
-            {byLevel && Object.values(byLevel).every(v => v === 0) && <span style={{ fontSize: 12, color: '#16A34A', fontWeight: 600 }}>none</span>}
+            {byLevel && Object.values(byLevel).every(v => v === 0) && <span style={{ fontSize: 12, color: '#16A34A', fontWeight: 600 }}>{t('anomaly.noneLower', 'none')}</span>}
           </div>
         </div>
       </div>
 
       {/* Chart */}
       {isLoading && !series ? (
-        <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94A3B8' }}>Loading series…</div>
+        <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94A3B8' }}>{t('anomaly.loadingSeries', 'Loading series…')}</div>
       ) : (
         <TimeSeriesChart points={series?.points ?? []} unit={unit} mode={mode} />
       )}
 
       {/* Legend */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10, fontSize: 10, color: '#94A3B8' }}>
-        <Legend swatch="#475569" label="Actual" />
-        <Legend swatch="#A5B4FC" label="Expected (mean)" dashed />
-        <Legend swatch="#F59E0B" label="EWMA trend" dashed />
-        <Legend swatch="#6366F1" label="±2σ band" band />
-        <Legend swatch={LEVEL_COLOR.extreme} label="Anomaly (by tier)" dot />
+        <Legend swatch="#475569" label={t('anomaly.legendActual', 'Actual')} />
+        <Legend swatch="#A5B4FC" label={t('anomaly.legendExpectedMean', 'Expected (mean)')} dashed />
+        <Legend swatch="#F59E0B" label={t('anomaly.legendEwma', 'EWMA trend')} dashed />
+        <Legend swatch="#6366F1" label={t('anomaly.legendBand', '±2σ band')} band />
+        <Legend swatch={LEVEL_COLOR.extreme} label={t('anomaly.legendAnomalyByTier', 'Anomaly (by tier)')} dot />
       </div>
     </div>
   );

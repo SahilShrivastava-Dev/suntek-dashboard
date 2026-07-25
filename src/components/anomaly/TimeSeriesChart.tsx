@@ -1,6 +1,13 @@
 import React, { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { SeriesPoint, Level } from '../../lib/anomaly/types';
-import { LEVEL_COLOR, fmtValue } from '../../lib/anomaly/levels';
+import { LEVEL_COLOR, LEVEL_LABEL, fmtValue } from '../../lib/anomaly/levels';
+
+/** Severity tier → i18n key (the label map itself lives in lib/anomaly/levels). */
+const LEVEL_KEY: Record<Level, string> = {
+  mild: 'anomaly.levelMild', moderate: 'anomaly.levelModerate',
+  heavy: 'anomaly.levelHeavy', extreme: 'anomaly.levelExtreme',
+};
 
 interface Props {
   points: SeriesPoint[];
@@ -18,6 +25,7 @@ const PAD = { top: 16, right: 16, bottom: 28, left: 56 };
  * control over the data-science presentation, matches the app's hand-built SVG style.
  */
 export function TimeSeriesChart({ points, unit, mode, height = 300 }: Props) {
+  const { t } = useTranslation();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
   const [w, setW] = useState(820);
@@ -29,7 +37,7 @@ export function TimeSeriesChart({ points, unit, mode, height = 300 }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  if (!points.length) return <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94A3B8' }}>No data</div>;
+  if (!points.length) return <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94A3B8' }}>{t('anomaly.noData', 'No data')}</div>;
 
   const plotW = Math.max(200, w - PAD.left - PAD.right);
   const plotH = height - PAD.top - PAD.bottom;
@@ -84,10 +92,10 @@ export function TimeSeriesChart({ points, unit, mode, height = 300 }: Props) {
         }}
       >
         {/* gridlines + y labels */}
-        {yTicks.map((t, i) => (
+        {yTicks.map((tick, i) => (
           <g key={i}>
-            <line x1={PAD.left} x2={PAD.left + plotW} y1={y(t)} y2={y(t)} stroke="#F1F5F9" strokeWidth={1} />
-            <text x={PAD.left - 8} y={y(t) + 3} textAnchor="end" fontSize={9} fill="#94A3B8">{fmtValue(t, unit)}</text>
+            <line x1={PAD.left} x2={PAD.left + plotW} y1={y(tick)} y2={y(tick)} stroke="#F1F5F9" strokeWidth={1} />
+            <text x={PAD.left - 8} y={y(tick) + 3} textAnchor="end" fontSize={9} fill="#94A3B8">{fmtValue(tick, unit)}</text>
           </g>
         ))}
         {/* zero line for pct/net */}
@@ -143,13 +151,17 @@ export function TimeSeriesChart({ points, unit, mode, height = 300 }: Props) {
             fontSize: 11, boxShadow: '0 8px 24px rgba(0,0,0,0.2)', zIndex: 5,
           }}>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>{p.label}</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94A3B8' }}>Value</span><strong>{fmtValue(p.value, unit)}</strong></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94A3B8' }}>Expected</span><span>{fmtValue(p.baseline, unit)}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94A3B8' }}>z-score</span><span>{p.warming ? '—' : p.z.toFixed(2)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94A3B8' }}>{t('anomaly.tooltipValue', 'Value')}</span><strong>{fmtValue(p.value, unit)}</strong></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94A3B8' }}>{t('anomaly.tooltipExpected', 'Expected')}</span><span>{fmtValue(p.baseline, unit)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94A3B8' }}>{t('anomaly.zScore', 'z-score')}</span><span>{p.warming ? '—' : p.z.toFixed(2)}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-              <span style={{ color: '#94A3B8' }}>Status</span>
+              <span style={{ color: '#94A3B8' }}>{t('anomaly.tooltipStatus', 'Status')}</span>
               <span style={{ fontWeight: 700, color: p.isAnomaly ? LEVEL_COLOR[p.severity as Level] : '#86EFAC' }}>
-                {p.warming ? 'calibrating' : p.isAnomaly ? p.severity : 'normal'}
+                {p.warming
+                  ? t('anomaly.calibrating', 'calibrating')
+                  : p.isAnomaly
+                    ? t(LEVEL_KEY[p.severity as Level], LEVEL_LABEL[p.severity as Level]).toLowerCase()
+                    : t('anomaly.normal', 'normal')}
               </span>
             </div>
           </div>

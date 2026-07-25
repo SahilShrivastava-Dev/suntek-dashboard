@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { X, SwitchCamera, Camera, RotateCcw, Check, ImageUp } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { ButtonV2 } from './v2';
 
 type Facing = 'environment' | 'user';
@@ -17,7 +18,7 @@ export function CameraCapture({
   open,
   onClose,
   onCapture,
-  title = 'Take photo',
+  title,
   initialFacing = 'environment',
 }: {
   open: boolean;
@@ -28,6 +29,8 @@ export function CameraCapture({
   /** 'environment' = back camera (default), 'user' = selfie. */
   initialFacing?: Facing;
 }) {
+  const { t } = useTranslation();
+  const heading = title ?? t('checkin.takePhoto', 'Take photo');
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -132,7 +135,7 @@ export function CameraCapture({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <div className="font-heading font-semibold text-[15px]">{title}</div>
+          <div className="font-heading font-semibold text-[15px]">{heading}</div>
           <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-600 p-1 -mr-1"><X size={16} /></button>
         </div>
 
@@ -141,7 +144,7 @@ export function CameraCapture({
           {state === 'starting' && (
             <div className="text-slate-300 text-[13px] flex flex-col items-center gap-2">
               <div className="w-6 h-6 rounded-full border-2 border-slate-600 border-t-white animate-spin" />
-              Starting camera…
+              {t('checkin.startingCamera', 'Starting camera…')}
             </div>
           )}
           {state === 'live' && (
@@ -160,10 +163,10 @@ export function CameraCapture({
           {state === 'fallback' && (
             <div className="text-center px-6">
               <Camera size={28} className="text-slate-500 mx-auto mb-2" />
-              <div className="text-slate-200 text-[13px] font-medium">Camera preview unavailable here</div>
-              <div className="text-slate-400 text-[11.5px] mt-1 mb-4">On phones this opens the camera app directly.</div>
+              <div className="text-slate-200 text-[13px] font-medium">{t('checkin.previewUnavailable', 'Camera preview unavailable here')}</div>
+              <div className="text-slate-400 text-[11.5px] mt-1 mb-4">{t('checkin.previewUnavailableHint', 'On phones this opens the camera app directly.')}</div>
               <ButtonV2 variant="accent" icon={<ImageUp />} onClick={() => fileRef.current?.click()}>
-                Open camera / choose photo
+                {t('checkin.openCameraOrChoose', 'Open camera / choose photo')}
               </ButtonV2>
               <input
                 ref={fileRef} type="file" accept="image/*" capture={facing} className="hidden"
@@ -178,20 +181,20 @@ export function CameraCapture({
         <div className="flex items-center justify-between gap-2 px-4 py-3">
           {state === 'preview' ? (
             <>
-              <ButtonV2 variant="outline" icon={<RotateCcw />} onClick={retake}>Retake</ButtonV2>
-              <ButtonV2 variant="primary" icon={<Check />} onClick={confirmPhoto}>Use photo</ButtonV2>
+              <ButtonV2 variant="outline" icon={<RotateCcw />} onClick={retake}>{t('checkin.retake', 'Retake')}</ButtonV2>
+              <ButtonV2 variant="primary" icon={<Check />} onClick={confirmPhoto}>{t('checkin.usePhoto', 'Use photo')}</ButtonV2>
             </>
           ) : (
             <>
               <ButtonV2
                 variant="outline" icon={<SwitchCamera />} onClick={flip}
                 disabled={state !== 'live'}
-                title={facing === 'environment' ? 'Switch to front camera' : 'Switch to back camera'}
+                title={facing === 'environment' ? t('checkin.switchToFrontCamera', 'Switch to front camera') : t('checkin.switchToBackCamera', 'Switch to back camera')}
               >
-                {facing === 'environment' ? 'Front' : 'Back'}
+                {facing === 'environment' ? t('checkin.cameraFront', 'Front') : t('checkin.cameraBack', 'Back')}
               </ButtonV2>
               <ButtonV2 variant="accent" icon={<Camera />} onClick={snap} disabled={state !== 'live'}>
-                Capture
+                {t('checkin.capture', 'Capture')}
               </ButtonV2>
             </>
           )}

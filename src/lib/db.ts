@@ -37,3 +37,16 @@ export function upsertRows<T extends TableName>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (supabase.from(table) as any).upsert(values);
 }
+
+/**
+ * Call a Postgres RPC (SECURITY DEFINER function). The loose schema carries no
+ * Functions metadata, so — exactly like the write helpers above — the one cast
+ * lives here and callers stay typed on the result.
+ */
+export async function callRpc<T = unknown>(
+  fn: 'apply_stock_purchase' | 'resolve_stock_anomaly' | 'apply_repair_return' | 'reverse_repair_return',
+  args: Record<string, unknown>,
+): Promise<{ data: T | null; error: { message: string } | null }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return await (supabase.rpc as any)(fn, args);
+}

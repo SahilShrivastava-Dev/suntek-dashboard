@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import type { AnomalyKpi } from '../../lib/anomaly/types';
 import { KpiInfoButton } from '../KpiInfoButton';
@@ -10,6 +11,7 @@ import { TILE_INFO } from '../../lib/anomaly/tileInfo';
  * neutral so the page reads as one system.
  */
 export function ProblemKpiGrid({ kpis }: { kpis: AnomalyKpi[] }) {
+  const { t } = useTranslation();
   return (
     // Flex-wrap (not grid) so a short last row stretches to fill — no orphan gap
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
@@ -29,7 +31,7 @@ export function ProblemKpiGrid({ kpis }: { kpis: AnomalyKpi[] }) {
                 <span style={{
                   fontSize: 9, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#DC2626',
                   background: '#fff', border: '1px solid #FECACA', borderRadius: 20, padding: '1px 7px',
-                }}>⚠ flagged</span>
+                }}>{t('anomaly.flaggedChip', '⚠ flagged')}</span>
               )}
             </div>
             <div className="text-[26px] font-bold text-slate-900 leading-tight num">
@@ -38,7 +40,7 @@ export function ProblemKpiGrid({ kpis }: { kpis: AnomalyKpi[] }) {
             {delta != null && (
               <div className={`inline-flex items-center gap-1 mt-0.5 text-[11.5px] font-medium ${up ? 'text-green-600' : 'text-red-600'}`}>
                 {up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                {up ? '+' : ''}{delta.toFixed(1)}% vs prior
+                {up ? '+' : ''}{delta.toFixed(1)}% {t('anomaly.vsPrior', 'vs prior')}
               </div>
             )}
           </div>

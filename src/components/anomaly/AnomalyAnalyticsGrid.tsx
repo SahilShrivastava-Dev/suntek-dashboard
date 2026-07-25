@@ -1,10 +1,17 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAnalytics } from '../../lib/anomaly/useAnomalies';
 import { ConcentrationBar, DeltaBadge } from '../charts/AnalyticsViz';
 import { LEVEL_COLOR, LEVEL_LABEL, fmtValue } from '../../lib/anomaly/levels';
 import { KpiInfoButton } from '../KpiInfoButton';
 import { TILE_INFO } from '../../lib/anomaly/tileInfo';
 import type { AnalyticsResult, Level } from '../../lib/anomaly/types';
+
+/** Severity tier → i18n key (the label map itself lives in lib/anomaly/levels). */
+const LEVEL_KEY: Record<Level, string> = {
+  mild: 'anomaly.levelMild', moderate: 'anomaly.levelModerate',
+  heavy: 'anomaly.levelHeavy', extreme: 'anomaly.levelExtreme',
+};
 
 // ── Card shell ────────────────────────────────────────────────────────────────
 function Panel({ title, sub, children, span = 1, infoKey }: { title: string; sub?: string; children: React.ReactNode; span?: number; infoKey?: string }) {
@@ -25,6 +32,7 @@ function pt(cx: number, cy: number, r: number, deg: number) { const a = (deg * M
 function arc(cx: number, cy: number, r: number, a0: number, a1: number) { const p0 = pt(cx, cy, r, a0), p1 = pt(cx, cy, r, a1); const large = Math.abs(a1 - a0) > 180 ? 1 : 0; return `M ${p0.x.toFixed(1)},${p0.y.toFixed(1)} A ${r},${r} 0 ${large} 1 ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`; }
 
 function MarginGauge({ margin }: { margin: AnalyticsResult['margin'] }) {
+  const { t } = useTranslation();
   const cx = 110, cy = 105, r = 78, sw = 16;
   const MAX = 40; // 0..40% margin scale
   const v = Math.max(0, Math.min(MAX, margin.recentPct * 100));
@@ -40,12 +48,12 @@ function MarginGauge({ margin }: { margin: AnalyticsResult['margin'] }) {
         <path d={arc(cx, cy, r, 180, ang(v))} fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round" />
         <circle cx={pt(cx, cy, r, ang(v)).x} cy={pt(cx, cy, r, ang(v)).y} r={7} fill={color} stroke="#fff" strokeWidth={2} />
         <text x={cx} y={cy - 8} textAnchor="middle" fontSize="30" fontWeight="800" fill={color}>{v.toFixed(1)}%</text>
-        <text x={cx} y={cy + 10} textAnchor="middle" fontSize="10" fill="#94A3B8">14-day gross margin</text>
+        <text x={cx} y={cy + 10} textAnchor="middle" fontSize="10" fill="#94A3B8">{t('anomaly.gaugeCaption', '14-day gross margin')}</text>
         <text x={cx - r} y={cy + 16} textAnchor="middle" fontSize="8" fill="#CBD5E1">0%</text>
         <text x={cx + r} y={cy + 16} textAnchor="middle" fontSize="8" fill="#CBD5E1">40%+</text>
       </svg>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#64748B' }}>
-        vs prior 14d <DeltaBadge value={delta} unit="pp" />
+        {t('anomaly.vsPrior14d', 'vs prior 14d')} <DeltaBadge value={delta} unit="pp" />
       </div>
     </div>
   );
@@ -53,8 +61,9 @@ function MarginGauge({ margin }: { margin: AnalyticsResult['margin'] }) {
 
 // ── 2. Severity mix donut ─────────────────────────────────────────────────────
 function SeverityDonut({ radar, timeline }: { radar: AnalyticsResult['radar']; timeline: AnalyticsResult['timeline'] }) {
+  const { t } = useTranslation();
   const totals: Record<Level, number> = { mild: 0, moderate: 0, heavy: 0, extreme: 0 };
-  timeline.forEach(t => { (['mild', 'moderate', 'heavy', 'extreme'] as Level[]).forEach(l => totals[l] += t[l]); });
+  timeline.forEach(row => { (['mild', 'moderate', 'heavy', 'extreme'] as Level[]).forEach(l => totals[l] += row[l]); });
   const all = (['extreme', 'heavy', 'moderate', 'mild'] as Level[]);
   const total = all.reduce((s, l) => s + totals[l], 0);
   const r = 52, sw = 16, cx = 70, cy = 70, circ = 2 * Math.PI * r;
@@ -70,13 +79,13 @@ function SeverityDonut({ radar, timeline }: { radar: AnalyticsResult['radar']; t
           offset += len; return el;
         })}
         <text x={cx} y={cy - 2} textAnchor="middle" fontSize="26" fontWeight="800" fill="#0F172A">{total}</text>
-        <text x={cx} y={cy + 14} textAnchor="middle" fontSize="9" fill="#94A3B8">anomalies</text>
+        <text x={cx} y={cy + 14} textAnchor="middle" fontSize="9" fill="#94A3B8">{t('anomaly.anomaliesCaption', 'anomalies')}</text>
       </svg>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {all.map(l => (
           <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
             <span style={{ width: 9, height: 9, borderRadius: 3, background: LEVEL_COLOR[l] }} />
-            <span style={{ color: '#475569' }}>{LEVEL_LABEL[l]}</span>
+            <span style={{ color: '#475569' }}>{t(LEVEL_KEY[l], LEVEL_LABEL[l])}</span>
             <strong style={{ marginLeft: 'auto', color: '#0F172A' }}>{totals[l]}</strong>
           </div>
         ))}
@@ -87,6 +96,7 @@ function SeverityDonut({ radar, timeline }: { radar: AnalyticsResult['radar']; t
 
 // ── 3. Sales vs Purchase dual area ────────────────────────────────────────────
 function DualArea({ data }: { data: AnalyticsResult['salesPurchase'] }) {
+  const { t } = useTranslation();
   const W = 360, H = 130, P = { t: 10, r: 8, b: 18, l: 8 };
   const pw = W - P.l - P.r, ph = H - P.t - P.b;
   const max = Math.max(...data.flatMap(d => [d.sales, d.purchase]), 1);
@@ -105,9 +115,9 @@ function DualArea({ data }: { data: AnalyticsResult['salesPurchase'] }) {
         {data.map((d, i) => (i % 2 === 0 || i === n - 1) ? <text key={i} x={x(i)} y={H - 5} textAnchor="middle" fontSize="8" fill="#94A3B8">{d.label}</text> : null)}
       </svg>
       <div style={{ display: 'flex', gap: 14, marginTop: 4, fontSize: 11 }}>
-        <span style={{ color: '#16A34A', fontWeight: 600 }}>● Sales</span>
-        <span style={{ color: '#DC2626', fontWeight: 600 }}>● Purchase</span>
-        <span style={{ color: '#94A3B8', marginLeft: 'auto' }}>weekly · gap = margin</span>
+        <span style={{ color: '#16A34A', fontWeight: 600 }}>● {t('nav.sales')}</span>
+        <span style={{ color: '#DC2626', fontWeight: 600 }}>● {t('nav.purchase')}</span>
+        <span style={{ color: '#94A3B8', marginLeft: 'auto' }}>{t('anomaly.weeklyGapMargin', 'weekly · gap = margin')}</span>
       </div>
     </div>
   );
@@ -181,22 +191,23 @@ function DebtorBars({ debtors }: { debtors: AnalyticsResult['debtors'] }) {
 
 // ── Grid ──────────────────────────────────────────────────────────────────────
 export function AnomalyAnalyticsGrid() {
+  const { t } = useTranslation();
   const { data, isLoading } = useAnalytics();
   if (isLoading || !data) {
-    return <div style={{ padding: '40px 0', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>Building analytics…</div>;
+    return <div style={{ padding: '40px 0', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>{t('anomaly.buildingAnalytics', 'Building analytics…')}</div>;
   }
   return (
     // Flex-wrap so a short last row stretches to fill the width — no empty slot
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-      <Panel title="Margin health" sub="speedometer · red <10% · amber <20% · green ≥20%" infoKey="marginGauge"><MarginGauge margin={data.margin} /></Panel>
-      <Panel title="Severity mix" sub="all detected anomalies by tier" infoKey="severityMix"><SeverityDonut radar={data.radar} timeline={data.timeline} /></Panel>
-      <Panel title="Sales vs Purchase" sub="weekly — the margin squeeze" infoKey="salesVsPurchase"><DualArea data={data.salesPurchase} /></Panel>
-      <Panel title="Metric risk radar" sub="latest deviation per metric (σ)" infoKey="riskRadar"><ZScoreBars radar={data.radar} /></Panel>
-      <Panel title="Anomaly timeline" sub="anomalies per week, stacked by tier" infoKey="anomalyTimeline"><TimelineBars timeline={data.timeline} /></Panel>
-      <Panel title="Vendor concentration" sub="raw-material supplier share (FY)" infoKey="vendorConcentration">
-        {data.vendors.length ? <ConcentrationBar segments={data.vendors.map(v => ({ name: v.name, sharePct: v.sharePct }))} /> : <div style={{ color: '#94A3B8', fontSize: 12 }}>No vendor data</div>}
+      <Panel title={t('anomaly.marginHealth', 'Margin health')} sub={t('anomaly.marginHealthSub', 'speedometer · red <10% · amber <20% · green ≥20%')} infoKey="marginGauge"><MarginGauge margin={data.margin} /></Panel>
+      <Panel title={t('anomaly.severityMix', 'Severity mix')} sub={t('anomaly.severityMixSub', 'all detected anomalies by tier')} infoKey="severityMix"><SeverityDonut radar={data.radar} timeline={data.timeline} /></Panel>
+      <Panel title={t('anomaly.salesVsPurchase', 'Sales vs Purchase')} sub={t('anomaly.salesVsPurchaseSub', 'weekly — the margin squeeze')} infoKey="salesVsPurchase"><DualArea data={data.salesPurchase} /></Panel>
+      <Panel title={t('anomaly.metricRiskRadar', 'Metric risk radar')} sub={t('anomaly.metricRiskRadarSub', 'latest deviation per metric (σ)')} infoKey="riskRadar"><ZScoreBars radar={data.radar} /></Panel>
+      <Panel title={t('anomaly.anomalyTimeline', 'Anomaly timeline')} sub={t('anomaly.anomalyTimelineSub', 'anomalies per week, stacked by tier')} infoKey="anomalyTimeline"><TimelineBars timeline={data.timeline} /></Panel>
+      <Panel title={t('anomaly.vendorConcentration', 'Vendor concentration')} sub={t('anomaly.vendorConcentrationSub', 'raw-material supplier share (FY)')} infoKey="vendorConcentration">
+        {data.vendors.length ? <ConcentrationBar segments={data.vendors.map(v => ({ name: v.name, sharePct: v.sharePct }))} /> : <div style={{ color: '#94A3B8', fontSize: 12 }}>{t('anomaly.noVendorData', 'No vendor data')}</div>}
       </Panel>
-      <Panel title="Top debtors" sub="outstanding receivables" span={1} infoKey="topDebtors"><DebtorBars debtors={data.debtors} /></Panel>
+      <Panel title={t('anomaly.topDebtors', 'Top debtors')} sub={t('anomaly.topDebtorsSub', 'outstanding receivables')} span={1} infoKey="topDebtors"><DebtorBars debtors={data.debtors} /></Panel>
     </div>
   );
 }

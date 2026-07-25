@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { MentionTextarea } from './mentions/MentionTextarea';
 
 // ── Slide-in drawer ───────────────────────────────────────────────────────────
@@ -16,6 +17,7 @@ interface SlidePanelProps {
 }
 
 export function SlidePanel({ open, onClose, title, subtitle, children, locked = false }: SlidePanelProps) {
+  const { t } = useTranslation();
   return (
     <>
       {/* Backdrop */}
@@ -70,7 +72,7 @@ export function SlidePanel({ open, onClose, title, subtitle, children, locked = 
           <button
             onClick={locked ? undefined : onClose}
             disabled={locked}
-            title={locked ? 'Please wait — upload in progress' : undefined}
+            title={locked ? t('common.uploadInProgress', 'Please wait — upload in progress') : undefined}
             style={{
               width: 36, height: 36, borderRadius: '50%',
               background: '#F1F5F9', border: 'none', cursor: locked ? 'not-allowed' : 'pointer',
@@ -205,6 +207,7 @@ interface OcrUploadProps {
 }
 
 export function OcrUpload({ label, hint, fields = [], onExtracted }: OcrUploadProps) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [extracting, setExtracting] = useState(false);
@@ -220,7 +223,7 @@ export function OcrUpload({ label, hint, fields = [], onExtracted }: OcrUploadPr
     setExtracting(true);
     setTimeout(() => {
       setExtracting(false);
-      setExtracted(fields.length > 0 ? fields : [{ key: '_doc', label: 'Document', value: file?.name || 'uploaded' }]);
+      setExtracted(fields.length > 0 ? fields : [{ key: '_doc', label: t('common.ocrDocument', 'Document'), value: file?.name || 'uploaded' }]);
     }, 1900);
   }
 
@@ -254,7 +257,7 @@ export function OcrUpload({ label, hint, fields = [], onExtracted }: OcrUploadPr
               <polyline points="14 2 14 8 20 8"/>
             </svg>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#365314' }}>{file.name}</span>
-            <span style={{ fontSize: 11, color: '#84CC16' }}>· tap to change</span>
+            <span style={{ fontSize: 11, color: '#84CC16' }}>· {t('common.tapToChange', 'tap to change')}</span>
           </div>
         ) : (
           <>
@@ -262,7 +265,7 @@ export function OcrUpload({ label, hint, fields = [], onExtracted }: OcrUploadPr
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
               <circle cx="12" cy="13" r="4"/>
             </svg>
-            <div style={{ fontSize: 12, color: '#64748B' }}>Click to upload image or PDF</div>
+            <div style={{ fontSize: 12, color: '#64748B' }}>{t('common.clickToUploadImagePdf', 'Click to upload image or PDF')}</div>
             {hint && <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{hint}</div>}
           </>
         )}
@@ -289,14 +292,14 @@ export function OcrUpload({ label, hint, fields = [], onExtracted }: OcrUploadPr
               <svg style={{ animation: 'spin 0.9s linear infinite', display: 'block' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
               </svg>
-              Extracting via NVIDIA Vision 90B…
+              {t('common.extractingViaNvidia', 'Extracting via NVIDIA Vision 90B…')}
             </>
           ) : (
             <>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
               </svg>
-              Extract fields with AI
+              {t('common.extractFieldsWithAi', 'Extract fields with AI')}
             </>
           )}
         </button>
@@ -322,7 +325,9 @@ export function OcrUpload({ label, hint, fields = [], onExtracted }: OcrUploadPr
               <path d="M20 6 9 17l-5-5"/>
             </svg>
             <span style={{ fontSize: 11, fontWeight: 700, color: '#15803D', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              NVIDIA Vision extracted {extracted.length} field{extracted.length !== 1 ? 's' : ''}
+              {extracted.length === 1
+                ? t('common.nvidiaExtractedOne', { defaultValue: 'NVIDIA Vision extracted {{count}} field', count: extracted.length })
+                : t('common.nvidiaExtractedMany', { defaultValue: 'NVIDIA Vision extracted {{count}} fields', count: extracted.length })}
             </span>
           </div>
 
@@ -354,7 +359,7 @@ export function OcrUpload({ label, hint, fields = [], onExtracted }: OcrUploadPr
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5">
                   <path d="M20 6 9 17l-5-5"/>
                 </svg>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#15803D' }}>Values applied to form</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#15803D' }}>{t('common.valuesAppliedToForm', 'Values applied to form')}</span>
               </div>
             ) : (
               <button
@@ -369,7 +374,7 @@ export function OcrUpload({ label, hint, fields = [], onExtracted }: OcrUploadPr
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 }}
               >
-                Apply extracted values to form
+                {t('common.applyExtractedValues', 'Apply extracted values to form')}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M5 12h14M13 6l6 6-6 6"/>
                 </svg>
@@ -397,12 +402,16 @@ interface PanelFooterProps {
 
 export function PanelFooter({
   saved, onCancel, onSave,
-  saveLabel = 'Submit',
-  successLabel = 'Submitted',
-  successSub = 'Entry saved successfully',
+  saveLabel,
+  successLabel,
+  successSub,
   disabled = false,
   requiredHint,
 }: PanelFooterProps) {
+  const { t } = useTranslation();
+  const saveText    = saveLabel    ?? t('common.submit', 'Submit');
+  const successText = successLabel ?? t('common.submitted', 'Submitted');
+  const successSubText = successSub ?? t('common.entrySavedSuccessfully', 'Entry saved successfully');
   // Universal double-submit guard: once Save is clicked, the button is locked
   // until onSave() settles — so rapid clicks can never fire duplicate writes.
   // Every panel form that uses PanelFooter inherits this for free.
@@ -431,8 +440,8 @@ export function PanelFooter({
             <path d="M20 6 9 17l-5-5"/>
           </svg>
         </div>
-        <div style={{ fontWeight: 700, color: '#15803D', marginBottom: 4 }}>{successLabel}</div>
-        <div style={{ fontSize: 12, color: '#64748B' }}>{successSub}</div>
+        <div style={{ fontWeight: 700, color: '#15803D', marginBottom: 4 }}>{successText}</div>
+        <div style={{ fontSize: 12, color: '#64748B' }}>{successSubText}</div>
       </div>
     );
   }
@@ -456,7 +465,7 @@ export function PanelFooter({
             opacity: submitting ? 0.6 : 1,
           }}
         >
-          Cancel
+          {t('common.cancel', 'Cancel')}
         </button>
         <button
           type="button"
@@ -471,7 +480,7 @@ export function PanelFooter({
             transition: 'background 0.15s',
           }}
         >
-          {submitting ? 'Saving…' : saveLabel}
+          {submitting ? t('common.saving', 'Saving…') : saveText}
         </button>
       </div>
     </div>

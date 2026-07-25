@@ -110,7 +110,7 @@ export function Sales() {
         .single();
       if (newCust) customerId = newCust.id;
     }
-    if (!customerId) { toast.error('Failed to find or create customer. Please try again.'); return; }
+    if (!customerId) { toast.error(t('sales.customerCreateFailed', 'Failed to find or create customer. Please try again.')); return; }
     const { error } = await insertRows('sales_contracts', {
       customer_id: customerId,
       density: parseInt(form.density) || 1400,
@@ -119,7 +119,7 @@ export function Sales() {
       dispatched_qty: 0,
       status: 'open',
     });
-    if (error) { toast.error(`Save failed: ${error.message}`); return; }
+    if (error) { toast.error(t('sales.saveFailed', { defaultValue: 'Save failed: {{message}}', message: error.message })); return; }
     setFormSaved(true);
     setTimeout(() => {
       setShowModal(false);
@@ -257,7 +257,7 @@ export function Sales() {
               caption={
                 <span className="inline-flex items-center gap-2 flex-wrap">
                   <span>{t('sales.new')} / {t('sales.lapsed')}</span>
-                  <DeltaBadge value={analytics.newCustomersMTD - analytics.lapsedCustomersMTD} unit=" net" />
+                  <DeltaBadge value={analytics.newCustomersMTD - analytics.lapsedCustomersMTD} unit={` ${t('sales.netUnit', 'net')}`} />
                 </span>
               } />
           </div>
@@ -279,8 +279,8 @@ export function Sales() {
                     <BulletCompare
                       left={analytics.gstOutputMTD || 0}
                       right={analytics.gstInputMTD || 0}
-                      leftLabel={`Output ${fmtINR(analytics.gstOutputMTD || 0)}`}
-                      rightLabel={`ITC ${fmtINR(analytics.gstInputMTD || 0)}`}
+                      leftLabel={t('sales.outputAmt', { defaultValue: 'Output {{amount}}', amount: fmtINR(analytics.gstOutputMTD || 0) })}
+                      rightLabel={t('sales.itcAmt', { defaultValue: 'ITC {{amount}}', amount: fmtINR(analytics.gstInputMTD || 0) })}
                       leftColor="#DC2626"
                       rightColor="#16A34A"
                     />
@@ -401,9 +401,9 @@ export function Sales() {
             {/* Header */}
             <div className="flex items-start justify-between mb-6">
               <div>
-                <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Sales · Contracts</div>
-                <div className="text-xl font-bold font-heading">New sales contract</div>
-                <div className="text-xs text-slate-500 mt-1">Lock in price and booked quantity for a customer</div>
+                <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">{t('sales.modalKicker', 'Sales · Contracts')}</div>
+                <div className="text-xl font-bold font-heading">{t('sales.modalTitle', 'New sales contract')}</div>
+                <div className="text-xs text-slate-500 mt-1">{t('sales.modalSubtitle', 'Lock in price and booked quantity for a customer')}</div>
               </div>
               <button
                 className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center shrink-0 ml-4 transition-colors"
@@ -422,26 +422,26 @@ export function Sales() {
                     <path d="M20 6 9 17l-5-5"/>
                   </svg>
                 </div>
-                <div className="font-semibold text-green-700">Contract saved</div>
-                <div className="text-xs text-slate-500 mt-1">Syncing to Busy…</div>
+                <div className="font-semibold text-green-700">{t('sales.contractSaved', 'Contract saved')}</div>
+                <div className="text-xs text-slate-500 mt-1">{t('sales.syncingToBusy', 'Syncing to Busy…')}</div>
               </div>
             ) : (
               <>
                 {/* Form fields */}
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Customer name *</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sales.fldCustomerName', 'Customer name *')}</label>
                     <input
                       type="text"
                       value={form.customer}
                       onChange={e => handleFormChange('customer', e.target.value)}
-                      placeholder="e.g. Samarth Polymers"
+                      placeholder={t('sales.phCustomer', 'e.g. Samarth Polymers')}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-300 transition"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Density grade</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sales.fldDensityGrade', 'Density grade')}</label>
                     <div className="flex gap-2 flex-wrap">
                       {DENSITY_OPTIONS.map(d => (
                         <button
@@ -461,22 +461,22 @@ export function Sales() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">Locked price (₹/drum) *</label>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sales.fldLockedPrice', 'Locked price (₹/drum) *')}</label>
                       <input
                         type="number"
                         value={form.lockedPrice}
                         onChange={e => handleFormChange('lockedPrice', e.target.value)}
-                        placeholder="e.g. 85"
+                        placeholder={t('sales.phLockedPrice', 'e.g. 85')}
                         className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-300 transition"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">Booked quantity (drums) *</label>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sales.fldBookedQty', 'Booked quantity (drums) *')}</label>
                       <input
                         type="number"
                         value={form.bookedQty}
                         onChange={e => handleFormChange('bookedQty', e.target.value)}
-                        placeholder="e.g. 50"
+                        placeholder={t('sales.phBookedQty', 'e.g. 50')}
                         className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-300 transition"
                       />
                     </div>
@@ -485,11 +485,11 @@ export function Sales() {
                   {/* Estimated value preview */}
                   {form.lockedPrice && form.bookedQty && (
                     <div className="bg-orange-50 border border-orange-100 rounded-xl px-4 py-3">
-                      <div className="text-[11px] text-orange-600 font-semibold uppercase tracking-wider">Contract value</div>
+                      <div className="text-[11px] text-orange-600 font-semibold uppercase tracking-wider">{t('sales.contractValue', 'Contract value')}</div>
                       <div className="text-xl font-extrabold num mt-0.5">
                         ₹ {(Number(form.lockedPrice) * Number(form.bookedQty)).toLocaleString('en-IN')}
                       </div>
-                      <div className="text-xs text-slate-500">{form.bookedQty} drums × ₹{form.lockedPrice} · density {form.density}</div>
+                      <div className="text-xs text-slate-500">{t('sales.contractValueDetail', { defaultValue: '{{qty}} drums × ₹{{price}} · density {{density}}', qty: form.bookedQty, price: form.lockedPrice, density: form.density })}</div>
                     </div>
                   )}
                 </div>
@@ -497,7 +497,7 @@ export function Sales() {
                 {/* Actions */}
                 <div className="flex gap-3 mt-6">
                   <ButtonV2 variant="outline" className="flex-1 py-3" onClick={handleCloseModal}>
-                    Cancel
+                    {t('sales.cancel', 'Cancel')}
                   </ButtonV2>
                   <ButtonV2
                     variant="accent"
@@ -505,7 +505,7 @@ export function Sales() {
                     disabled={!form.customer.trim() || !form.lockedPrice || !form.bookedQty}
                     onClick={handleSaveContract}
                   >
-                    Save contract
+                    {t('sales.saveContract', 'Save contract')}
                   </ButtonV2>
                 </div>
               </>

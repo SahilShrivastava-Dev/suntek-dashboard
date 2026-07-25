@@ -41,7 +41,10 @@ export async function billToImages(file: File, maxPages = 5): Promise<string[]> 
 
 export interface ParsedBill {
   invoiceNumber: string | null;
+  /** Invoice date as printed on the bill (free-form; may not be ISO). */
+  invoiceDate: string | null;
   supplierName: string | null;
+  supplierGstin: string | null;
   lineItems: PurchaseLineItem[];
   /** Taxable value before GST (Total Before Tax). Line amounts reconcile to this. */
   subTotal: number | null;
@@ -82,7 +85,9 @@ export async function parseBill(
     results.reduce<number | null>((acc, r) => { const v = pick(r); return v != null ? (acc ?? 0) + v : acc; }, null);
   return {
     invoiceNumber: results.find(r => r.invoiceNumber)?.invoiceNumber ?? null,
+    invoiceDate: results.find(r => r.invoiceDate)?.invoiceDate ?? null,
     supplierName: results.find(r => r.supplierName)?.supplierName ?? null,
+    supplierGstin: results.find(r => r.supplierGstin)?.supplierGstin ?? null,
     lineItems,
     subTotal: sumField(r => r.subTotal),
     taxAmount: sumField(r => r.taxAmount),

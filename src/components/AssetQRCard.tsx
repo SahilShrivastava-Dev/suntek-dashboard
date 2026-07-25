@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { QRCodeCanvas, QRCodeSVG } from 'qrcode.react';
+import { useTranslation } from 'react-i18next';
 import { updateRows } from '../lib/db';
 import { useRoleContext } from '../contexts/RoleContext';
 import { useToast } from './ui/toast';
@@ -29,6 +30,7 @@ export function AssetQRCard({ asset, onUpdated, compact = false }: {
   onUpdated?: (patch: QrPatch) => void;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
   const { can, activeProfile } = useRoleContext();
   const toast = useToast();
   const canGenerate = can('generate_asset_qr');
@@ -45,39 +47,41 @@ export function AssetQRCard({ asset, onUpdated, compact = false }: {
 
   async function generate(regenerate: boolean) {
     if (!canGenerate || busy) return;
-    if (regenerate && !window.confirm('Regenerate this QR code?\n\nThe current printed code will STOP working and must be reprinted and re-attached.')) return;
+    if (regenerate && !window.confirm(t('far.qrRegenConfirm', 'Regenerate this QR code?\n\nThe current printed code will STOP working and must be reprinted and re-attached.'))) return;
     setBusy(true);
     try {
       const patch: QrPatch = { qr_token: makeQrToken(), qr_generated_at: new Date().toISOString(), qr_generated_by: activeProfile.name };
       await updateRows('fixed_assets', patch).eq('id', asset.id);
       onUpdated?.(patch);
-      toast.success(regenerate ? 'QR regenerated — reprint & reattach' : 'QR code generated');
+      toast.success(regenerate
+        ? t('far.qrRegenSuccess', 'QR regenerated — reprint & reattach')
+        : t('far.qrCodeGenerated', 'QR code generated'));
     } catch (e) {
-      toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('far.qrFailed', { defaultValue: 'Failed: {{msg}}', msg: e instanceof Error ? e.message : String(e) }));
     } finally { setBusy(false); }
   }
 
   function download() {
     const png = getPng();
-    if (!png) { toast.error('QR not ready yet'); return; }
+    if (!png) { toast.error(t('far.qrNotReady', 'QR not ready yet')); return; }
     downloadDataUrl(png, `QR-${safeFileName(label)}.png`);
   }
 
   function print() {
     const png = getPng();
-    if (!png) { toast.error('QR not ready yet'); return; }
-    printQrLabel({ pngDataUrl: png, title: label, subtitle: plantName, footer: `Asset #${asset.id.slice(0, 8)} · scan to open the digital profile` });
+    if (!png) { toast.error(t('far.qrNotReady', 'QR not ready yet')); return; }
+    printQrLabel({ pngDataUrl: png, title: label, subtitle: plantName, footer: t('far.qrPrintFooter', { defaultValue: 'Asset #{{id}} · scan to open the digital profile', id: asset.id.slice(0, 8) }) });
   }
 
   // No QR yet → generate prompt.
   if (!asset.qr_token) {
     return (
       <div style={{ border: '1px dashed #CBD5E1', borderRadius: 14, padding: compact ? 14 : 20, textAlign: 'center', background: '#F8FAFC' }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#475569', marginBottom: 4 }}>No QR code yet</div>
-        <div style={{ fontSize: 11.5, color: '#94A3B8', marginBottom: canGenerate ? 12 : 0 }}>Generate a code, print it, and attach it to the equipment.</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#475569', marginBottom: 4 }}>{t('far.qrNoQrYet', 'No QR code yet')}</div>
+        <div style={{ fontSize: 11.5, color: '#94A3B8', marginBottom: canGenerate ? 12 : 0 }}>{t('far.qrGenerateHint', 'Generate a code, print it, and attach it to the equipment.')}</div>
         {canGenerate && (
           <button onClick={() => generate(false)} disabled={busy} className="btn-accent pill" style={{ padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1 }}>
-            {busy ? 'Generating…' : '＋ Generate QR Code'}
+            {busy ? t('far.qrGenerating', 'Generating…') : `＋ ${t('far.qrGenerateQrCode', 'Generate QR Code')}`}
           </button>
         )}
       </div>
@@ -96,14 +100,14 @@ export function AssetQRCard({ asset, onUpdated, compact = false }: {
         <QRCodeSVG value={url} size={compact ? 132 : 168} level="M" marginSize={2} />
       </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 14 }}>
-        <button onClick={download} className="chip" style={{ fontWeight: 600 }}>⬇ Download</button>
-        <button onClick={print} className="chip" style={{ fontWeight: 600 }}>🖨 Print label</button>
-        {canGenerate && <button onClick={() => generate(true)} disabled={busy} className="chip" style={{ fontWeight: 600, color: '#DC2626' }}>{busy ? '…' : '↻ Regenerate'}</button>}
+        <button onClick={download} className="chip" style={{ fontWeight: 600 }}>{`⬇ ${t('far.qrDownload', 'Download')}`}</button>
+        <button onClick={print} className="chip" style={{ fontWeight: 600 }}>{`🖨 ${t('far.qrPrintLabel', 'Print label')}`}</button>
+        {canGenerate && <button onClick={() => generate(true)} disabled={busy} className="chip" style={{ fontWeight: 600, color: '#DC2626' }}>{busy ? '…' : `↻ ${t('far.qrRegenerate', 'Regenerate')}`}</button>}
       </div>
       {asset.qr_generated_at && (
         <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 8 }}>
-          Generated {new Date(asset.qr_generated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-          {asset.qr_generated_by ? ` · by ${asset.qr_generated_by}` : ''}
+          {t('far.qrGeneratedOn', { defaultValue: 'Generated {{date}}', date: new Date(asset.qr_generated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) })}
+          {asset.qr_generated_by ? t('far.qrGeneratedByName', { defaultValue: ' · by {{name}}', name: asset.qr_generated_by }) : ''}
         </div>
       )}
     </div>

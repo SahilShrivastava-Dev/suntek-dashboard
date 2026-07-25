@@ -1,4 +1,9 @@
 import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+
+/** Loose translator signature so callers can pass react-i18next's `t` without type friction. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TFn = (key: string, defaultValueOrOpts?: any) => string;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -12,17 +17,17 @@ export const FREQ_LABEL: Record<string, string> = {
 export const FREQ_DAYS: Record<string, number> = { daily: 1, weekly: 7, fortnightly: 15 };
 export const FREQ_MONTHS: Record<string, number> = { monthly: 1, bimonthly: 2, quarterly: 3, biannual: 6, triannual: 9, annual: 12 };
 
-export const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> = {
-  open:                     { label: 'Open',              bg: '#DBEAFE', color: '#2563EB' },
-  in_progress:              { label: 'In Progress',       bg: '#FEF3C7', color: '#D97706' },
-  pending_store:            { label: 'Pending Store',     bg: '#FEF3C7', color: '#D97706' },
-  pending_unit_head:        { label: 'Pending Approval',  bg: '#EDE9FE', color: '#7C3AED' },
-  pending_purchase:         { label: 'Purchasing',        bg: '#EDE9FE', color: '#7C3AED' },
-  pending_purchase_manager: { label: 'Bill & Dispatch',   bg: '#FAE8FF', color: '#A21CAF' },
-  pending_handover:         { label: 'Handover',          bg: '#F3E8FF', color: '#9333EA' },
-  pending_defective_return: { label: 'Defective Return',  bg: '#FEF3C7', color: '#D97706' },
-  changes_requested:        { label: 'Changes Requested', bg: '#FEF2F2', color: '#DC2626' },
-  closed:                   { label: 'Closed',            bg: '#DCFCE7', color: '#16A34A' },
+export const STATUS_CFG: Record<string, { label: string; labelKey?: string; bg: string; color: string }> = {
+  open:                     { label: 'Open',              labelKey: 'maint.statusOpen',             bg: '#DBEAFE', color: '#2563EB' },
+  in_progress:              { label: 'In Progress',       labelKey: 'maint.statusInProgress',       bg: '#FEF3C7', color: '#D97706' },
+  pending_store:            { label: 'Pending Store',     labelKey: 'maint.statusPendingStore',     bg: '#FEF3C7', color: '#D97706' },
+  pending_unit_head:        { label: 'Pending Approval',  labelKey: 'maint.statusPendingApproval',  bg: '#EDE9FE', color: '#7C3AED' },
+  pending_purchase:         { label: 'Purchasing',        labelKey: 'maint.statusPurchasing',       bg: '#EDE9FE', color: '#7C3AED' },
+  pending_purchase_manager: { label: 'Bill & Dispatch',   labelKey: 'maint.statusBillDispatch',     bg: '#FAE8FF', color: '#A21CAF' },
+  pending_handover:         { label: 'Handover',          labelKey: 'maint.statusHandover',         bg: '#F3E8FF', color: '#9333EA' },
+  pending_defective_return: { label: 'Defective Return',  labelKey: 'maint.statusDefectiveReturn',  bg: '#FEF3C7', color: '#D97706' },
+  changes_requested:        { label: 'Changes Requested', labelKey: 'maint.statusChangesRequested', bg: '#FEF2F2', color: '#DC2626' },
+  closed:                   { label: 'Closed',            labelKey: 'maint.statusClosed',           bg: '#DCFCE7', color: '#16A34A' },
 };
 
 // pending_purchase is shown in strip but may be skipped (available-in-store path)
@@ -37,12 +42,22 @@ export const STAGE_LABELS: Record<string, string> = {
   pending_handover: 'Handover', pending_defective_return: 'Defective', closed: 'Closed',
 };
 
+/** i18n keys for STAGE_LABELS — translate at render with t(key, STAGE_LABELS[stage]). */
+export const STAGE_LABEL_KEYS: Record<string, string> = {
+  open: 'maint.stageRaised', in_progress: 'maint.stageAssessed', pending_store: 'maint.stageStoreCheck',
+  pending_unit_head: 'maint.stageUnitHead', pending_purchase: 'maint.stagePurchase', pending_purchase_manager: 'maint.stagePurchaseMgr',
+  pending_handover: 'maint.stageHandover', pending_defective_return: 'maint.stageDefective', closed: 'maint.stageClosed',
+};
+
 // In-house repairs (no store part requested) never touch the procurement pipeline,
 // so their timeline is just: raise → upload the completion photo → close. Showing the
 // full approval strip for these only confuses users.
 export const INHOUSE_STAGES = ['open', 'in_progress', 'closed'];
 export const INHOUSE_STAGE_LABELS: Record<string, string> = {
   open: 'Raised', in_progress: 'Completion Photo', closed: 'Closed',
+};
+export const INHOUSE_STAGE_LABEL_KEYS: Record<string, string> = {
+  open: 'maint.stageRaised', in_progress: 'maint.stageCompletionPhoto', closed: 'maint.stageClosed',
 };
 
 // Part needed but AVAILABLE in store → no procurement, so the Purchase / Purchase Mgr
@@ -55,9 +70,10 @@ export const AVAILABLE_STAGES = [
 
 // ── Pure helpers ────────────────────────────────────────────────────────────────
 
-export function statusBadge(status: string) {
+export function statusBadge(status: string, t?: TFn) {
   const cfg = STATUS_CFG[status] || { label: status, bg: '#F1F5F9', color: '#475569' };
-  return <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{cfg.label}</span>;
+  const label = t && cfg.labelKey ? t(cfg.labelKey, cfg.label) : cfg.label;
+  return <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontWeight: 700 }}>{label}</span>;
 }
 
 export function formatDate(d: string | null | undefined) {
@@ -73,12 +89,13 @@ export function daysFromNow(d: string | null | undefined): number | null {
   return Math.round((due.getTime() - now.getTime()) / 86400000);
 }
 
-export function dueDateLabel(days: number | null): { text: string; color: string } {
+export function dueDateLabel(days: number | null, t?: TFn): { text: string; color: string } {
   if (days === null) return { text: '—', color: '#94A3B8' };
-  if (days < 0) return { text: `${Math.abs(days)}d overdue`, color: '#DC2626' };
-  if (days === 0) return { text: 'Due today', color: '#D97706' };
-  if (days <= 3) return { text: `In ${days}d`, color: '#D97706' };
-  return { text: `In ${days}d`, color: '#16A34A' };
+  if (days < 0) return { text: t ? t('maint.overdueDays', { defaultValue: '{{n}}d overdue', n: Math.abs(days) }) : `${Math.abs(days)}d overdue`, color: '#DC2626' };
+  if (days === 0) return { text: t ? t('maint.dueToday', 'Due today') : 'Due today', color: '#D97706' };
+  const inTxt = t ? t('maint.dueInDays', { defaultValue: 'In {{n}}d', n: days }) : `In ${days}d`;
+  if (days <= 3) return { text: inTxt, color: '#D97706' };
+  return { text: inTxt, color: '#16A34A' };
 }
 
 /** Next occurrence = `from` (or now) + the frequency interval. Pass the current
@@ -93,11 +110,14 @@ export function calculateNextDue(frequency: string, from?: string | Date | null)
 
 // ── PhotoUploader ─────────────────────────────────────────────────────────────
 
-export function PhotoUploader({ onBlobReady, label = 'Attach photo proof', hint = 'Take or upload a photo' }: {
+export function PhotoUploader({ onBlobReady, label, hint }: {
   onBlobReady: (blob: Blob | null) => void;
   label?: string;
   hint?: string;
 }) {
+  const { t } = useTranslation();
+  const labelTxt = label ?? t('maint.attachPhotoProof', 'Attach photo proof');
+  const hintTxt = hint ?? t('maint.takeOrUploadPhoto', 'Take or upload a photo');
   const [preview, setPreview] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -116,8 +136,8 @@ export function PhotoUploader({ onBlobReady, label = 'Attach photo proof', hint 
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 10 }}>{hint}</div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{labelTxt}</div>
+      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 10 }}>{hintTxt}</div>
       {preview ? (
         <div style={{ position: 'relative' }}>
           <img src={preview} alt="Preview" style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 12 }} />
@@ -129,8 +149,8 @@ export function PhotoUploader({ onBlobReady, label = 'Attach photo proof', hint 
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
             <circle cx="12" cy="13" r="4"/>
           </svg>
-          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>Tap to upload a photo</div>
-          <div style={{ fontSize: 11, color: '#CBD5E1', marginTop: 2 }}>JPG / PNG · opens camera on mobile</div>
+          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>{t('maint.tapToUploadPhoto', 'Tap to upload a photo')}</div>
+          <div style={{ fontSize: 11, color: '#CBD5E1', marginTop: 2 }}>{t('maint.jpgPngCameraHint', 'JPG / PNG · opens camera on mobile')}</div>
         </div>
       )}
       <input ref={inputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleFile} />
@@ -151,6 +171,7 @@ export function StageStrip({ status, skippedStages = [], onStageClick, activeSta
   stages?: string[];
   labels?: Record<string, string>;
 }) {
+  const { t } = useTranslation();
   const idx = stages.indexOf(status);
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, marginBottom: 20, overflowX: 'auto', paddingBottom: 2 }}>
@@ -166,7 +187,7 @@ export function StageStrip({ status, skippedStages = [], onStageClick, activeSta
           <React.Fragment key={s}>
             <div
               onClick={clickable ? () => onStageClick!(s) : undefined}
-              title={clickable ? `View ${labels[s]} details` : undefined}
+              title={clickable ? t('maint.viewStageDetails', { defaultValue: 'View {{stage}} details', stage: labels[s] }) : undefined}
               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, cursor: clickable ? 'pointer' : 'default' }}
             >
               <div style={{
@@ -182,7 +203,7 @@ export function StageStrip({ status, skippedStages = [], onStageClick, activeSta
                 {isCurrent && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
               </div>
               <div style={{ fontSize: 8.5, fontWeight: isActive || isCurrent ? 700 : 500, color: isActive ? '#0F172A' : isSkipped ? '#CBD5E1' : isCurrent ? '#F47651' : isPast ? '#16A34A' : '#94A3B8', marginTop: 3, whiteSpace: 'nowrap', textDecoration: clickable ? 'underline dotted' : 'none', textUnderlineOffset: 2 }}>
-                {labels[s]}{isSkipped ? ' (skipped)' : ''}
+                {labels[s]}{isSkipped ? ` ${t('maint.skippedSuffix', '(skipped)')}` : ''}
               </div>
             </div>
             {!isLast && <div style={{ height: 2, flex: 1, minWidth: 12, background: (isPast && !isSkipped) ? '#16A34A' : '#E2E8F0', marginTop: 10, flexShrink: 0 }} />}

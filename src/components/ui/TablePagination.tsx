@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { PAGE_SIZE_OPTIONS, type PaginationControls } from './usePagination';
 
 /**
@@ -19,6 +20,7 @@ export function TablePagination({
   /** Noun for the page-size selector, e.g. "rows", "items". */
   label?: string;
 }) {
+  const { t } = useTranslation();
   const { page, pageSize, pageCount, total, from, to, canPrev, canNext, setPage, setPageSize, prev, next, pageNumbers } = controls;
 
   // Show the control whenever there's data so users can always change the page size
@@ -41,7 +43,7 @@ export function TablePagination({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: '#64748B' }}>
         <span>
-          {total === 0 ? 'No rows' : <>Showing <strong style={{ color: '#334155' }}>{from}–{to}</strong> of <strong style={{ color: '#334155' }}>{total}</strong></>}
+          {total === 0 ? t('common.noRows', 'No rows') : <>{t('common.showing', 'Showing')} <strong style={{ color: '#334155' }}>{from}–{to}</strong> {t('common.of', 'of')} <strong style={{ color: '#334155' }}>{total}</strong></>}
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <select
@@ -52,7 +54,7 @@ export function TablePagination({
           >
             {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
           </select>
-          <span>/ page</span>
+          <span>{t('common.perPage', '/ page')}</span>
         </span>
       </div>
 

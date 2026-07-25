@@ -55,6 +55,15 @@ export function hasStoredLanguage(): boolean {
 export function applyLanguage(code: string | null | undefined): void {
   if (!code) return;
   if (i18n.language !== code) i18n.changeLanguage(code);
+  // Mirror the language onto <html lang> so CSS can adapt. Devanagari glyphs
+  // are taller than Latin (shirorekha above + matras below), so the tight
+  // line-heights the design uses clip them — index.css relaxes those under
+  // html[lang="hi"] only, leaving the English layout untouched.
+  try {
+    document.documentElement.setAttribute('lang', code);
+  } catch {
+    /* no DOM (SSR/tests) — nothing to mirror */
+  }
   try {
     localStorage.setItem(STORAGE_KEY, code);
   } catch {
@@ -74,5 +83,13 @@ i18n.use(initReactI18next).init({
   // Resources are bundled synchronously, so never suspend (no boundary needed).
   react: { useSuspense: false },
 });
+
+// Mirror the boot language onto <html lang> too (applyLanguage covers later
+// switches, but the first paint happens before any switch).
+try {
+  document.documentElement.setAttribute('lang', i18n.language || 'en');
+} catch {
+  /* no DOM (SSR/tests) */
+}
 
 export default i18n;

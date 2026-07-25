@@ -333,7 +333,7 @@ export function TopBar({ title, breadcrumb, subtitle, onMenu }: TopBarProps) {
                       </div>
                       {n.photo_url && (
                         <button
-                          title="View photo"
+                          title={t('topbar.viewPhoto', 'View photo')}
                           onClick={(e) => { e.stopPropagation(); setPhotoView(n.photo_url!); }}
                           style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer', fontSize: 15, marginTop: 2 }}
                         >

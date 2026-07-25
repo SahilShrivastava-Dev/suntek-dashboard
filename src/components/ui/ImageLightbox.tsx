@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export interface LightboxImage {
   url: string;
@@ -23,6 +24,7 @@ export function ImageLightbox({
   onClose: () => void;
   startIndex?: number;
 }) {
+  const { t } = useTranslation();
   const [idx, setIdx] = useState(startIndex);
 
   useEffect(() => { if (open) setIdx(Math.min(startIndex, Math.max(0, images.length - 1))); }, [open, startIndex, images.length]);
@@ -78,7 +80,7 @@ export function ImageLightbox({
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, color: '#E2E8F0', fontSize: 13 }}>
           {cur.label && <span style={{ fontWeight: 600 }}>{cur.label}</span>}
           {multi && <span style={{ color: '#94A3B8' }}>{idx + 1} / {images.length}</span>}
-          <a href={cur.url} target="_blank" rel="noreferrer" style={{ color: '#FF8A66', fontWeight: 600, textDecoration: 'none' }}>Open original ↗</a>
+          <a href={cur.url} target="_blank" rel="noreferrer" style={{ color: '#FF8A66', fontWeight: 600, textDecoration: 'none' }}>{t('common.openOriginal', 'Open original ↗')}</a>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Eye, Plus, Check, Building2 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
@@ -27,6 +28,7 @@ function fmtDT(d: string | null | undefined) {
  * `generate_asset_qr` inside that page.
  */
 export function QRManagement() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { scopeQuery } = usePlantScope();
   const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -96,7 +98,7 @@ export function QRManagement() {
   const SortTh = ({ k, children }: { k: SortKey; children: React.ReactNode }) => {
     const on = sort.key === k;
     return (
-      <th onClick={() => toggleSort(k)} title="Sort" style={{ cursor: 'pointer', userSelect: 'none' }}>
+      <th onClick={() => toggleSort(k)} title={t('common.sort', 'Sort')} style={{ cursor: 'pointer', userSelect: 'none' }}>
         {children}
         <span aria-hidden style={{ marginLeft: 4, fontSize: 9, opacity: on ? 0.9 : 0.35 }}>
           {on ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
@@ -112,21 +114,21 @@ export function QRManagement() {
       {/* Filters */}
       <FilterBar
         className="mb-4"
-        search={search} onSearch={setSearch} searchPlaceholder="Search asset name or mark…"
+        search={search} onSearch={setSearch} searchPlaceholder={t('far.qrSearchPlaceholder', 'Search asset name or mark…')}
         onReset={() => { setSearch(''); setPlantFilter('all'); setStatusFilter('all'); }}
       >
         <FilterSelect
-          label="Plant" icon={<Building2 />}
+          label={t('common.plant', 'Plant')} icon={<Building2 />}
           value={plantFilter} onChange={setPlantFilter}
-          options={[{ value: 'all', label: 'All Plants' }, ...plantNames.map(p => ({ value: p, label: p }))]}
+          options={[{ value: 'all', label: t('common.allPlants', 'All Plants') }, ...plantNames.map(p => ({ value: p, label: p }))]}
         />
         <FilterSelect
-          label="QR Status"
+          label={t('far.qrStatus', 'QR Status')}
           value={statusFilter} onChange={setStatusFilter}
           options={[
-            { value: 'all', label: 'All Status' },
-            { value: 'generated', label: 'Generated' },
-            { value: 'not', label: 'Not Generated' },
+            { value: 'all', label: t('common.allStatus', 'All Status') },
+            { value: 'generated', label: t('far.qrGenerated', 'Generated') },
+            { value: 'not', label: t('far.qrNotGenerated', 'Not Generated') },
           ]}
         />
       </FilterBar>
@@ -134,26 +136,26 @@ export function QRManagement() {
       {/* Table */}
       <div className="card2 overflow-hidden">
         {error ? (
-          <div className="p-5"><ErrorState title="Couldn't load assets" message="The fixed asset register failed to load." /></div>
+          <div className="p-5"><ErrorState title={t('far.qrErrLoadTitle', "Couldn't load assets")} message={t('far.qrErrLoadMessage', 'The fixed asset register failed to load.')} /></div>
         ) : loading ? (
-          <div className="py-8 text-center text-slate-400 text-[13px]">Loading assets…</div>
+          <div className="py-8 text-center text-slate-400 text-[13px]">{t('far.qrLoadingAssets', 'Loading assets…')}</div>
         ) : (
           <>
             <div className="overflow-x-auto scroll-x">
               <table className="dt2">
                 <thead>
                   <tr>
-                    <SortTh k="name">Asset Name</SortTh>
-                    <SortTh k="mark">Asset ID / Mark</SortTh>
-                    <SortTh k="plant">Plant</SortTh>
-                    <SortTh k="status">QR Status</SortTh>
-                    <SortTh k="generated">Generated On</SortTh>
-                    <th>Action</th>
+                    <SortTh k="name">{t('far.qrThAssetName', 'Asset Name')}</SortTh>
+                    <SortTh k="mark">{t('far.qrThAssetIdMark', 'Asset ID / Mark')}</SortTh>
+                    <SortTh k="plant">{t('common.plant', 'Plant')}</SortTh>
+                    <SortTh k="status">{t('far.qrStatus', 'QR Status')}</SortTh>
+                    <SortTh k="generated">{t('far.qrThGeneratedOn', 'Generated On')}</SortTh>
+                    <th>{t('far.qrThAction', 'Action')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRows.length === 0 && (
-                    <tr><td colSpan={6} className="text-center text-slate-400 py-8 text-sm">No assets match your search.</td></tr>
+                    <tr><td colSpan={6} className="text-center text-slate-400 py-8 text-sm">{t('far.qrNoAssetsMatch', 'No assets match your search.')}</td></tr>
                   )}
                   {pageRows.map(a => (
                     <tr key={a.id} onClick={() => openDetail(a)} style={{ cursor: 'pointer' }}>
@@ -162,18 +164,18 @@ export function QRManagement() {
                       <td className="text-slate-500">{a.plants?.name || '—'}</td>
                       <td>
                         {a.qr_token
-                          ? <StatusPill tone="green" icon={<Check strokeWidth={3} />} label="Generated" />
-                          : <StatusPill tone="orange" dot label="Not Generated" />}
+                          ? <StatusPill tone="green" icon={<Check strokeWidth={3} />} label={t('far.qrGenerated', 'Generated')} />
+                          : <StatusPill tone="orange" dot label={t('far.qrNotGenerated', 'Not Generated')} />}
                       </td>
                       <td className="text-slate-500">{a.qr_token ? fmtDT(a.qr_generated_at) : '—'}</td>
                       <td>
                         {a.qr_token ? (
                           <ButtonV2 size="sm" variant="outline" icon={<Eye />} onClick={(e) => { e.stopPropagation(); openDetail(a); }}>
-                            View QR
+                            {t('far.qrViewQr', 'View QR')}
                           </ButtonV2>
                         ) : (
                           <ButtonV2 size="sm" variant="outline" icon={<Plus />} onClick={(e) => { e.stopPropagation(); openDetail(a); }}>
-                            Generate QR
+                            {t('far.qrGenerateQr', 'Generate QR')}
                           </ButtonV2>
                         )}
                       </td>
@@ -182,7 +184,7 @@ export function QRManagement() {
                 </tbody>
               </table>
             </div>
-            <TablePaginationV2 controls={controls} label="assets" />
+            <TablePaginationV2 controls={controls} label={t('far.qrAssetsNoun', 'assets')} />
           </>
         )}
       </div>

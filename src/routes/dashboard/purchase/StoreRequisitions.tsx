@@ -285,14 +285,14 @@ export function StoreRequisitions() {
                           <span className="badge" style={{ background: s.bg, color: s.color }}>{t('storereq.stage_' + stageKey)}</span>
                         </td>
                         <td className="text-slate-500">{r.status === 'pending' ? t('storereq.awaiting_unit_head') : '—'}</td>
-                        <td className="font-semibold">{r.status}</td>
+                        <td className="font-semibold">{t('storereq.decision_' + stageKey, r.status)}</td>
                         <td onClick={e => e.stopPropagation()}><PicBadge url={r.photo_url} onOpen={() => r.photo_url && setLightbox([{ url: r.photo_url, label: r.item }])} /></td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              <TablePaginationV2 controls={controls} label="requirements" />
+              <TablePaginationV2 controls={controls} label={t('storereq.pagination_noun', 'requirements')} />
             </div>
           )}
         </>
@@ -379,6 +379,7 @@ export function StoreRequisitions() {
       >
         {detailReq && (() => {
           const s = STATUS_STAGE[detailReq.status] || STATUS_STAGE.pending;
+          const stageKey = STATUS_STAGE[detailReq.status] ? detailReq.status : 'pending';
           const Row = ({ k, v }: { k: string; v: React.ReactNode }) => (
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '9px 0', borderBottom: '1px solid #F1F5F9' }}>
               <span style={{ fontSize: 12, color: '#94A3B8' }}>{k}</span>
@@ -392,8 +393,8 @@ export function StoreRequisitions() {
               <Row k={t('storereq.col_plant')} v={detailReq.plants?.name || '—'} />
               <Row k={t('storereq.col_qty')} v={String(detailReq.qty)} />
               <Row k={t('storereq.field_priority')} v={detailReq.urgency === 'high' || detailReq.urgency === 'plant_stopper' ? t('storereq.opt_urgent') : t('storereq.opt_normal')} />
-              <Row k={t('storereq.col_stage')} v={<span className="badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>} />
-              <Row k={t('storereq.col_decision')} v={detailReq.status} />
+              <Row k={t('storereq.col_stage')} v={<span className="badge" style={{ background: s.bg, color: s.color }}>{t('storereq.stage_' + stageKey)}</span>} />
+              <Row k={t('storereq.col_decision')} v={t('storereq.decision_' + stageKey, detailReq.status)} />
               {detailReq.remarks && <Row k={t('storereq.field_reason')} v={detailReq.remarks} />}
               <Row k={t('storereq.detail_requested', 'Requested on')} v={detailReq.created_at ? new Date(detailReq.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'} />
               {detailReq.photo_url && (

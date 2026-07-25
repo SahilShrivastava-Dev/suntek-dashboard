@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { updateRows } from '../lib/db';
 import { useToast } from './ui/toast';
@@ -15,6 +16,7 @@ import { applyLanguage } from '../i18n';
  * these from User Management.
  */
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
   const toast = useToast();
   const { authProfile } = useRoleContext();
   const { addNotification } = useNotifications();
@@ -62,24 +64,24 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   if (!open) return null;
 
   async function handleSave() {
-    if (!authUserId) { toast.error('No active session — sign in again'); return; }
-    if (!displayName.trim()) { toast.error('Display name cannot be empty'); return; }
+    if (!authUserId) { toast.error(t('topbar.settingsNoSession', 'No active session — sign in again')); return; }
+    if (!displayName.trim()) { toast.error(t('topbar.settingsNameEmpty', 'Display name cannot be empty')); return; }
     if (password) {
-      if (password.length < 8) { toast.error('Password must be at least 8 characters'); return; }
-      if (password !== confirm) { toast.error('Passwords do not match'); return; }
+      if (password.length < 8) { toast.error(t('topbar.settingsPwdTooShort', 'Password must be at least 8 characters')); return; }
+      if (password !== confirm) { toast.error(t('topbar.settingsPwdMismatch', 'Passwords do not match')); return; }
     }
     setSaving(true);
 
     const changes: string[] = [];
-    if (displayName.trim() !== origName) changes.push(`name → "${displayName.trim()}"`);
-    if (language !== origLang) changes.push(`language → ${LANGUAGE_OPTIONS.find(l => l.value === language)?.label ?? language}`);
-    if (password) changes.push('password reset');
+    if (displayName.trim() !== origName) changes.push(t('topbar.settingsChgName', { defaultValue: 'name → "{{name}}"', name: displayName.trim() }));
+    if (language !== origLang) changes.push(t('topbar.settingsChgLanguage', { defaultValue: 'language → {{lang}}', lang: LANGUAGE_OPTIONS.find(l => l.value === language)?.label ?? language }));
+    if (password) changes.push(t('topbar.settingsChgPassword', 'password reset'));
 
     // 1) profiles (the login row — always present for a logged-in user)
     const { error: pErr } = await updateRows('profiles', {
       name: displayName.trim(), preferred_language: language,
     }).eq('id', authUserId);
-    if (pErr) { toast.error(`Save failed: ${pErr.message}`); setSaving(false); return; }
+    if (pErr) { toast.error(t('topbar.settingsSaveFailed', { defaultValue: 'Save failed: {{message}}', message: pErr.message })); setSaving(false); return; }
 
     // 2) user_accounts directory row, if this login is linked to one
     if (userAccountId) {
@@ -91,19 +93,19 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     // 3) password — self-service via the user's own session (no service role)
     if (password) {
       const { error: pwErr } = await supabase.auth.updateUser({ password });
-      if (pwErr) { toast.error(`Password change failed: ${pwErr.message}`); setSaving(false); return; }
+      if (pwErr) { toast.error(t('topbar.settingsPwdFailed', { defaultValue: 'Password change failed: {{message}}', message: pwErr.message })); setSaving(false); return; }
     }
 
     // Apply the chosen language to the interface immediately.
     applyLanguage(language);
 
-    if (changes.length === 0) { toast.info('No changes to save'); setSaving(false); onClose(); return; }
+    if (changes.length === 0) { toast.info(t('topbar.settingsNoChanges', 'No changes to save')); setSaving(false); onClose(); return; }
 
     const summary = changes.join(', ');
     // Notify admin + write to history
     await addNotification({
       target_roles: ['admin'],
-      title: `${displayName.trim()} updated their profile`,
+      title: t('topbar.settingsProfileUpdatedNotif', { defaultValue: '{{name}} updated their profile', name: displayName.trim() }),
       body: summary,
       type: 'info',
       route: '/dashboard/users',
@@ -116,7 +118,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       actorName: displayName.trim(), actorRole: authProfile?.id ?? null,
     });
 
-    toast.success('Settings saved');
+    toast.success(t('topbar.settingsSaved', 'Settings saved'));
     setSaving(false);
     onClose();
   }
@@ -133,49 +135,49 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         {/* Header */}
         <div style={{ padding: '18px 22px', borderBottom: '1px solid #F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: '#0F172A' }}>Settings</div>
-            <div style={{ fontSize: 12, color: '#94A3B8' }}>{email || 'Your account'} · {authProfile?.roleLabel}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: '#0F172A' }}>{t('topbar.settingsTitle', 'Settings')}</div>
+            <div style={{ fontSize: 12, color: '#94A3B8' }}>{email || t('topbar.settingsYourAccount', 'Your account')} · {authProfile?.roleLabel}</div>
           </div>
           <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: '50%', border: 'none', background: '#F1F5F9', cursor: 'pointer', color: '#64748B', fontSize: 16 }}>✕</button>
         </div>
 
         {/* Body */}
         <div style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Field label="Display name">
-            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={inputStyle} placeholder="Your name" />
+          <Field label={t('topbar.settingsDisplayName', 'Display name')}>
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={inputStyle} placeholder={t('topbar.settingsNamePlaceholder', 'Your name')} />
           </Field>
 
-          <Field label="Preferred language">
+          <Field label={t('topbar.settingsPreferredLanguage', 'Preferred language')}>
             <select value={language} onChange={(e) => setLanguage(e.target.value)} style={{ ...inputStyle, background: '#fff' }}>
               {LANGUAGE_OPTIONS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
             </select>
-            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>Applies to the interface as more screens are translated (Hindi available now).</div>
+            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>{t('topbar.settingsLanguageHint', 'Applies to the interface as more screens are translated (Hindi available now).')}</div>
           </Field>
 
           <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', marginBottom: 10 }}>Change password</div>
-            <Field label="New password">
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} placeholder="Leave blank to keep current" />
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', marginBottom: 10 }}>{t('topbar.settingsChangePassword', 'Change password')}</div>
+            <Field label={t('topbar.settingsNewPassword', 'New password')}>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} placeholder={t('topbar.settingsNewPasswordPh', 'Leave blank to keep current')} />
             </Field>
             {password && (
               <div style={{ marginTop: 10 }}>
-                <Field label="Confirm new password">
-                  <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} placeholder="Re-enter new password" />
+                <Field label={t('topbar.settingsConfirmPassword', 'Confirm new password')}>
+                  <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} placeholder={t('topbar.settingsConfirmPasswordPh', 'Re-enter new password')} />
                 </Field>
               </div>
             )}
           </div>
 
           <div style={{ fontSize: 11, color: '#94A3B8', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: '8px 12px' }}>
-            Changes here notify the admin and are recorded in the profile history.
+            {t('topbar.settingsNotifyNote', 'Changes here notify the admin and are recorded in the profile history.')}
           </div>
         </div>
 
         {/* Footer */}
         <div style={{ padding: '14px 22px', borderTop: '1px solid #F1F5F9', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button onClick={onClose} style={{ padding: '9px 18px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer', color: '#475569' }}>Cancel</button>
+          <button onClick={onClose} style={{ padding: '9px 18px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer', color: '#475569' }}>{t('common.cancel', 'Cancel')}</button>
           <button onClick={handleSave} disabled={saving} style={{ padding: '9px 20px', borderRadius: 12, border: 'none', background: saving ? '#94A3B8' : '#0F172A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: saving ? 'default' : 'pointer' }}>
-            {saving ? 'Saving…' : 'Save changes'}
+            {saving ? t('common.saving', 'Saving…') : t('topbar.settingsSaveChanges', 'Save changes')}
           </button>
         </div>
       </div>

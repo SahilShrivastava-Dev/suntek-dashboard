@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
 import { insertRows } from '../../../lib/db';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
@@ -29,6 +30,7 @@ const btnGhost: React.CSSProperties = { padding: '10px 16px', borderRadius: 10, 
  *  the FAR → create recurring schedules. Soft validation: unmatched equipment is
  *  allowed with a justification and an admin notification (never blocked). */
 export function PMScheduleImport({ open, onClose, onImported }: { open: boolean; onClose: () => void; onImported: () => void }) {
+  const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
   const { allowedPlants } = usePlantScope();
   const { addNotification } = useNotifications();
@@ -76,12 +78,12 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
 
   // Match each template to a FAR asset (per-plant duplicate-skip happens at save).
   const rows = useMemo(() => templates
-    .map(t => ({ t, match: matchAsset(t.equipmentLabel, assets) })), [templates, assets]);
+    .map(tpl => ({ tpl, match: matchAsset(tpl.equipmentLabel, assets) })), [templates, assets]);
   const matched = rows.filter(r => r.match);
   const unmatched = rows.filter(r => !r.match);
   const byFreq = useMemo(() => {
     const m = new Map<string, number>();
-    for (const r of rows) m.set(r.t.frequency, (m.get(r.t.frequency) || 0) + 1);
+    for (const r of rows) m.set(r.tpl.frequency, (m.get(r.tpl.frequency) || 0) + 1);
     return [...m.entries()];
   }, [rows]);
 
@@ -94,17 +96,17 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
     setFileName(file.name); setErr(null); setStage('parsing');
     try {
       try { const up = await uploadWorkflowFile(file, { workflow: 'maintenance', subfolder: 'pm-schedules', kind: 'pm', creator: activeProfile.name }); setCloudUrl(up.secure_url); } catch { /* archive best-effort */ }
-      if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error('Please upload the Preventive Maintenance .xlsx workbook.');
+      if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error(t('far.pmErrUploadXlsx', 'Please upload the Preventive Maintenance .xlsx workbook.'));
       const res = await parseMaintenanceFile(file);
-      if (!res.templates.length) throw new Error('No maintenance schedules found in this workbook.');
+      if (!res.templates.length) throw new Error(t('far.pmErrNoSchedules', 'No maintenance schedules found in this workbook.'));
       setTemplates(res.templates);
       setStage('review');
     } catch (e) { setErr(errMsg(e)); setStage('error'); }
   }
 
   async function confirm() {
-    if (!plantIds.length) { setErr('Select at least one factory this workbook belongs to.'); return; }
-    if (unmatched.length && !justification.trim()) { setErr('Some equipment is not in the FAR — add a justification to proceed.'); return; }
+    if (!plantIds.length) { setErr(t('far.pmErrSelectFactory', 'Select at least one factory this workbook belongs to.')); return; }
+    if (unmatched.length && !justification.trim()) { setErr(t('far.pmErrNeedJustification', 'Some equipment is not in the FAR — add a justification to proceed.')); return; }
     setStage('saving');
     try {
       const nowStart = new Date(startDate).toISOString();
@@ -113,20 +115,20 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
       // Create the schedule set for EACH selected factory (each has its own FAR copy).
       for (const pid of plantIds) {
         const plantAssets = assets.filter(a => a.plant_id === pid);
-        for (const { t } of rows) {
-          if (existing.has(`${(t.mark || '').toLowerCase()}|${t.frequency}|${pid}`)) continue; // skip duplicate
-          const match = matchAsset(t.equipmentLabel, plantAssets);
+        for (const { tpl } of rows) {
+          if (existing.has(`${(tpl.mark || '').toLowerCase()}|${tpl.frequency}|${pid}`)) continue; // skip duplicate
+          const match = matchAsset(tpl.equipmentLabel, plantAssets);
           payload.push({
-            title: `${t.equipmentType}${t.mark ? ` (${t.mark})` : ''} — ${FREQ_LABEL[t.frequency] || t.frequency}`,
-            equipment: t.equipmentLabel, plant_id: pid, frequency: t.frequency,
+            title: `${tpl.equipmentType}${tpl.mark ? ` (${tpl.mark})` : ''} — ${FREQ_LABEL[tpl.frequency] || tpl.frequency}`,
+            equipment: tpl.equipmentLabel, plant_id: pid, frequency: tpl.frequency,
             description: null,
             // Only the unit head's own (single) plant gets a default technician; the
             // unit head can reassign later. Multi-plant admin import stays unassigned.
             assigned_to: (singlePlant && assigneeTech) ? assigneeTech : null,
             is_active: true, next_due_at: nowStart,
-            far_asset_id: match?.asset.id ?? null, equipment_mark: t.mark,
+            far_asset_id: match?.asset.id ?? null, equipment_mark: tpl.mark,
             start_date: startDate, until_date: untilDate || null,
-            checklist: t.checklist, requires_approval: t.frequency !== 'daily',
+            checklist: tpl.checklist, requires_approval: tpl.frequency !== 'daily',
             unmatched_justification: match ? null : justification.trim(), source: 'pm_import',
           });
         }
@@ -140,8 +142,13 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
         // Notify that plant's unit head so they can assign/verify technicians.
         addNotification({
           target_roles: ['unit_head', 'admin'],
-          title: `PM schedules imported for ${plants.find(p => p.id === pid)?.name || 'plant'}`,
-          body: `${activeProfile.name} imported ${payload.filter(p => p.plant_id === pid).length} recurring schedules${unmatched.length ? ` · ${unmatched.length} not in FAR (${justification.trim()})` : ''}. Assign technicians as needed.`,
+          title: t('far.pmNotifTitle', { defaultValue: 'PM schedules imported for {{plant}}', plant: plants.find(p => p.id === pid)?.name || t('common.plant', 'Plant') }),
+          body: t('far.pmNotifBody', {
+            defaultValue: '{{name}} imported {{count}} recurring schedules{{extra}}. Assign technicians as needed.',
+            name: activeProfile.name,
+            count: payload.filter(p => p.plant_id === pid).length,
+            extra: unmatched.length ? t('far.pmNotifBodyUnmatched', { defaultValue: ' · {{count}} not in FAR ({{justification}})', count: unmatched.length, justification: justification.trim() }) : '',
+          }),
           type: unmatched.length ? 'warning' : 'info', route: '/dashboard/purchase/maint',
           actor_name: activeProfile.name, actor_role: activeProfile.role, plant_id: pid,
         });
@@ -156,91 +163,91 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
     <div style={overlay} onClick={() => { if (stage !== 'parsing' && stage !== 'saving') close(); }}>
       <div style={modal} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <div style={{ fontSize: 15, fontWeight: 700 }}>Import Preventive Maintenance workbook</div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{t('far.pmImportTitle', 'Import Preventive Maintenance workbook')}</div>
           <button onClick={close} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer', color: '#94A3B8' }}>×</button>
         </div>
-        <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 14 }}>Every schedule is validated against the FAR. Recurring tickets generate automatically until the end date.</div>
+        <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 14 }}>{t('far.pmImportSubtitle', 'Every schedule is validated against the FAR. Recurring tickets generate automatically until the end date.')}</div>
 
         {stage === 'form' && (
           <div>
             {/* Factory selection — multi-select for an admin; auto-scoped (hidden) for a single-plant unit head. */}
             {plants.length > 1 && (
               <div style={{ marginBottom: 12 }}>
-                <div style={label}>Factory / factories this workbook applies to *</div>
+                <div style={label}>{t('far.pmFactoriesLabel', 'Factory / factories this workbook applies to *')}</div>
                 <div className="flex gap-2 flex-wrap" style={{ marginTop: 2 }}>
                   {plants.map(p => {
                     const on = plantIds.includes(p.id);
                     return <button key={p.id} onClick={() => setPlantIds(ids => on ? ids.filter(x => x !== p.id) : [...ids, p.id])} className={`chip${on ? ' active' : ''}`}>{on ? '✓ ' : ''}{p.name}</button>;
                   })}
                 </div>
-                <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 5 }}>{plantIds.length > 1 ? `These schedules will be created for each of the ${plantIds.length} factories; each unit head is notified.` : 'Pick one, or multiple if this workbook is shared across factories.'}</div>
+                <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 5 }}>{plantIds.length > 1 ? t('far.pmMultiFactoryHint', { defaultValue: 'These schedules will be created for each of the {{count}} factories; each unit head is notified.', count: plantIds.length }) : t('far.pmPickFactoryHint', 'Pick one, or multiple if this workbook is shared across factories.')}</div>
               </div>
             )}
             {/* Default technician — only for a single factory (the unit head can reassign later). */}
-            {plantIds.length === 1 && technicians.some(t => t.plant_id === plantIds[0] || t.plant_id === null) && (
+            {plantIds.length === 1 && technicians.some(tc => tc.plant_id === plantIds[0] || tc.plant_id === null) && (
               <div style={{ marginBottom: 12 }}>
-                <div style={label}>Assign to technician (optional — unit head can change later)</div>
+                <div style={label}>{t('far.pmAssignTechLabel', 'Assign to technician (optional — unit head can change later)')}</div>
                 <select value={assigneeTech} onChange={e => setAssigneeTech(e.target.value)} style={{ ...input, width: '100%' }}>
-                  <option value="">— Leave for unit head to assign —</option>
-                  {[...new Set(technicians.filter(t => t.plant_id === plantIds[0] || t.plant_id === null).map(t => t.name))].map(n => <option key={n} value={n}>{n}</option>)}
+                  <option value="">{t('far.pmLeaveForUnitHead', '— Leave for unit head to assign —')}</option>
+                  {[...new Set(technicians.filter(tc => tc.plant_id === plantIds[0] || tc.plant_id === null).map(tc => tc.name))].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
             )}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-              <div style={{ flex: 1, minWidth: 130 }}><div style={label}>Start date</div><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ ...input, width: '100%' }} /></div>
-              <div style={{ flex: 1, minWidth: 130 }}><div style={label}>Continue until (optional)</div><input type="date" value={untilDate} onChange={e => setUntilDate(e.target.value)} style={{ ...input, width: '100%' }} /></div>
+              <div style={{ flex: 1, minWidth: 130 }}><div style={label}>{t('far.pmStartDate', 'Start date')}</div><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ ...input, width: '100%' }} /></div>
+              <div style={{ flex: 1, minWidth: 130 }}><div style={label}>{t('far.pmContinueUntil', 'Continue until (optional)')}</div><input type="date" value={untilDate} onChange={e => setUntilDate(e.target.value)} style={{ ...input, width: '100%' }} /></div>
             </div>
             <button onClick={() => fileRef.current?.click()} style={{ ...btnGhost, width: '100%', padding: '20px', borderStyle: 'dashed' }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: '#334155' }}>⬆ Upload PM workbook (.xlsx)</div>
-              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3 }}>Daily · 7/15 Days · 1/2/3/6 Months · Yearly sheets</div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#334155' }}>{t('far.pmUploadWorkbook', '⬆ Upload PM workbook (.xlsx)')}</div>
+              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3 }}>{t('far.pmSheetKinds', 'Daily · 7/15 Days · 1/2/3/6 Months · Yearly sheets')}</div>
             </button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
           </div>
         )}
 
-        {stage === 'parsing' && <div style={{ fontSize: 13, color: '#475569', padding: '20px 0' }}>Reading the workbook & matching against the FAR…</div>}
+        {stage === 'parsing' && <div style={{ fontSize: 13, color: '#475569', padding: '20px 0' }}>{t('far.pmParsing', 'Reading the workbook & matching against the FAR…')}</div>}
 
         {stage === 'review' && (
           <div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-              <div style={{ flex: 1, minWidth: 90, background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10.5, color: '#16A34A', fontWeight: 700 }}>IN FAR</div><div style={{ fontSize: 18, fontWeight: 800, color: '#16A34A' }}>{matched.length}</div></div>
-              <div style={{ flex: 1, minWidth: 90, background: '#FFFBEB', border: '1px solid #FED7AA', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10.5, color: '#B45309', fontWeight: 700 }}>NOT IN FAR</div><div style={{ fontSize: 18, fontWeight: 800, color: '#B45309' }}>{unmatched.length}</div></div>
-              <div style={{ flex: 1, minWidth: 90, background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10.5, color: '#64748B', fontWeight: 700 }}>SCHEDULES</div><div style={{ fontSize: 18, fontWeight: 800, color: '#334155' }}>{totalToCreate}</div>{plantIds.length > 1 && <div style={{ fontSize: 10, color: '#94A3B8' }}>{rows.length} × {plantIds.length} plants</div>}</div>
+              <div style={{ flex: 1, minWidth: 90, background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10.5, color: '#16A34A', fontWeight: 700 }}>{t('far.pmInFar', 'IN FAR')}</div><div style={{ fontSize: 18, fontWeight: 800, color: '#16A34A' }}>{matched.length}</div></div>
+              <div style={{ flex: 1, minWidth: 90, background: '#FFFBEB', border: '1px solid #FED7AA', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10.5, color: '#B45309', fontWeight: 700 }}>{t('far.pmNotInFar', 'NOT IN FAR')}</div><div style={{ fontSize: 18, fontWeight: 800, color: '#B45309' }}>{unmatched.length}</div></div>
+              <div style={{ flex: 1, minWidth: 90, background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10.5, color: '#64748B', fontWeight: 700 }}>{t('far.pmSchedulesTile', 'SCHEDULES')}</div><div style={{ fontSize: 18, fontWeight: 800, color: '#334155' }}>{totalToCreate}</div>{plantIds.length > 1 && <div style={{ fontSize: 10, color: '#94A3B8' }}>{t('far.pmRowsTimesPlants', { defaultValue: '{{rows}} × {{plants}} plants', rows: rows.length, plants: plantIds.length })}</div>}</div>
             </div>
-            <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>{byFreq.map(([f, n]) => `${FREQ_LABEL[f] || f}: ${n}`).join(' · ')}{templates.length !== rows.length ? ` · ${templates.length - rows.length} already scheduled (skipped)` : ''}</div>
+            <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>{byFreq.map(([f, n]) => `${FREQ_LABEL[f] || f}: ${n}`).join(' · ')}{templates.length !== rows.length ? ` · ${t('far.pmAlreadyScheduled', { defaultValue: '{{count}} already scheduled (skipped)', count: templates.length - rows.length })}` : ''}</div>
 
             <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #E2E8F0', borderRadius: 10 }}>
               {rows.map((r, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: i < rows.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.t.equipmentLabel}</div>
-                    <div style={{ fontSize: 11, color: '#94A3B8' }}>{FREQ_LABEL[r.t.frequency] || r.t.frequency} · {r.t.checklist.length} checkpoint{r.t.checklist.length === 1 ? '' : 's'}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.tpl.equipmentLabel}</div>
+                    <div style={{ fontSize: 11, color: '#94A3B8' }}>{FREQ_LABEL[r.tpl.frequency] || r.tpl.frequency} · {r.tpl.checklist.length === 1 ? t('far.pmCheckpointOne', { defaultValue: '{{count}} checkpoint', count: r.tpl.checklist.length }) : t('far.pmCheckpointMany', { defaultValue: '{{count}} checkpoints', count: r.tpl.checklist.length })}</div>
                   </div>
                   {r.match
-                    ? <span style={{ fontSize: 11, fontWeight: 700, color: '#16A34A', whiteSpace: 'nowrap' }}>✓ {r.match.asset.identification_mark || r.match.asset.name}{r.match.via === 'name' ? ' (name)' : ''}</span>
-                    : <span style={{ fontSize: 11, fontWeight: 700, color: '#B45309', whiteSpace: 'nowrap' }}>⚠ not in FAR</span>}
+                    ? <span style={{ fontSize: 11, fontWeight: 700, color: '#16A34A', whiteSpace: 'nowrap' }}>✓ {r.match.asset.identification_mark || r.match.asset.name}{r.match.via === 'name' ? ` ${t('far.pmViaName', '(name)')}` : ''}</span>
+                    : <span style={{ fontSize: 11, fontWeight: 700, color: '#B45309', whiteSpace: 'nowrap' }}>{t('far.pmNotInFarBadge', '⚠ not in FAR')}</span>}
                 </div>
               ))}
-              {rows.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>Nothing new to schedule.</div>}
+              {rows.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>{t('far.pmNothingNew', 'Nothing new to schedule.')}</div>}
             </div>
 
             {unmatched.length > 0 && (
               <div style={{ marginTop: 10 }}>
-                <div style={{ ...label, color: '#B45309' }}>Justification for {unmatched.length} equipment not in FAR *</div>
-                <textarea value={justification} onChange={e => setJustification(e.target.value)} rows={2} placeholder="e.g. Newly installed; FAR upload pending; parser missed these — admin will reconcile." style={{ ...input, width: '100%', resize: 'vertical' }} />
+                <div style={{ ...label, color: '#B45309' }}>{t('far.pmJustificationLabel', { defaultValue: 'Justification for {{count}} equipment not in FAR *', count: unmatched.length })}</div>
+                <textarea value={justification} onChange={e => setJustification(e.target.value)} rows={2} placeholder={t('far.pmJustificationPlaceholder', 'e.g. Newly installed; FAR upload pending; parser missed these — admin will reconcile.')} style={{ ...input, width: '100%', resize: 'vertical' }} />
               </div>
             )}
 
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button onClick={reset} style={btnGhost}>Back</button>
-              <button onClick={confirm} disabled={!rows.length || !plantIds.length} style={{ ...btnPrimary, flex: 1, opacity: (rows.length && plantIds.length) ? 1 : 0.5 }}>Create {totalToCreate} schedule{totalToCreate === 1 ? '' : 's'}</button>
+              <button onClick={reset} style={btnGhost}>{t('far.pmBack', 'Back')}</button>
+              <button onClick={confirm} disabled={!rows.length || !plantIds.length} style={{ ...btnPrimary, flex: 1, opacity: (rows.length && plantIds.length) ? 1 : 0.5 }}>{totalToCreate === 1 ? t('far.pmCreateScheduleOne', { defaultValue: 'Create {{count}} schedule', count: totalToCreate }) : t('far.pmCreateScheduleMany', { defaultValue: 'Create {{count}} schedules', count: totalToCreate })}</button>
             </div>
           </div>
         )}
 
-        {stage === 'saving' && <div style={{ fontSize: 13, color: '#475569', padding: '20px 0' }}>Creating schedules…</div>}
-        {stage === 'done' && (<div><div style={{ fontSize: 13, color: '#16A34A', marginBottom: 14 }}>✓ Created {createdCount} recurring maintenance schedule(s).</div><button onClick={close} style={{ ...btnPrimary, width: '100%' }}>Done</button></div>)}
-        {stage === 'error' && (<div><div style={{ fontSize: 13, color: '#DC2626', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: 10, marginBottom: 12 }}>{err}</div><div style={{ display: 'flex', gap: 8 }}><button onClick={() => setStage(templates.length ? 'review' : 'form')} style={{ ...btnGhost, flex: 1 }}>Back</button><button onClick={close} style={{ ...btnPrimary, flex: 1 }}>Close</button></div></div>)}
+        {stage === 'saving' && <div style={{ fontSize: 13, color: '#475569', padding: '20px 0' }}>{t('far.pmCreating', 'Creating schedules…')}</div>}
+        {stage === 'done' && (<div><div style={{ fontSize: 13, color: '#16A34A', marginBottom: 14 }}>{t('far.pmCreatedDone', { defaultValue: '✓ Created {{count}} recurring maintenance schedule(s).', count: createdCount })}</div><button onClick={close} style={{ ...btnPrimary, width: '100%' }}>{t('far.done', 'Done')}</button></div>)}
+        {stage === 'error' && (<div><div style={{ fontSize: 13, color: '#DC2626', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: 10, marginBottom: 12 }}>{err}</div><div style={{ display: 'flex', gap: 8 }}><button onClick={() => setStage(templates.length ? 'review' : 'form')} style={{ ...btnGhost, flex: 1 }}>{t('far.pmBack', 'Back')}</button><button onClick={close} style={{ ...btnPrimary, flex: 1 }}>{t('far.pmClose', 'Close')}</button></div></div>)}
       </div>
     </div>
   );

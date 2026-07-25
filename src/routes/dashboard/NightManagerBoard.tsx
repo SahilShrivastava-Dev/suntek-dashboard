@@ -70,13 +70,14 @@ function getCoords(plantName: string, realLat: number | null, realLng: number | 
   return [base[0] + jitterLat, base[1] + jitterLng];
 }
 
-function formatRelativeTime(dateStr: string) {
+// Not a component — receives `t` from the caller instead of calling the hook.
+function formatRelativeTime(dateStr: string, t: (key: string, options?: Record<string, unknown>) => string) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1) return t('nightBoard.justNow', { defaultValue: 'Just now' });
+  if (mins < 60) return t('nightBoard.minAgo', { defaultValue: '{{n}} min ago', n: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
+  if (hours < 24) return t('nightBoard.hrAgo', { defaultValue: '{{n}} hr ago', n: hours });
   return new Date(dateStr).toLocaleDateString('en-IN');
 }
 
@@ -182,7 +183,7 @@ export function NightManagerBoard() {
           (acctRows ?? []).forEach(a => acctName.set(a.id, { name: a.name, role_id: a.role_id }));
         }
       }
-      const roleLabelOf = (roleId: string | null) => roles.find(r => r.id === roleId)?.label ?? 'Technician';
+      const roleLabelOf = (roleId: string | null) => roles.find(r => r.id === roleId)?.label ?? t('nightBoard.technician', 'Technician');
 
       // 3. Format shift logs with mapping resolution
       const formatted = logs.map((row, index: number) => {
@@ -228,7 +229,7 @@ export function NightManagerBoard() {
           coords,
           status: row.is_on_site ? 'green' : 'red',
           shift: t('nightBoard.liveCheckinShift'),
-          last: formatRelativeTime(row.submitted_at),
+          last: formatRelativeTime(row.submitted_at, t),
           submitted_at: row.submitted_at,
           initial: name.substring(0, 2).toUpperCase(),
           ip_address: ip,

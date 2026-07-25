@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * useSortable — click-to-sort for any table already built as `<table className="dt">`.
@@ -84,12 +85,13 @@ export function Th({ children, sortKey, s, firstDir = 'asc', className, style }:
   className?: string;
   style?: React.CSSProperties;
 }) {
+  const { t } = useTranslation();
   const active = s.sort.key === sortKey;
   return (
     <th
       className={className}
       onClick={() => s.onSort(sortKey, firstDir)}
-      title="Sort"
+      title={t('common.sort', 'Sort')}
       style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...style }}
     >
       {children}

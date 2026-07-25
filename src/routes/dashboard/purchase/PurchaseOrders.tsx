@@ -9,6 +9,7 @@ import { useMentionNotifier } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
 import { exportToXlsx } from '../../../lib/utils/exportXlsx';
 import { useRoleContext } from '../../../contexts/RoleContext';
+import { profileHasCapability } from '../../../lib/profiles';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, PanelSection, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
 import { useToast } from '../../../components/ui/toast';
@@ -38,8 +39,9 @@ interface MaintPO {
 }
 
 function PicBadge({ has }: { has: boolean }) {
+  const { t } = useTranslation();
   return (
-    <span className={`pic-badge${has ? '' : ' missing'}`} title={has ? 'Pic on file' : 'No pic yet'}>
+    <span className={`pic-badge${has ? '' : ' missing'}`} title={has ? t('po.pic_on_file', 'Pic on file') : t('po.no_pic_yet', 'No pic yet')}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
         <circle cx="12" cy="13" r="4"/>
@@ -141,12 +143,13 @@ export function PurchaseOrders() {
     if (data) setOrders(prev => [data as OrderRow, ...prev]);
     await notifyMentions(form.notes, {
       entityType: 'oil_contract', entityId: (data as OrderRow | undefined)?.id,
-      entityLabel: `PO · ${form.material || form.supplier}`, route: '/dashboard/purchase/purchase',
+      entityLabel: t('po.entity_label', { defaultValue: 'PO · {{name}}', name: form.material || form.supplier }),
+      route: '/dashboard/purchase/purchase',
     });
     // Screen the supplier/material against the blacklist (vendor risk).
     const hits = await screenBlacklist(
-      [{ value: form.supplier, label: 'Supplier' }, { value: form.material, label: 'Material' }],
-      { workflow: 'Purchase Orders', source: 'entry', entityLabel: `PO · ${form.material || form.supplier}` },
+      [{ value: form.supplier, label: t('po.ocr_f_supplier') }, { value: form.material, label: t('po.field_material_short', 'Material') }],
+      { workflow: 'Purchase Orders', source: 'entry', entityLabel: t('po.entity_label', { defaultValue: 'PO · {{name}}', name: form.material || form.supplier }) },
     );
     if (hits.length) {
       const h = hits[0];
@@ -195,18 +198,23 @@ export function PurchaseOrders() {
 
   return (
     <>
-      {/* Add purchased spares to the stock register (bill AI or manual) */}
-      <SectionCard
-        className="mb-4"
-        title="Add purchase to stock register"
-        subtitle={<>Bought new spares? Upload the bill (image / PDF) to auto-read items &amp; quantities, or enter them manually — matched items increment, new items are created.</>}
-        actions={
-          <ButtonV2 variant="accent" icon={<Plus />} onClick={() => setShowPurchase(true)}>
-            Add purchase
-          </ButtonV2>
-        }
-      />
-      <AddPurchaseModal open={showPurchase} onClose={() => setShowPurchase(false)} onApplied={() => {}} />
+      {/* Add purchased spares to the stock register (bill AI or manual) —
+          capability-gated; the RPC re-enforces this server-side. */}
+      {profileHasCapability(activeProfile, 'add_stock_purchase') && (
+        <>
+          <SectionCard
+            className="mb-4"
+            title={t('po.add_stock_title', 'Add purchase to stock register')}
+            subtitle={t('po.add_stock_sub', 'Bought new spares? Upload the bill (image / PDF) to auto-read items & quantities, or enter them manually — matched items increment, new items are created.')}
+            actions={
+              <ButtonV2 variant="accent" icon={<Plus />} onClick={() => setShowPurchase(true)}>
+                {t('po.btn_add_purchase', 'Add purchase')}
+              </ButtonV2>
+            }
+          />
+          <AddPurchaseModal open={showPurchase} onClose={() => setShowPurchase(false)} onApplied={() => {}} />
+        </>
+      )}
 
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-4 mb-4">
@@ -351,10 +359,10 @@ export function PurchaseOrders() {
                   <td>{m.supplier}</td>
                   <td className="num">{m.qty}</td>
                   {/* Bulk bills have no per-unit price → show the bill's line-item count instead. */}
-                  <td className="num">{m.unitPrice != null ? `₹ ${m.unitPrice.toLocaleString('en-IN')}` : (m.billItems ? <span className="text-xs text-slate-400">{m.billItems} on bill</span> : '—')}</td>
+                  <td className="num">{m.unitPrice != null ? `₹ ${m.unitPrice.toLocaleString('en-IN')}` : (m.billItems ? <span className="text-xs text-slate-400">{t('po.on_bill', { defaultValue: '{{n}} on bill', n: m.billItems })}</span> : '—')}</td>
                   <td className="num font-semibold">{totalCost != null ? `₹ ${Number(totalCost).toLocaleString('en-IN')}` : '—'}</td>
                   <td className="text-slate-500 text-xs">{m.busyRef || '—'}</td>
-                  <td>{m.billUrl ? <button type="button" onClick={() => setBillLightbox([{ url: m.billUrl as string, label: `Supplier bill · #${m.ticketRef}` }])} style={{ color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, textDecoration: 'underline' }}>View</button> : <span className="text-slate-300 text-xs">—</span>}</td>
+                  <td>{m.billUrl ? <button type="button" onClick={() => setBillLightbox([{ url: m.billUrl as string, label: t('po.bill_lightbox_label', { defaultValue: 'Supplier bill · #{{ref}}', ref: m.ticketRef }) }])} style={{ color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, textDecoration: 'underline' }}>{t('common.view', 'View')}</button> : <span className="text-slate-300 text-xs">—</span>}</td>
                   <td className="text-slate-500 text-xs">{m.date ? new Date(m.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
                 </tr>
                 );
@@ -383,9 +391,9 @@ export function PurchaseOrders() {
             <PanelField label={t('po.field_destination')}>
               <PanelSelect value={form.destination} onChange={e => set('destination', e.target.value)}>
                 {PLANTS.map(p => <option key={p}>{p}</option>)}
-                <option>Kandla</option>
-                <option>Mundra</option>
-                <option>Port</option>
+                <option value="Kandla">Kandla</option>
+                <option value="Mundra">Mundra</option>
+                <option value="Port">{t('po.opt_port', 'Port')}</option>
               </PanelSelect>
             </PanelField>
             <PanelField label={t('po.field_unit')}>

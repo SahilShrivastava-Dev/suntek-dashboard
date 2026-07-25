@@ -208,17 +208,20 @@ export function DailyLogPage() {
         });
       }
 
-      await notifyMentions(remarks, {
-        entityLabel: `Daily log · ${unitName || 'Unit'} · ${date}`, route: '/dashboard/daily-log',
+      const entityLabel = t('dailyLog.entityLabel', {
+        defaultValue: 'Daily log · {{unit}} · {{date}}',
+        unit: unitName || t('dailyLog.unitFallback', 'Unit'),
+        date,
       });
+      await notifyMentions(remarks, { entityLabel, route: '/dashboard/daily-log' });
 
       // Screen OCR/entered operator + helper names against the blacklist.
       const hits = await screenBlacklist(
         [
-          ...operators.split(',').map((n) => ({ value: n.trim(), label: 'Operator' })),
-          { value: helper, label: 'Helper' },
+          ...operators.split(',').map((n) => ({ value: n.trim(), label: t('dailyLog.operatorLabel', 'Operator') })),
+          { value: helper, label: t('dailyLog.helper_label') },
         ],
-        { workflow: 'Daily Log OCR', source: 'ocr', entityLabel: `Daily log · ${unitName || 'Unit'} · ${date}` },
+        { workflow: 'Daily Log OCR', source: 'ocr', entityLabel },
       );
       if (hits.length) {
         const h = hits[0];

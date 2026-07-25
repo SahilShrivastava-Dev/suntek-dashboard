@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { KpiInfoButton } from '../KpiInfoButton';
 import type { Database } from '../../lib/database.types';
 
@@ -23,15 +24,16 @@ interface AlertsPanelProps {
 
 /** Open-alerts feed on the Overview. Pure display; navigation via callback. */
 export function AlertsPanel({ alerts, onNavigate }: AlertsPanelProps) {
+  const { t } = useTranslation();
   return (
     <div className="col-span-12 lg:col-span-3 card p-6" style={{ position: 'relative' }}>
       <KpiInfoButton info={{ title: 'Open Alerts', what: 'Operational alerts across all modules — marine insurance balance, stock levels, batch timing, maintenance overdue. Colour-coded by severity (red=high, amber=medium, grey=low). Click any alert to navigate to the relevant module.', source: 'Supabase', note: 'Live from the alerts table (migration 0003), filtered to unresolved.' }} />
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="text-base font-bold font-heading">Open alerts</div>
-          <div className="text-xs text-slate-500">Click to navigate · real-time</div>
+          <div className="text-base font-bold font-heading">{t('overview.openAlerts', 'Open Alerts')}</div>
+          <div className="text-xs text-slate-500">{t('overview.openAlertsSub', 'Click to navigate · real-time')}</div>
         </div>
-        <span className="badge" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>{alerts.length} open</span>
+        <span className="badge" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>{t('overview.openCount', { defaultValue: '{{count}} open', count: alerts.length })}</span>
       </div>
       <div className="space-y-2.5">
         {alerts.map((a) => {
@@ -56,7 +58,7 @@ export function AlertsPanel({ alerts, onNavigate }: AlertsPanelProps) {
           );
         })}
         {alerts.length === 0 && (
-          <div className="text-center text-slate-400 py-4 text-sm">No open alerts</div>
+          <div className="text-center text-slate-400 py-4 text-sm">{t('overview.noOpenAlerts', 'No open alerts')}</div>
         )}
       </div>
     </div>

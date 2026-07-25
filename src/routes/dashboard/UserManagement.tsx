@@ -56,34 +56,36 @@ type RoleOption = { id: string; label: string; level: string };
 // Every dashboard section a role's `allowed_routes` can grant. The union of all
 // routes across the seeded roles, with human labels — used by the Role Manager's
 // permission checkbox list.
-const ALL_DASHBOARD_SECTIONS: { route: string; label: string }[] = [
-  { route: '/dashboard',                  label: 'Overview' },
-  { route: '/dashboard/batches',          label: 'Batch Sheets' },
-  { route: '/dashboard/stock',            label: 'CPM Stock' },
-  { route: '/dashboard/night-manager',    label: 'Night Manager Board' },
-  { route: '/dashboard/night-entry',      label: 'Night Check-in (entry)' },
-  { route: '/dashboard/batch-entry',      label: 'Batch Logger (entry)' },
-  { route: '/dashboard/daily-log',        label: 'Daily Unit Log' },
-  { route: '/dashboard/warehouse-entry',  label: 'Warehouse Console (entry)' },
-  { route: '/dashboard/sales',            label: 'Sales' },
-  { route: '/dashboard/customers',        label: 'Customers' },
-  { route: '/dashboard/anomalies',        label: 'Anomaly Detection' },
-  { route: '/dashboard/anomaly-center',   label: 'Anomaly Operations Center' },
-  { route: '/dashboard/cost-intelligence',label: 'Cost & Margin Intelligence' },
-  { route: '/dashboard/benchmarking',     label: 'Multi-Plant Benchmarking' },
-  { route: '/dashboard/predictive-qc',    label: 'Predictive QC' },
-  { route: '/dashboard/working-capital',  label: 'Working Capital & Cash' },
-  { route: '/dashboard/oil-ratio',        label: 'Oil Ratio Reference' },
-  { route: '/dashboard/audit',            label: 'Audit Trail' },
-  { route: '/dashboard/blacklist',        label: 'Blacklist Registry' },
-  { route: '/dashboard/purchase/far',     label: 'Fixed Asset Register' },
-  { route: '/dashboard/purchase/qr',      label: 'Asset QR Codes' },
-  { route: '/dashboard/purchase/maint',   label: 'Maintenance' },
-  { route: '/dashboard/purchase/activity',label: 'Plant Activity Log' },
-  { route: '/dashboard/purchase/storereq',label: 'Store Requisitions' },
-  { route: '/dashboard/purchase/purchase',label: 'Purchase Orders' },
-  { route: '/dashboard/purchase/marine',  label: 'Marine Insurance' },
-  { route: '/dashboard/purchase/labour',  label: 'Labour Costs' },
+// `label` is the English default; `labelKey` is resolved via t() at render time
+// (this list lives outside the component, so it can't call the hook itself).
+const ALL_DASHBOARD_SECTIONS: { route: string; label: string; labelKey: string }[] = [
+  { route: '/dashboard',                  label: 'Overview',                   labelKey: 'userMgmt.sec_overview' },
+  { route: '/dashboard/batches',          label: 'Batch Sheets',               labelKey: 'userMgmt.sec_batchSheets' },
+  { route: '/dashboard/stock',            label: 'CPM Stock',                  labelKey: 'userMgmt.sec_cpmStock' },
+  { route: '/dashboard/night-manager',    label: 'Night Manager Board',        labelKey: 'userMgmt.sec_nightManagerBoard' },
+  { route: '/dashboard/night-entry',      label: 'Night Check-in (entry)',     labelKey: 'userMgmt.sec_nightCheckinEntry' },
+  { route: '/dashboard/batch-entry',      label: 'Batch Logger (entry)',       labelKey: 'userMgmt.sec_batchLoggerEntry' },
+  { route: '/dashboard/daily-log',        label: 'Daily Unit Log',             labelKey: 'userMgmt.sec_dailyUnitLog' },
+  { route: '/dashboard/warehouse-entry',  label: 'Warehouse Console (entry)',  labelKey: 'userMgmt.sec_warehouseConsoleEntry' },
+  { route: '/dashboard/sales',            label: 'Sales',                      labelKey: 'userMgmt.sec_sales' },
+  { route: '/dashboard/customers',        label: 'Customers',                  labelKey: 'userMgmt.sec_customers' },
+  { route: '/dashboard/anomalies',        label: 'Anomaly Detection',          labelKey: 'userMgmt.sec_anomalyDetection' },
+  { route: '/dashboard/anomaly-center',   label: 'Anomaly Operations Center',  labelKey: 'userMgmt.sec_anomalyOpsCenter' },
+  { route: '/dashboard/cost-intelligence',label: 'Cost & Margin Intelligence', labelKey: 'userMgmt.sec_costMarginIntel' },
+  { route: '/dashboard/benchmarking',     label: 'Multi-Plant Benchmarking',   labelKey: 'userMgmt.sec_benchmarking' },
+  { route: '/dashboard/predictive-qc',    label: 'Predictive QC',              labelKey: 'userMgmt.sec_predictiveQc' },
+  { route: '/dashboard/working-capital',  label: 'Working Capital & Cash',     labelKey: 'userMgmt.sec_workingCapital' },
+  { route: '/dashboard/oil-ratio',        label: 'Oil Ratio Reference',        labelKey: 'userMgmt.sec_oilRatio' },
+  { route: '/dashboard/audit',            label: 'Audit Trail',                labelKey: 'userMgmt.sec_auditTrail' },
+  { route: '/dashboard/blacklist',        label: 'Blacklist Registry',         labelKey: 'userMgmt.sec_blacklistRegistry' },
+  { route: '/dashboard/purchase/far',     label: 'Fixed Asset Register',       labelKey: 'userMgmt.sec_fixedAssetRegister' },
+  { route: '/dashboard/purchase/qr',      label: 'Asset QR Codes',             labelKey: 'userMgmt.sec_assetQrCodes' },
+  { route: '/dashboard/purchase/maint',   label: 'Maintenance',                labelKey: 'userMgmt.sec_maintenance' },
+  { route: '/dashboard/purchase/activity',label: 'Plant Activity Log',         labelKey: 'userMgmt.sec_plantActivityLog' },
+  { route: '/dashboard/purchase/storereq',label: 'Store Requisitions',         labelKey: 'userMgmt.sec_storeRequisitions' },
+  { route: '/dashboard/purchase/purchase',label: 'Purchase Orders',            labelKey: 'userMgmt.sec_purchaseOrders' },
+  { route: '/dashboard/purchase/marine',  label: 'Marine Insurance',           labelKey: 'userMgmt.sec_marineInsurance' },
+  { route: '/dashboard/purchase/labour',  label: 'Labour Costs',               labelKey: 'userMgmt.sec_labourCosts' },
 ];
 
 const LEVEL_OPTIONS = ['L1', 'L2', 'L3', 'L4'];
@@ -101,6 +103,7 @@ const LEVEL_COLOR: Record<string, { bg: string; color: string }> = {
   L1: { bg: '#F5F3FF', color: '#7C3AED' },
 };
 
+// Colours only — the visible label is translated at the render site.
 const STATUS_CFG = {
   active:   { label: 'Active',   bg: '#DCFCE7', color: '#16A34A' },
   inactive: { label: 'Inactive', bg: '#F1F5F9', color: '#94A3B8' },
@@ -220,14 +223,14 @@ export function UserManagement() {
 
   async function handleSaveRole() {
     const label = roleForm.label.trim();
-    if (!label) { toast.error('Role name is required'); return; }
+    if (!label) { toast.error(t('userMgmt.errRoleNameRequired', 'Role name is required')); return; }
     const id = editingRole ? editingRole.id : (slugTouched ? slugify(roleForm.id) : slugify(label));
-    if (!id) { toast.error('A valid slug id is required'); return; }
+    if (!id) { toast.error(t('userMgmt.errRoleSlugRequired', 'A valid slug id is required')); return; }
     if (savingRole) return;
     setSavingRole(true);
     try {
       if (!editingRole && roles.some(r => r.id === id)) {
-        toast.error(`A role with id "${id}" already exists`);
+        toast.error(t('userMgmt.errRoleIdExists', { defaultValue: 'A role with id "{{id}}" already exists', id }));
         return;
       }
       const payload = {
@@ -240,19 +243,19 @@ export function UserManagement() {
       };
       if (editingRole) {
         const { error } = await updateRows('roles', payload).eq('id', editingRole.id);
-        if (error) { toast.error(`Save failed: ${error.message}`); return; }
+        if (error) { toast.error(t('userMgmt.errSaveFailed', { msg: error.message })); return; }
       } else {
         const { error } = await insertRows('roles', {
           id, ...payload, is_admin: false, is_system: false,
           description: null, avatar_from: null, avatar_to: null,
           sort_order: (roles.reduce((m, r) => Math.max(m, r.sort_order ?? 0), 0)) + 1,
         });
-        if (error) { toast.error(`Create failed: ${error.message}`); return; }
+        if (error) { toast.error(t('userMgmt.errRoleCreateFailed', { defaultValue: 'Create failed: {{msg}}', msg: error.message })); return; }
       }
       await refreshRoles();
       setShowRoleForm(false);
       setEditingRole(null);
-      toast.success(editingRole ? 'Role updated' : 'Role created');
+      toast.success(editingRole ? t('userMgmt.roleUpdated', 'Role updated') : t('userMgmt.roleCreated', 'Role created'));
     } finally {
       setSavingRole(false);
     }
@@ -261,17 +264,17 @@ export function UserManagement() {
   async function handleDeleteRole(r: RoleRow) {
     if (r.is_admin || r.is_system) return;
     if (users.some(u => u.role_id === r.id)) {
-      toast.error(`Cannot delete "${r.label}" — users are still assigned to it`);
+      toast.error(t('userMgmt.errRoleInUse', { defaultValue: 'Cannot delete "{{label}}" — users are still assigned to it', label: r.label }));
       return;
     }
-    if (!window.confirm(`Delete role "${r.label}"? This cannot be undone.`)) return;
+    if (!window.confirm(t('userMgmt.confirmDeleteRole', { defaultValue: 'Delete role "{{label}}"? This cannot be undone.', label: r.label }))) return;
     setDeletingRoleId(r.id);
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (supabase.from('roles') as any).delete().eq('id', r.id);
-      if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+      if (error) { toast.error(t('userMgmt.errRoleDeleteFailed', { defaultValue: 'Delete failed: {{msg}}', msg: error.message })); return; }
       await refreshRoles();
-      toast.success('Role deleted');
+      toast.success(t('userMgmt.roleDeleted', 'Role deleted'));
     } finally {
       setDeletingRoleId(null);
     }
@@ -542,15 +545,15 @@ export function UserManagement() {
 
     await notifyMentions(form.access_note, {
       entityType: 'user_account', entityId: editingUser?.id,
-      entityLabel: `User · ${form.name.trim()}`, route: '/dashboard/users',
+      entityLabel: t('userMgmt.entityLabel', { defaultValue: 'User · {{name}}', name: form.name.trim() }), route: '/dashboard/users',
     });
     const hits = await screenBlacklist(
-      [{ value: form.name, label: 'Name' }, { value: form.designation, label: 'Designation' }],
-      { workflow: 'User Management', source: 'entry', entityLabel: `User · ${form.name.trim()}` },
+      [{ value: form.name, label: t('userMgmt.colName') }, { value: form.designation, label: t('userMgmt.colDesignation') }],
+      { workflow: 'User Management', source: 'entry', entityLabel: t('userMgmt.entityLabel', { defaultValue: 'User · {{name}}', name: form.name.trim() }) },
     );
     if (hits.length) {
       const h = hits[0];
-      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      toast.error(t('userMgmt.blacklistHit', { defaultValue: '⚠ "{{value}}" ≈ blacklisted {{type}} "{{name}}" ({{pct}}%). Admin notified.', value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
     }
     setSaved(true);
     await loadData();
@@ -823,7 +826,7 @@ export function UserManagement() {
               {selectedRole.level} · {selectedRole.label}
             </div>
             <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>
-              {selectedRole.description || 'Custom access'}
+              {selectedRole.description || t('userMgmt.customAccess', 'Custom access')}
             </div>
           </div>
         )}
@@ -1013,11 +1016,11 @@ export function UserManagement() {
         ) : (
           <div className="flex flex-col gap-2.5">
             {historyEvents.map(ev => {
-              const cfg = EVENT_CFG[ev.action] || { label: ev.action, bg: '#F1F5F9', color: '#475569' };
+              const cfg = EVENT_CFG[ev.action] || { label: ev.action, labelKey: '', bg: '#F1F5F9', color: '#475569' };
               return (
                 <div key={ev.id} style={{ border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px' }}>
                   <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontSize: 10.5, fontWeight: 700 }}>{cfg.label}</span>
+                    <span className="badge" style={{ background: cfg.bg, color: cfg.color, fontSize: 10.5, fontWeight: 700 }}>{cfg.labelKey ? t(cfg.labelKey, cfg.label) : cfg.label}</span>
                     <span className="text-[11px] text-slate-400">{formatEventTime(ev.created_at)}</span>
                   </div>
                   {ev.details && <div className="text-[13px] text-slate-700 leading-snug">{ev.details}</div>}
@@ -1062,8 +1065,8 @@ export function UserManagement() {
             const lvl = LEVEL_COLOR[r.level] || { bg: '#F1F5F9', color: '#64748B' };
             const userCount = users.filter(u => u.role_id === r.id).length;
             const access = r.allowed_routes?.includes('*')
-              ? 'All sections'
-              : `${r.allowed_routes?.length || 0} section${(r.allowed_routes?.length || 0) === 1 ? '' : 's'}`;
+              ? t('userMgmt.allSections', 'All sections')
+              : t('userMgmt.sectionCount', { defaultValue: '{{count}} sections', count: r.allowed_routes?.length || 0 });
             return (
               <div key={r.id} style={{ border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px' }}>
                 <div className="flex items-center justify-between gap-2">
@@ -1076,7 +1079,7 @@ export function UserManagement() {
                       )}
                     </div>
                     <div className="text-[11px] text-slate-400 mt-1">
-                      {r.id} · {access} · {userCount} user{userCount === 1 ? '' : 's'}
+                      {r.id} · {access} · {t('userMgmt.userCount', { defaultValue: '{{count}} users', count: userCount })}
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -1116,7 +1119,7 @@ export function UserManagement() {
                 label: e.target.value,
                 id: editingRole || slugTouched ? f.id : slugify(e.target.value),
               }))}
-              placeholder="e.g. Quality Inspector"
+              placeholder={t('userMgmt.roleNamePlaceholder', 'e.g. Quality Inspector')}
             />
           </PanelField>
           <PanelField label={t('userMgmt.roleSlugLabel', 'Slug / id')}>
@@ -1162,7 +1165,7 @@ export function UserManagement() {
               return (
                 <label key={s.route} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#334155', cursor: 'pointer', padding: '6px 8px', borderRadius: 8, background: on ? '#EFF6FF' : 'transparent' }}>
                   <input type="checkbox" checked={on} onChange={() => toggleRoleRoute(s.route)} />
-                  <span>{s.label}</span>
+                  <span>{t(s.labelKey, s.label)}</span>
                 </label>
               );
             })}
@@ -1184,7 +1187,7 @@ export function UserManagement() {
                   </div>
                   <button
                     type="button"
-                    title={on ? 'Revoke (requires password)' : 'Grant (requires password)'}
+                    title={on ? t('userMgmt.revokeRequiresPassword', 'Revoke (requires password)') : t('userMgmt.grantRequiresPassword', 'Grant (requires password)')}
                     onClick={async () => {
                       // Granting OR revoking a privileged allowance is sensitive → step-up.
                       const ok = await stepUp();
@@ -1226,13 +1229,14 @@ export function UserManagement() {
   );
 }
 
-const EVENT_CFG: Record<string, { label: string; bg: string; color: string }> = {
-  created:        { label: 'Created',        bg: '#EFF6FF', color: '#2563EB' },
-  self_update:    { label: 'Self update',    bg: '#F5F3FF', color: '#7C3AED' },
-  admin_update:   { label: 'Admin update',   bg: '#FFF7ED', color: '#EA580C' },
-  password_reset: { label: 'Password reset', bg: '#FEF2F2', color: '#DC2626' },
-  login_enabled:  { label: 'Login enabled',  bg: '#F0FDF4', color: '#16A34A' },
-  login_disabled: { label: 'Login disabled', bg: '#F1F5F9', color: '#64748B' },
+// `label` = English default; `labelKey` is resolved via t() at the render site.
+const EVENT_CFG: Record<string, { label: string; labelKey: string; bg: string; color: string }> = {
+  created:        { label: 'Created',        labelKey: 'userMgmt.evCreated',       bg: '#EFF6FF', color: '#2563EB' },
+  self_update:    { label: 'Self update',    labelKey: 'userMgmt.evSelfUpdate',    bg: '#F5F3FF', color: '#7C3AED' },
+  admin_update:   { label: 'Admin update',   labelKey: 'userMgmt.evAdminUpdate',   bg: '#FFF7ED', color: '#EA580C' },
+  password_reset: { label: 'Password reset', labelKey: 'userMgmt.evPasswordReset', bg: '#FEF2F2', color: '#DC2626' },
+  login_enabled:  { label: 'Login enabled',  labelKey: 'userMgmt.evLoginEnabled',  bg: '#F0FDF4', color: '#16A34A' },
+  login_disabled: { label: 'Login disabled', labelKey: 'userMgmt.evLoginDisabled', bg: '#F1F5F9', color: '#64748B' },
 };
 
 function formatEventTime(d: string) {

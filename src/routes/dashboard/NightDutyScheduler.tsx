@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, X, Download, Building2, Activity } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../components/ui/toast';
@@ -29,6 +30,7 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const todayIso = () => iso(new Date());
 
+// CSV export keeps the original English labels by design.
 const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> = {
   scheduled:  { label: 'Scheduled',  bg: '#EFF6FF', color: '#2563EB' },
   checked_in: { label: 'Checked in', bg: '#DCFCE7', color: '#16A34A' },
@@ -36,15 +38,30 @@ const STATUS_CFG: Record<string, { label: string; bg: string; color: string }> =
   missed:     { label: 'Missed',     bg: '#FEF2F2', color: '#DC2626' },
 };
 
-const WIZARD_STEPS = [
-  { n: 1, title: 'Choose Date',               sub: 'Select the dates for night duty' },
-  { n: 2, title: 'Select Employees',          sub: 'Choose available employees' },
-  { n: 3, title: 'Repeat Schedule (Optional)', sub: 'Set recurrence and end date' },
-  { n: 4, title: 'Review & Confirm',          sub: 'Review and assign duty' },
-];
-
 export function NightDutyScheduler() {
+  const { t } = useTranslation();
   const toast = useToast();
+
+  // UI status labels (translated) — CSV export keeps English via STATUS_CFG.
+  const statusLabels: Record<string, string> = {
+    scheduled:  t('nightBoard.statusScheduled', 'Scheduled'),
+    checked_in: t('nightBoard.statusCheckedIn', 'Checked in'),
+    completed:  t('nightBoard.statusCompleted', 'Completed'),
+    missed:     t('nightBoard.statusMissed', 'Missed'),
+  };
+
+  const wizardSteps = [
+    { n: 1, title: t('nightBoard.step1Title', 'Choose Date'),                sub: t('nightBoard.step1Sub', 'Select the dates for night duty') },
+    { n: 2, title: t('nightBoard.step2Title', 'Select Employees'),           sub: t('nightBoard.step2Sub', 'Choose available employees') },
+    { n: 3, title: t('nightBoard.step3Title', 'Repeat Schedule (Optional)'), sub: t('nightBoard.step3Sub', 'Set recurrence and end date') },
+    { n: 4, title: t('nightBoard.step4Title', 'Review & Confirm'),           sub: t('nightBoard.step4Sub', 'Review and assign duty') },
+  ];
+
+  const weekdayLabels = [
+    t('nightBoard.weekdaySun', 'Sun'), t('nightBoard.weekdayMon', 'Mon'), t('nightBoard.weekdayTue', 'Tue'),
+    t('nightBoard.weekdayWed', 'Wed'), t('nightBoard.weekdayThu', 'Thu'), t('nightBoard.weekdayFri', 'Fri'),
+    t('nightBoard.weekdaySat', 'Sat'),
+  ];
   const { activeProfile, roles } = useRoleContext();
   const { plantIds, isGlobal, plants } = usePlantScope();
 
@@ -132,9 +149,9 @@ export function NightDutyScheduler() {
 
   // Night-duty report stats (from the loaded upcoming/checked-in duties).
   const report = useMemo(() => {
-    const t = todayIso();
+    const td = todayIso(); // NOTE: not `t` — would shadow the i18n translate fn
     return {
-      tonight: duties.filter(d => d.duty_date === t).length,
+      tonight: duties.filter(d => d.duty_date === td).length,
       scheduled: duties.filter(d => d.status === 'scheduled').length,
       checkedIn: duties.filter(d => d.status === 'checked_in').length,
       missed: duties.filter(d => d.status === 'missed').length,
@@ -150,22 +167,24 @@ export function NightDutyScheduler() {
 
   // "Repeat" helper: add every matching weekday from today..until into selectedDates.
   function applyRepeat() {
-    if (!repeatDays.length || !repeatUntil) { toast.error('Pick weekday(s) and an end date'); return; }
+    if (!repeatDays.length || !repeatUntil) { toast.error(t('nightBoard.pickWeekdayEnd', 'Pick weekday(s) and an end date')); return; }
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(repeatUntil + 'T00:00:00');
-    if (end < start) { toast.error('End date is in the past'); return; }
+    if (end < start) { toast.error(t('nightBoard.endDatePast', 'End date is in the past')); return; }
     const add: string[] = [];
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       if (repeatDays.includes(d.getDay())) add.push(iso(d));
     }
     setSelectedDates(s => [...new Set([...s, ...add])]);
-    toast.success(`Added ${add.length} date${add.length === 1 ? '' : 's'}`);
+    toast.success(add.length === 1
+      ? t('nightBoard.addedDateOne', 'Added 1 date')
+      : t('nightBoard.addedDatesMany', { defaultValue: 'Added {{n}} dates', n: add.length }));
   }
 
   async function schedule() {
     if (saving) return;
-    if (!selectedTechIds.length) { toast.error('Select at least one person'); return; }
-    if (!selectedDates.length) { toast.error('Select at least one date'); return; }
+    if (!selectedTechIds.length) { toast.error(t('nightBoard.selectOnePerson', 'Select at least one person')); return; }
+    if (!selectedDates.length) { toast.error(t('nightBoard.selectOneDate', 'Select at least one date')); return; }
     setSaving(true);
     try {
       const group = (crypto as { randomUUID?: () => string }).randomUUID?.() ?? null;
@@ -196,14 +215,21 @@ export function NightDutyScheduler() {
           .upsert(rows, { onConflict: 'technician_id,duty_date', ignoreDuplicates: true })
           .select('id');
       }
-      if (res.error) { toast.error(`Schedule failed: ${res.error.message}`); return; }
+      if (res.error) { toast.error(t('nightBoard.scheduleFailed', { defaultValue: 'Schedule failed: {{message}}', message: res.error.message })); return; }
       const created = res.data?.length ?? 0;
       const skipped = rows.length - created;
       if (created === 0) {
-        toast.error(`Nothing new — ${skipped === 1 ? 'that slot already exists' : `all ${skipped} slots already exist`} for the selected people/dates${skipped ? ' (same plant + date)' : ''}.`);
+        toast.error(skipped === 1
+          ? t('nightBoard.nothingNewOne', 'Nothing new — that slot already exists for the selected people/dates (same plant + date).')
+          : t('nightBoard.nothingNewMany', { defaultValue: 'Nothing new — all {{n}} slots already exist for the selected people/dates (same plant + date).', n: skipped }));
         return; // keep the wizard open so the allocator can adjust
       }
-      toast.success(`Scheduled ${created} duty slot${created === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} already existed` : ''}`);
+      const scheduledMsg = created === 1
+        ? t('nightBoard.scheduledSlotOne', 'Scheduled 1 duty slot')
+        : t('nightBoard.scheduledSlotsMany', { defaultValue: 'Scheduled {{n}} duty slots', n: created });
+      toast.success(skipped > 0
+        ? `${scheduledMsg} · ${t('nightBoard.alreadyExisted', { defaultValue: '{{n}} already existed', n: skipped })}`
+        : scheduledMsg);
       setSelectedDates([]); setSelectedTechIds([]); setRepeatDays([]); setRepeatUntil(''); setDutyPlant('auto');
       setSchedulerOpen(false); setStep(1); // close the wizard on success — back to the report
       await load();
@@ -245,14 +271,14 @@ export function NightDutyScheduler() {
       const acct = acctById[d.technician_id];
       const role = acct?.role_id ? (roleLabel[acct.role_id] || '') : '';
       const plant = (d.plant_id ? plantName[d.plant_id] : acct?.plant_id ? plantName[acct.plant_id] : '') || '';
-      return { d, name: acctName[d.technician_id] || 'Unknown', role, plant };
+      return { d, name: acctName[d.technician_id] || t('nightBoard.unknown', 'Unknown'), role, plant };
     }).filter(r =>
       (!q || r.name.toLowerCase().includes(q) || r.role.toLowerCase().includes(q) || r.plant.toLowerCase().includes(q))
       && (schedPlant === 'all' || r.plant === schedPlant)
       && (schedStatus === 'all' || r.d.status === schedStatus)
       && (!schedFrom || r.d.duty_date >= schedFrom)
       && (!schedTo || r.d.duty_date <= schedTo));
-  }, [duties, acctById, acctName, roleLabel, plantName, schedQ, schedPlant, schedStatus, schedFrom, schedTo]);
+  }, [duties, acctById, acctName, roleLabel, plantName, schedQ, schedPlant, schedStatus, schedFrom, schedTo, t]);
   const schedPg = usePagination(scheduleRows, { resetKey: `${schedQ}|${schedPlant}|${schedStatus}|${schedFrom}|${schedTo}|${duties.length}` });
 
   const PILL_TONE: Record<string, 'blue' | 'green' | 'slate' | 'red'> = {
@@ -261,10 +287,11 @@ export function NightDutyScheduler() {
 
   /** Un-schedule a future duty (scheduled only — check-ins are audit history). */
   async function removeDuty(d: Duty) {
-    if (!window.confirm(`Remove this scheduled duty (${new Date(d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })})?`)) return;
+    const dateLabel = new Date(d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    if (!window.confirm(t('nightBoard.removeDutyConfirm', { defaultValue: 'Remove this scheduled duty ({{date}})?', date: dateLabel }))) return;
     const { error } = await supabase.from('night_duty').delete().eq('id', d.id);
-    if (error) { toast.error(`Remove failed: ${error.message}`); return; }
-    toast.success('Duty removed');
+    if (error) { toast.error(t('nightBoard.removeFailed', { defaultValue: 'Remove failed: {{message}}', message: error.message })); return; }
+    toast.success(t('nightBoard.dutyRemoved', 'Duty removed'));
     await load();
   }
 
@@ -290,7 +317,7 @@ export function NightDutyScheduler() {
         <button onClick={() => setMonthCursor(c => new Date(c.getFullYear(), c.getMonth() + 1, 1))} style={navBtn}>›</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
-        {WEEKDAYS.map(w => <div key={w} style={{ textAlign: 'center', fontSize: 10.5, color: '#94A3B8', fontWeight: 700, padding: '2px 0' }}>{w.toUpperCase()}</div>)}
+        {weekdayLabels.map((w, i) => <div key={WEEKDAYS[i]} style={{ textAlign: 'center', fontSize: 10.5, color: '#94A3B8', fontWeight: 700, padding: '2px 0' }}>{w.toUpperCase()}</div>)}
         {monthGrid.map((d, i) => {
           if (!d) return <div key={i} />;
           const past = d < today;
@@ -316,10 +343,10 @@ export function NightDutyScheduler() {
       </div>
       {selectedDates.length > 0 && (
         <div className="mt-3 pt-3 border-t border-slate-100">
-          <div className="text-[11px] text-slate-500 font-semibold uppercase tracking-wide mb-1">Selected {selectedDates.length === 1 ? 'Date' : `Dates (${selectedDates.length})`}</div>
+          <div className="text-[11px] text-slate-500 font-semibold uppercase tracking-wide mb-1">{selectedDates.length === 1 ? t('nightBoard.selectedDateOne', 'Selected Date') : t('nightBoard.selectedDatesMany', { defaultValue: 'Selected Dates ({{n}})', n: selectedDates.length })}</div>
           <div className="text-[13px] font-semibold text-[#C5421F]">
             {[...selectedDates].sort().slice(0, 3).map(d => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })).join(' · ')}
-            {selectedDates.length > 3 && ` +${selectedDates.length - 3} more`}
+            {selectedDates.length > 3 && ` ${t('nightBoard.moreDates', { defaultValue: '+{{n}} more', n: selectedDates.length - 3 })}`}
           </div>
         </div>
       )}
@@ -329,18 +356,18 @@ export function NightDutyScheduler() {
   const peoplePicker = (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <div className="text-[11.5px] font-bold text-slate-600">Who's on duty ({selectedTechIds.length} selected)</div>
-        {selectedTechIds.length > 0 && <button onClick={() => setSelectedTechIds([])} style={{ fontSize: 10.5, color: '#64748B', border: 'none', background: 'none', cursor: 'pointer' }}>clear</button>}
+        <div className="text-[11.5px] font-bold text-slate-600">{t('nightBoard.whosOnDuty', { defaultValue: "Who's on duty ({{n}} selected)", n: selectedTechIds.length })}</div>
+        {selectedTechIds.length > 0 && <button onClick={() => setSelectedTechIds([])} style={{ fontSize: 10.5, color: '#64748B', border: 'none', background: 'none', cursor: 'pointer' }}>{t('nightBoard.clear', 'clear')}</button>}
       </div>
       <input
         type="text" value={techSearch} onChange={e => setTechSearch(e.target.value)}
-        placeholder="Search by name, role or level…"
+        placeholder={t('nightBoard.searchByNameRoleLevel', 'Search by name, role or level…')}
         style={{ width: '100%', padding: '8px 11px', border: '1px solid #E2E8F0', borderRadius: 10, fontSize: 12.5, outline: 'none', fontFamily: 'inherit', marginBottom: 6, boxSizing: 'border-box' }}
       />
       <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #E2E8F0', borderRadius: 10, padding: 4 }}>
-        {loading && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>Loading…</div>}
-        {!loading && subordinates.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>No team members beneath you in your plant.</div>}
-        {!loading && subordinates.length > 0 && filteredSubs.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>No match for "{techSearch}".</div>}
+        {loading && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>{t('nightBoard.loading', 'Loading…')}</div>}
+        {!loading && subordinates.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>{t('nightBoard.noTeamMembers', 'No team members beneath you in your plant.')}</div>}
+        {!loading && subordinates.length > 0 && filteredSubs.length === 0 && <div style={{ fontSize: 12, color: '#94A3B8', padding: 8 }}>{t('nightBoard.noMatchFor', { defaultValue: 'No match for "{{q}}".', q: techSearch })}</div>}
         {filteredSubs.map(s => {
           const on = selectedTechIds.includes(s.id);
           const lvl = s.role_id ? roleTier[s.role_id] : '';
@@ -358,58 +385,58 @@ export function NightDutyScheduler() {
 
       {/* Duty plant — lets a multi-plant technician be scheduled per plant */}
       <div className="mt-3">
-        <div className="text-[11.5px] font-bold text-slate-600 mb-1">Duty plant</div>
+        <div className="text-[11.5px] font-bold text-slate-600 mb-1">{t('nightBoard.dutyPlantLabel', 'Duty plant')}</div>
         <select
           value={dutyPlant}
           onChange={e => setDutyPlant(e.target.value)}
           style={{ width: '100%', padding: '8px 11px', border: '1px solid #E2E8F0', borderRadius: 10, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', cursor: 'pointer' }}
         >
-          <option value="auto">Auto — each person's own plant</option>
+          <option value="auto">{t('nightBoard.autoOwnPlant', "Auto — each person's own plant")}</option>
           {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <div className="text-[10.5px] text-slate-400 mt-1">Pick a specific plant to schedule someone at a plant other than their own — e.g. a second duty the same night at another plant.</div>
+        <div className="text-[10.5px] text-slate-400 mt-1">{t('nightBoard.dutyPlantHint', 'Pick a specific plant to schedule someone at a plant other than their own — e.g. a second duty the same night at another plant.')}</div>
       </div>
     </div>
   );
 
   const repeatHelper = (
     <div>
-      <div className="text-[11.5px] font-bold text-slate-600 mb-1.5">Repeat (for rotation) — optional</div>
+      <div className="text-[11.5px] font-bold text-slate-600 mb-1.5">{t('nightBoard.repeatOptional', 'Repeat (for rotation) — optional')}</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-        {WEEKDAYS.map((w, idx) => {
+        {weekdayLabels.map((w, idx) => {
           const on = repeatDays.includes(idx);
           return (
-            <button key={w} onClick={() => setRepeatDays(s => on ? s.filter(x => x !== idx) : [...s, idx])}
+            <button key={WEEKDAYS[idx]} onClick={() => setRepeatDays(s => on ? s.filter(x => x !== idx) : [...s, idx])}
               style={{ padding: '5px 9px', borderRadius: 8, border: '1px solid ' + (on ? '#F47651' : '#E2E8F0'), background: on ? '#F47651' : '#fff', color: on ? '#fff' : '#475569', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>{w}</button>
           );
         })}
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11.5, color: '#64748B' }}>until</span>
+        <span style={{ fontSize: 11.5, color: '#64748B' }}>{t('nightBoard.until', 'until')}</span>
         <input type="date" value={repeatUntil} min={today} onChange={e => setRepeatUntil(e.target.value)}
           style={{ padding: '7px 10px', border: '1px solid #E2E8F0', borderRadius: 10, fontSize: 12.5, fontFamily: 'inherit' }} />
-        <ButtonV2 size="sm" variant="outline" onClick={applyRepeat}>Add dates</ButtonV2>
+        <ButtonV2 size="sm" variant="outline" onClick={applyRepeat}>{t('nightBoard.addDates', 'Add dates')}</ButtonV2>
       </div>
-      <div className="text-[11px] text-slate-400 mt-2">Adds every matching weekday between today and the end date to your selected dates ({selectedDates.length} so far).</div>
+      <div className="text-[11px] text-slate-400 mt-2">{t('nightBoard.repeatHint', { defaultValue: 'Adds every matching weekday between today and the end date to your selected dates ({{n}} so far).', n: selectedDates.length })}</div>
     </div>
   );
 
   const review = (
     <div>
-      <div className="text-[11.5px] font-bold text-slate-600 mb-2">Review</div>
+      <div className="text-[11.5px] font-bold text-slate-600 mb-2">{t('nightBoard.review', 'Review')}</div>
       <div className="rounded-[10px] border border-slate-200 divide-y divide-slate-100">
-        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Employees</span><span className="font-semibold">{selectedTechIds.length}</span></div>
-        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Nights</span><span className="font-semibold">{selectedDates.length}</span></div>
-        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Duty plant</span><span className="font-semibold">{dutyPlant === 'auto' ? "Each person's own" : (plantName[dutyPlant] ?? '—')}</span></div>
-        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">Duty slots</span><span className="font-semibold">{selectedTechIds.length * selectedDates.length}</span></div>
+        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">{t('nightBoard.employees', 'Employees')}</span><span className="font-semibold">{selectedTechIds.length}</span></div>
+        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">{t('nightBoard.nights', 'Nights')}</span><span className="font-semibold">{selectedDates.length}</span></div>
+        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">{t('nightBoard.dutyPlantLabel', 'Duty plant')}</span><span className="font-semibold">{dutyPlant === 'auto' ? t('nightBoard.eachPersonsOwn', "Each person's own") : (plantName[dutyPlant] ?? '—')}</span></div>
+        <div className="flex justify-between px-3.5 py-2.5 text-[13px]"><span className="text-slate-500">{t('nightBoard.dutySlots', 'Duty slots')}</span><span className="font-semibold">{selectedTechIds.length * selectedDates.length}</span></div>
       </div>
       {selectedTechIds.length > 0 && (
         <div className="text-[12px] text-slate-500 mt-2 leading-relaxed">
-          {selectedTechIds.map(id => acctName[id] || 'Unknown').join(', ')}
+          {selectedTechIds.map(id => acctName[id] || t('nightBoard.unknown', 'Unknown')).join(', ')}
         </div>
       )}
       {(selectedTechIds.length === 0 || selectedDates.length === 0) && (
-        <div className="text-[12px] text-amber-600 mt-2">Pick at least one date (step 1) and one employee (step 2) before confirming.</div>
+        <div className="text-[12px] text-amber-600 mt-2">{t('nightBoard.pickBeforeConfirm', 'Pick at least one date (step 1) and one employee (step 2) before confirming.')}</div>
       )}
     </div>
   );
@@ -421,30 +448,30 @@ export function NightDutyScheduler() {
     <div>
       {/* KPI cards — "View →" links drive the schedule-table filters */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <StatCard label="On Duty Tonight" value={String(report.tonight).padStart(2, '0')} caption="Employees"
-          viewLabel="View list" onView={() => { resetSchedFilters(); setSchedFrom(today); setSchedTo(today); }} />
-        <StatCard label="Upcoming Duties" value={String(report.scheduled).padStart(2, '0')} caption="Scheduled ahead"
-          viewLabel="View calendar" onView={() => { resetSchedFilters(); setSchedStatus('scheduled'); }} />
-        <StatCard label="Checked In" value={String(report.checkedIn).padStart(2, '0')} caption="Today"
+        <StatCard label={t('nightBoard.onDutyTonight', 'On Duty Tonight')} value={String(report.tonight).padStart(2, '0')} caption={t('nightBoard.employees', 'Employees')}
+          viewLabel={t('nightBoard.viewList', 'View list')} onView={() => { resetSchedFilters(); setSchedFrom(today); setSchedTo(today); }} />
+        <StatCard label={t('nightBoard.upcomingDuties', 'Upcoming Duties')} value={String(report.scheduled).padStart(2, '0')} caption={t('nightBoard.scheduledAhead', 'Scheduled ahead')}
+          viewLabel={t('nightBoard.viewCalendar', 'View calendar')} onView={() => { resetSchedFilters(); setSchedStatus('scheduled'); }} />
+        <StatCard label={t('nightBoard.checkedInLabel', 'Checked In')} value={String(report.checkedIn).padStart(2, '0')} caption={t('nightBoard.todayCaption', 'Today')}
           valueTone={report.checkedIn > 0 ? 'green' : 'default'}
-          viewLabel="View check-ins" onView={() => { resetSchedFilters(); setSchedStatus('checked_in'); }} />
-        <StatCard label="Missed Check-ins" value={String(report.missed).padStart(2, '0')} caption="Employees"
+          viewLabel={t('nightBoard.viewCheckins', 'View check-ins')} onView={() => { resetSchedFilters(); setSchedStatus('checked_in'); }} />
+        <StatCard label={t('nightBoard.missedCheckins', 'Missed Check-ins')} value={String(report.missed).padStart(2, '0')} caption={t('nightBoard.employees', 'Employees')}
           valueTone={report.missed > 0 ? 'orange' : 'default'}
-          viewLabel="View details" onView={() => { resetSchedFilters(); setSchedStatus('missed'); }} />
+          viewLabel={t('nightBoard.viewDetails', 'View details')} onView={() => { resetSchedFilters(); setSchedStatus('missed'); }} />
       </div>
 
     <SectionCard
       flush
-      title="Night Duty Schedule"
-      subtitle="Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights."
+      title={t('nightBoard.nightDutySchedule', 'Night Duty Schedule')}
+      subtitle={t('nightBoard.scheduleSubtitle', 'Assign your team onto night-duty shifts. Rotate by scheduling different people on different nights.')}
       actions={
         <>
           <ButtonV2 variant="outline" icon={<Download />} onClick={exportSchedule} disabled={!scheduleRows.length}>
-            Export
+            {t('common.export', 'Export')}
           </ButtonV2>
           {!schedulerOpen && (
             <ButtonV2 variant="primary" icon={<Plus />} onClick={() => setSchedulerOpen(true)}>
-              Assign Night Duty
+              {t('nightBoard.assignNightDuty', 'Assign Night Duty')}
             </ButtonV2>
           )}
         </>
@@ -454,11 +481,11 @@ export function NightDutyScheduler() {
       <div className="px-5 pb-4">
         <FilterBar
           className="!p-0 !border-0"
-          search={schedQ} onSearch={setSchedQ} searchPlaceholder="Search employee, role or plant…"
+          search={schedQ} onSearch={setSchedQ} searchPlaceholder={t('nightBoard.searchEmployeePlaceholder', 'Search employee, role or plant…')}
           onReset={resetSchedFilters}
         >
           <FilterSelect icon={<Building2 />} value={schedPlant} onChange={setSchedPlant}
-            options={[{ value: 'all', label: 'All Plants' }, ...plants.map(p => ({ value: p.name, label: p.name }))]} />
+            options={[{ value: 'all', label: t('common.allPlants', 'All Plants') }, ...plants.map(p => ({ value: p.name, label: p.name }))]} />
           <div className="flex items-center gap-1.5">
             <input type="date" value={schedFrom} onChange={e => setSchedFrom(e.target.value)}
               className="rounded-[10px] border border-slate-200 bg-white text-[13px] text-slate-700 py-2.5 px-3 hover:bg-slate-50" />
@@ -468,11 +495,11 @@ export function NightDutyScheduler() {
           </div>
           <FilterSelect icon={<Activity />} value={schedStatus} onChange={setSchedStatus}
             options={[
-              { value: 'all', label: 'All Status' },
-              { value: 'scheduled', label: 'Scheduled' },
-              { value: 'checked_in', label: 'Checked in' },
-              { value: 'completed', label: 'Completed' },
-              { value: 'missed', label: 'Missed' },
+              { value: 'all', label: t('common.allStatus', 'All Status') },
+              { value: 'scheduled', label: statusLabels.scheduled },
+              { value: 'checked_in', label: statusLabels.checked_in },
+              { value: 'completed', label: statusLabels.completed },
+              { value: 'missed', label: statusLabels.missed },
             ]} />
         </FilterBar>
       </div>
@@ -482,14 +509,14 @@ export function NightDutyScheduler() {
         <table className="dt2">
           <thead>
             <tr>
-              <th>Employee</th><th>Role</th><th>Plant</th><th>Duty Date</th>
-              <th>Shift Time</th><th>Status</th><th>Check-in</th><th>Actions</th>
+              <th>{t('nightBoard.thEmployee', 'Employee')}</th><th>{t('nightBoard.thRole', 'Role')}</th><th>{t('common.plant', 'Plant')}</th><th>{t('nightBoard.thDutyDate', 'Duty Date')}</th>
+              <th>{t('nightBoard.thShiftTime', 'Shift Time')}</th><th>{t('nightBoard.thStatus', 'Status')}</th><th>{t('nightBoard.thCheckin', 'Check-in')}</th><th>{t('nightBoard.thActions', 'Actions')}</th>
             </tr>
           </thead>
           <tbody>
             {schedPg.pageRows.length === 0 && (
               <tr><td colSpan={8} className="text-center text-slate-400 py-8 text-sm">
-                {duties.length === 0 ? 'No upcoming night duty scheduled.' : 'No duties match your filters.'}
+                {duties.length === 0 ? t('nightBoard.noUpcomingDuty', 'No upcoming night duty scheduled.') : t('nightBoard.noDutiesMatch', 'No duties match your filters.')}
               </td></tr>
             )}
             {schedPg.pageRows.map(r => (
@@ -502,7 +529,7 @@ export function NightDutyScheduler() {
                   <div className="text-[11px] text-slate-400">{new Date(r.d.duty_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short' })}</div>
                 </td>
                 <td className="text-slate-500">{SHIFT_LABEL}</td>
-                <td><StatusPill tone={PILL_TONE[r.d.status] ?? 'slate'} label={STATUS_CFG[r.d.status]?.label ?? r.d.status} /></td>
+                <td><StatusPill tone={PILL_TONE[r.d.status] ?? 'slate'} label={statusLabels[r.d.status] ?? r.d.status} /></td>
                 <td>
                   {r.d.checked_in_at ? (
                     <>
@@ -513,7 +540,7 @@ export function NightDutyScheduler() {
                 </td>
                 <td>
                   {r.d.status === 'scheduled'
-                    ? <ButtonV2 size="sm" variant="outline" onClick={() => removeDuty(r.d)}>Remove</ButtonV2>
+                    ? <ButtonV2 size="sm" variant="outline" onClick={() => removeDuty(r.d)}>{t('nightBoard.remove', 'Remove')}</ButtonV2>
                     : <span className="text-slate-300 text-xs">—</span>}
                 </td>
               </tr>
@@ -521,7 +548,7 @@ export function NightDutyScheduler() {
           </tbody>
         </table>
       </div>
-      <TablePaginationV2 controls={schedPg.controls} label="records" />
+      <TablePaginationV2 controls={schedPg.controls} label={t('nightBoard.records', 'records')} />
     </SectionCard>
     </div>
 
@@ -529,14 +556,14 @@ export function NightDutyScheduler() {
     {schedulerOpen && (
       <div className="card2 p-5 lg:sticky lg:top-4">
         <div className="flex items-start justify-between mb-1">
-          <div className="font-heading font-semibold text-[17px]">Assign Night Duty</div>
+          <div className="font-heading font-semibold text-[17px]">{t('nightBoard.assignNightDuty', 'Assign Night Duty')}</div>
           <button onClick={closeWizard} aria-label="Close" className="text-slate-400 hover:text-slate-600 p-1 -mr-1"><X size={16} /></button>
         </div>
-        <div className="text-[12.5px] text-slate-500 mb-4">Schedule night duty for employees.</div>
+        <div className="text-[12.5px] text-slate-500 mb-4">{t('nightBoard.wizardSubtitle', 'Schedule night duty for employees.')}</div>
 
         {/* Step list */}
         <div className="flex flex-col gap-3 mb-4">
-          {WIZARD_STEPS.map(s => {
+          {wizardSteps.map(s => {
             const active = s.n === step;
             const done = s.n < step;
             return (
@@ -565,13 +592,17 @@ export function NightDutyScheduler() {
         {/* Footer buttons */}
         <div className="flex items-center justify-between gap-2 mt-5">
           <ButtonV2 variant="outline" onClick={step === 1 ? closeWizard : () => setStep(s => s - 1)}>
-            {step === 1 ? 'Cancel' : 'Back'}
+            {step === 1 ? t('nightBoard.cancel', 'Cancel') : t('nightBoard.back', 'Back')}
           </ButtonV2>
           {step < 4 ? (
-            <ButtonV2 variant="primary" onClick={() => setStep(s => s + 1)}>Next</ButtonV2>
+            <ButtonV2 variant="primary" onClick={() => setStep(s => s + 1)}>{t('nightBoard.next', 'Next')}</ButtonV2>
           ) : (
             <ButtonV2 variant="primary" onClick={schedule} disabled={saving || !selectedTechIds.length || !selectedDates.length}>
-              {saving ? 'Scheduling…' : `Confirm · ${selectedTechIds.length}× ${selectedDates.length} night${selectedDates.length === 1 ? '' : 's'}`}
+              {saving
+                ? t('nightBoard.scheduling', 'Scheduling…')
+                : selectedDates.length === 1
+                  ? t('nightBoard.confirmNightsOne', { defaultValue: 'Confirm · {{techs}}× {{dates}} night', techs: selectedTechIds.length, dates: selectedDates.length })
+                  : t('nightBoard.confirmNightsMany', { defaultValue: 'Confirm · {{techs}}× {{dates}} nights', techs: selectedTechIds.length, dates: selectedDates.length })}
             </ButtonV2>
           )}
         </div>

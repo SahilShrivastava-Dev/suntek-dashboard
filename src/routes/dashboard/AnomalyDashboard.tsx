@@ -19,6 +19,12 @@ const TIER_ICON: Record<Level, React.ReactNode> = {
   mild: <Info />, moderate: <AlertCircle />, heavy: <AlertTriangle />, extreme: <Flame />,
 };
 
+/** Severity tier → i18n key (the label map itself lives in lib/anomaly/levels). */
+const LEVEL_KEY: Record<Level, string> = {
+  mild: 'anomaly.levelMild', moderate: 'anomaly.levelModerate',
+  heavy: 'anomaly.levelHeavy', extreme: 'anomaly.levelExtreme',
+};
+
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <div className="font-heading font-semibold text-[15px] text-slate-800 mb-3">{children}</div>;
 }
@@ -76,7 +82,7 @@ export function AnomalyDashboard() {
             key={l}
             className={`col-span-12 sm:col-span-6 lg:col-span-3 h-full ${tierModal === l ? 'ring-2 ring-slate-300' : ''}`}
             icon={TIER_ICON[l]}
-            label={LEVEL_LABEL[l]}
+            label={t(LEVEL_KEY[l], LEVEL_LABEL[l])}
             value={levels[l]}
             onClick={() => setTierModal(l)}
           />
@@ -110,7 +116,7 @@ export function AnomalyDashboard() {
       {/* Tier popup — opened from a severity pill */}
       {tierModal && (
         <SlidePanel open onClose={() => setTierModal(null)} subtitle={t('anomaly.detectedAnomalies')}
-          title={`${LEVEL_LABEL[tierModal]} · ${tierFindings.length}`}>
+          title={`${t(LEVEL_KEY[tierModal], LEVEL_LABEL[tierModal])} · ${tierFindings.length}`}>
           {loading ? (
             <div className="text-center py-10 text-slate-400 text-[13px]">{t('anomaly.scanningLiveData')}</div>
           ) : error ? (
@@ -118,7 +124,7 @@ export function AnomalyDashboard() {
           ) : tierFindings.length === 0 ? (
             <div className="flex flex-col items-center py-9 text-green-600">
               <ShieldCheck size={34} />
-              <div className="text-sm font-bold font-heading mt-2.5 text-green-700">{t('anomaly.noTierAnomalies', { level: LEVEL_LABEL[tierModal].toLowerCase() })}</div>
+              <div className="text-sm font-bold font-heading mt-2.5 text-green-700">{t('anomaly.noTierAnomalies', { level: t(LEVEL_KEY[tierModal], LEVEL_LABEL[tierModal]).toLowerCase() })}</div>
               <div className="text-xs text-slate-400 mt-1">{t('anomaly.nothingAtSeverity')}</div>
             </div>
           ) : (
@@ -144,27 +150,21 @@ function MethodologyPanel() {
             <span className="w-8 h-8 rounded-[10px] bg-blue-50 text-blue-600 inline-flex items-center justify-center shrink-0"><Cpu size={15} /></span>
             <span className="font-semibold text-[13px] text-slate-800">{t('anomaly.statEngineTitle')}</span>
           </div>
-          <div className="text-xs text-slate-600 leading-relaxed">
-            Deterministic detectors decide <strong>what</strong> is anomalous: rolling z-score, EWMA drift, robust MAD (outlier-tolerant), and IQR fences over engineered features. Severity tier = max(|z|, |robust-z|): mild ≥2σ, moderate ≥2.5σ, heavy ≥3.5σ, extreme ≥5σ.
-          </div>
+          <div className="text-xs text-slate-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: t('anomaly.statEngineBody', 'Deterministic detectors decide <strong>what</strong> is anomalous: rolling z-score, EWMA drift, robust MAD (outlier-tolerant), and IQR fences over engineered features. Severity tier = max(|z|, |robust-z|): mild ≥2σ, moderate ≥2.5σ, heavy ≥3.5σ, extreme ≥5σ.') }} />
         </div>
         <div className="col-span-12 lg:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
           <div className="flex items-center gap-2.5 mb-2">
             <span className="w-8 h-8 rounded-[10px] bg-purple-50 text-purple-600 inline-flex items-center justify-center shrink-0"><Sparkles size={15} /></span>
             <span className="font-semibold text-[13px] text-slate-800">{t('anomaly.aiAnalystTitle')}</span>
           </div>
-          <div className="text-xs text-slate-600 leading-relaxed">
-            Llama-3.3-70B explains <strong>why</strong> — the root-cause story and recommended action — given only the numbers the engine already computed. It never decides severity and never invents figures. Open any anomaly to see its analysis.
-          </div>
+          <div className="text-xs text-slate-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: t('anomaly.aiAnalystBody', 'Llama-3.3-70B explains <strong>why</strong> — the root-cause story and recommended action — given only the numbers the engine already computed. It never decides severity and never invents figures. Open any anomaly to see its analysis.') }} />
         </div>
         <div className="col-span-12 lg:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
           <div className="flex items-center gap-2.5 mb-2">
             <span className="w-8 h-8 rounded-[10px] bg-green-50 text-green-600 inline-flex items-center justify-center shrink-0"><Database size={15} /></span>
             <span className="font-semibold text-[13px] text-slate-800">{t('anomaly.dataDependencyTitle')}</span>
           </div>
-          <div className="text-xs text-slate-600 leading-relaxed">
-            Financial detectors run on <strong>real BUSY data</strong> (live, ~2 months). Statistical baselines sharpen as more history accrues; thin metrics show as <em>calibrating</em> rather than false-firing. Engineered features are exported to <code className="text-[11px]">data/anomaly/*.csv</code>.
-          </div>
+          <div className="text-xs text-slate-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: t('anomaly.dataDependencyBody', 'Financial detectors run on <strong>real BUSY data</strong> (live, ~2 months). Statistical baselines sharpen as more history accrues; thin metrics show as <em>calibrating</em> rather than false-firing. Engineered features are exported to <code class="text-[11px]">data/anomaly/*.csv</code>.') }} />
         </div>
       </div>
     </SectionCard>

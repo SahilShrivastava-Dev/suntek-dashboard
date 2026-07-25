@@ -11,7 +11,7 @@ import { SkeletonRows, ErrorState } from '../../../components/ui/states';
 import { usePagination } from '../../../components/ui/usePagination';
 import { useSortable } from '../../../components/ui/useSortable';
 import { StatCard, SectionCard, ButtonV2, SegmentTabs, TablePaginationV2, ThV2 as Th } from '../../../components/v2';
-import { Boxes, ShieldCheck, Wrench, Camera, Download, Upload, Plus } from 'lucide-react';
+import { Boxes, Wrench, Camera, Download, Upload, Plus } from 'lucide-react';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import { uploadWorkflowFile, uploadWorkflowImage } from '../../../lib/cloudinary';
 import * as XLSX from 'xlsx';
@@ -123,12 +123,6 @@ function fmtDT(d: string | null | undefined): string {
   return d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 }
 function inr(n: number): string { return `₹ ${Math.round(n).toLocaleString('en-IN')}`; }
-function cr(n: number): string { return `₹ ${(n / 1e7).toFixed(2)} Cr`; }
-
-// Annual asset-insurance cover (₹). Asset purchases + maintenance procurement for
-// the financial year are deducted against this cover; any spend beyond it is paid
-// out of pocket. Kept as a constant for now — wire to a per-policy-year source later.
-const INSURANCE_COVERAGE = 38.4e7; // ₹38.4 Cr
 
 const MAINT_CSV_COLUMNS: CsvColumn[] = [
   { header: 'Ticket #', key: 'ticket' },
@@ -164,7 +158,7 @@ function PicCell({ asset, onUpload, onView }: {
       <button
         type="button"
         className={`pic-badge${has ? '' : ' missing'}`}
-        title={busy ? 'Uploading…' : has ? `${t('far.picOnFile')} — click to view` : `${t('far.noPicYet')} — click to add a photo`}
+        title={busy ? t('far.uploading', 'Uploading…') : has ? `${t('far.picOnFile')} — ${t('far.clickToView', 'click to view')}` : `${t('far.noPicYet')} — ${t('far.clickToAddPhoto', 'click to add a photo')}`}
         disabled={busy}
         onClick={() => (has ? onView(asset) : inputRef.current?.click())}
         style={{ cursor: busy ? 'wait' : 'pointer', border: 'none', padding: 0, opacity: busy ? 0.5 : 1 }}
@@ -200,6 +194,7 @@ function AssetDetailTable({ assets, showPlant, onUploadPic, onViewPic }: {
   onUploadPic: (asset: AssetRow, file: File) => Promise<void>;
   onViewPic: (asset: AssetRow) => void;
 }) {
+  const { t } = useTranslation();
   const s = useSortable(assets, {
     mark: a => a.identification_mark,
     make: a => a.make,
@@ -213,7 +208,7 @@ function AssetDetailTable({ assets, showPlant, onUploadPic, onViewPic }: {
   return (
     <div className="overflow-x-auto scroll-x">
       <table className="dt2" style={{ margin: 0 }}>
-        <thead><tr><Th sortKey="mark" s={s}>Mark</Th><Th sortKey="make" s={s}>Make</Th><Th sortKey="serial" s={s}>Serial</Th><Th sortKey="model" s={s}>Model</Th><Th sortKey="capacity" s={s} className="num">Capacity</Th><Th sortKey="year" s={s} firstDir="desc" className="num">Year</Th><Th sortKey="value" s={s} firstDir="desc" className="num">Value</Th>{showPlant && <Th sortKey="plant" s={s}>Plant</Th>}<th>Pic</th></tr></thead>
+        <thead><tr><Th sortKey="mark" s={s}>{t('far.thMark', 'Mark')}</Th><Th sortKey="make" s={s}>{t('far.thMake', 'Make')}</Th><Th sortKey="serial" s={s}>{t('far.thSerial', 'Serial')}</Th><Th sortKey="model" s={s}>{t('far.thModel')}</Th><Th sortKey="capacity" s={s} className="num">{t('far.thCapacity')}</Th><Th sortKey="year" s={s} firstDir="desc" className="num">{t('far.thYear')}</Th><Th sortKey="value" s={s} firstDir="desc" className="num">{t('far.thValue', 'Value')}</Th>{showPlant && <Th sortKey="plant" s={s}>{t('far.rowPlant')}</Th>}<th>{t('far.thPic')}</th></tr></thead>
         <tbody>
           {s.sorted.map(a => (
             <tr key={a.id}>
@@ -256,9 +251,9 @@ export function FAR() {
       const { error } = await updateRows('fixed_assets', { photo_url: up.secure_url }).eq('id', asset.id);
       if (error) throw error;
       setAssets(prev => prev.map(x => x.id === asset.id ? { ...x, photo_url: up.secure_url } : x));
-      toast.success('Machine photo saved');
+      toast.success(t('far.machinePhotoSaved', 'Machine photo saved'));
     } catch (e) {
-      toast.error(`Photo upload failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(t('far.photoUploadFailed', { defaultValue: 'Photo upload failed: {{message}}', message: e instanceof Error ? e.message : String(e) }));
     }
   }
   function handleAssetPicView(asset: AssetRow) {
@@ -338,7 +333,7 @@ export function FAR() {
           id: tk.id,
           equipment: tk.equipment,
           plant: tk.plants?.name || '—',
-          part: primary?.part_name || 'In-house repair',
+          part: primary?.part_name || t('far.inHouseRepair', 'In-house repair'),
           cost,
           procuredQty,
           billUrl: tk.pm_bill_url ?? null,
@@ -417,18 +412,10 @@ export function FAR() {
   const groupPg = usePagination(groupSort.sorted, { resetKey: `${groupSort.sorted.length}|${groupSort.sort.key}|${groupSort.sort.dir}` });
   const fyPg = usePagination(fySort.sorted, { resetKey: `${activeFY ?? ''}|${fySort.sort.key}|${fySort.sort.dir}` });
 
-  // ── Insurance deduction math (for the displayed financial year) ───────────────
-  // Deduction = capital assets bought in the FY + maintenance/repair procurement.
-  // Coverage − deduction = headroom left; negative = paid out of pocket.
-  const currentFY = fyOf(today);
-  const displayFY = activeFY || currentFY;
-  const fyAssetSpend = useMemo(
-    () => assets.filter(a => fyOf(a.purchase_date) === displayFY).reduce((s, a) => s + (Number(a.value) || 0), 0),
-    [assets, displayFY],
-  );
-  const fyDeduction = fyAssetSpend + fyTotal;
-  const fyRemaining = INSURANCE_COVERAGE - fyDeduction;
-  const fyOverage = Math.max(0, -fyRemaining);
+  // ── Pic-proof coverage — % of registered assets with a photo on file ─────────
+  const picCoverage = assets.length
+    ? Math.round((assets.filter(a => !!a.photo_url).length / assets.length) * 100)
+    : 0;
 
   function downloadMaintCsv() {
     if (!activeFY) return;
@@ -482,7 +469,7 @@ export function FAR() {
     }
   }
   async function confirmImport() {
-    if (!importPlantIds.length) { setImportError('Select at least one factory this FAR belongs to.'); setImportStage('error'); return; }
+    if (!importPlantIds.length) { setImportError(t('far.selectFactoryError', 'Select at least one factory this FAR belongs to.')); setImportStage('error'); return; }
     setImportStage('importing');
     try {
       // A shared FAR can cover several factories → register the assets for each.
@@ -570,25 +557,18 @@ export function FAR() {
     <>
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-4 mb-4">
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
-          <KpiInfoButton info={{ title: 'Total Fixed Assets', what: 'Count of all capitalised fixed assets registered across all 4 factory plants (SHD, Rehla, Ganjam, HQ). Each asset is named and tracked in the FAR.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Stored in FAR_DATA mock; future target: Supabase fixed_assets table.' }} />
+        <div className="col-span-12 sm:col-span-6 lg:col-span-4 relative">
+          <KpiInfoButton info={{ title: 'Total Fixed Assets', what: 'Count of all capitalised fixed assets registered across all 4 factory plants (SHD, Rehla, Ganjam, HQ). Each asset is named and tracked in the FAR.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Live count from the Supabase fixed_assets table.' }} />
           <StatCard className="h-full" icon={<Boxes />} label={t('far.totalFixedAssets')} value={assets.length} caption={t('far.across4Factories')} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
-          <KpiInfoButton info={{ title: 'Insurance Coverage', what: `Annual insurance cover (${cr(INSURANCE_COVERAGE)}). Capital asset purchases plus maintenance/repair procurement for the financial year are deducted against this cover. If total spend exceeds the cover, the excess is paid out of pocket.`, source: 'Derived', note: 'Coverage − (FY asset spend + FY repair procurement) = headroom. FY repairs come from the maintenance workflow; asset spend from FAR purchase values.' }} />
-          <StatCard className="h-full" icon={<ShieldCheck />} tone="blue" label={`${t('far.insuranceCoverage')} · ${displayFY}`} value={cr(INSURANCE_COVERAGE)}
-            caption={fyRemaining >= 0
-              ? <span className="text-green-600">{t('far.leftUsed', { left: cr(fyRemaining), used: cr(fyDeduction) })}</span>
-              : <span className="text-red-600 font-semibold">⚠ {t('far.overOutOfPocket', { amt: cr(fyOverage) })}</span>} />
-        </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
-          <KpiInfoButton info={{ title: 'Assets Flagged for Repair', what: 'Count of fixed assets that have been flagged as requiring repair or maintenance and are awaiting resolution. High count = production downtime risk.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Assets with repair flag set in FAR_DATA.' }} />
+        <div className="col-span-12 sm:col-span-6 lg:col-span-4 relative">
+          <KpiInfoButton info={{ title: 'Assets Flagged for Repair', what: 'Count of fixed assets that have been flagged as requiring repair or maintenance and are awaiting resolution. High count = production downtime risk.', source: 'Derived', note: 'Open (not yet closed) emergency maintenance tickets from the maintenance workflow.' }} />
           <StatCard className="h-full" icon={<Wrench />} tone="amber" valueTone="amber" label={t('far.repairFlagged')} value={maintEntries.filter(e => e.status !== 'closed').length} caption={<span className="text-amber-600">{t('far.awaitingClosure')}</span>} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3 relative">
-          <KpiInfoButton info={{ title: 'Pic-Proof Coverage', what: 'Percentage of registered assets that have a photo on file as proof of existence. Required for insurance claims and audits. Target 100%.', source: 'Form entry', formLabel: 'Add Asset form (OCR upload)', formPath: '/dashboard/purchase/far', note: 'Photo attached during asset registration via the OCR uploader in the slide panel.' }} />
-          <StatCard className="h-full" icon={<Camera />} tone="green" label={t('far.picProofCoverage')} value="95%"
-            caption={<div className="progress mt-1"><div style={{ width: '95%' }}></div></div>} />
+        <div className="col-span-12 sm:col-span-6 lg:col-span-4 relative">
+          <KpiInfoButton info={{ title: 'Pic-Proof Coverage', what: 'Percentage of registered assets that have a photo on file as proof of existence. Required for insurance claims and audits. Target 100%.', source: 'Derived', note: 'Assets with a photo on file ÷ total registered assets. 0% when the FAR is empty. Updates as photos are added or removed.' }} />
+          <StatCard className="h-full" icon={<Camera />} tone="green" label={t('far.picProofCoverage')} value={`${picCoverage}%`}
+            caption={<div className="progress mt-1"><div style={{ width: `${picCoverage}%` }}></div></div>} />
         </div>
       </div>
 
@@ -616,9 +596,6 @@ export function FAR() {
               <div className="col-span-12 sm:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
                 <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('far.repairCost')} · {activeFY}</div>
                 <div className="text-[24px] font-extrabold mt-1 num text-slate-800">{inr(fyTotal)}</div>
-                {fyRemaining >= 0
-                  ? <div className="text-[11px] text-green-600 mt-1">{t('far.insuranceCoverLeft', { amt: cr(fyRemaining) })}</div>
-                  : <div className="text-[11px] text-red-600 mt-1 font-semibold">⚠ {t('far.overCoverOutOfPocket', { amt: cr(fyOverage) })}</div>}
               </div>
               <div className="col-span-6 sm:col-span-4 rounded-xl border border-slate-100 p-4" style={{ background: '#F8FAFC' }}>
                 <div className="text-[11px] text-slate-500 uppercase tracking-wider">{t('far.maintenanceEntries')}</div>
@@ -658,7 +635,7 @@ export function FAR() {
                 </tbody>
               </table>
             </div>
-            <TablePaginationV2 controls={fyPg.controls} label="entries" />
+            <TablePaginationV2 controls={fyPg.controls} label={t('far.nounEntries', 'entries')} />
           </>
         )}
       </SectionCard>
@@ -668,7 +645,7 @@ export function FAR() {
         <KpiInfoButton info={{ title: 'Fixed Asset Register (FAR)', what: 'Complete list of all capitalized fixed assets across 4 plants. Each asset must be individually named on the FAR to be covered by the marine/fire insurance policy. Photo proof required for audit. New assets added via the "+ Add asset" slide panel.', source: 'Form entry', formLabel: '+ Add asset form', formPath: '/dashboard/purchase/far', note: 'Data from FAR_DATA mock (mockData.ts). Future: Supabase fixed_assets table.' }} />
       <SectionCard
         title={t('far.fixedAssetRegister')}
-        subtitle={`Equipment master for Preventive Maintenance — grouped by type · ${equipGroups.length} types · ${assets.length} assets`}
+        subtitle={t('far.equipMasterSubtitle', { defaultValue: 'Equipment master for Preventive Maintenance — grouped by type · {{types}} types · {{assets}} assets', types: equipGroups.length, assets: assets.length })}
         actions={
           <>
             <ButtonV2 variant="outline" icon={<Upload />} onClick={() => { setImportOpen(o => !o); if (importStage === 'done') resetImport(); }}>
@@ -719,7 +696,7 @@ export function FAR() {
                 </div>
                 {/* Which factory/factories does this FAR belong to? (multi-select — a shared FAR can cover several) */}
                 <div style={{ border: '1px solid #FDE68A', background: '#FFFDF5', borderRadius: 10, padding: 12, marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', textTransform: 'uppercase', marginBottom: 6 }}>Factory / factories this FAR belongs to *</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', textTransform: 'uppercase', marginBottom: 6 }}>{t('far.factoryBelongsTo', 'Factory / factories this FAR belongs to *')}</div>
                   <div className="flex gap-2 flex-wrap">
                     {(allowedPlants.length ? allowedPlants : dbPlants).map(p => {
                       const on = importPlantIds.includes(p.id);
@@ -731,13 +708,13 @@ export function FAR() {
                   </div>
                   <div style={{ fontSize: 11, color: '#A16207', marginTop: 6 }}>
                     {importPlantIds.length > 1
-                      ? `These ${parsedRows.length} assets will be registered for each of the ${importPlantIds.length} selected factories.`
-                      : 'Select one, or multiple if this single FAR is shared across factories.'}
+                      ? t('far.assetsPerFactoryHint', { defaultValue: 'These {{rows}} assets will be registered for each of the {{plants}} selected factories.', rows: parsedRows.length, plants: importPlantIds.length })
+                      : t('far.selectFactoryHint', 'Select one, or multiple if this single FAR is shared across factories.')}
                   </div>
                 </div>
                 <div className="overflow-x-auto scroll-x" style={{ maxHeight: 280 }}>
                   <table className="dt2">
-                    <thead><tr><th>Equipment</th><th>{t('far.thIdMark')}</th><th>Make</th><th>Serial</th><th>Qty</th><th>{t('far.thModel')}</th><th>{t('far.thYear')}</th><th>{t('far.thTaxableValue')}</th><th>{t('far.thInvoice')}</th><th>{t('far.thPurchaseDate')}</th><th>{t('far.thAccountHead')}</th></tr></thead>
+                    <thead><tr><th>{t('far.thEquipment')}</th><th>{t('far.thIdMark')}</th><th>{t('far.thMake', 'Make')}</th><th>{t('far.thSerial', 'Serial')}</th><th>{t('far.thQty', 'Qty')}</th><th>{t('far.thModel')}</th><th>{t('far.thYear')}</th><th>{t('far.thTaxableValue')}</th><th>{t('far.thInvoice')}</th><th>{t('far.thPurchaseDate')}</th><th>{t('far.thAccountHead')}</th></tr></thead>
                     <tbody>
                       {parsedRows.map((r, i) => {
                         const upd = (k: keyof FarImportRow, v: string) => setParsedRows(prev => prev.map((x, j) => j === i ? { ...x, [k]: v } : x));
@@ -750,7 +727,7 @@ export function FAR() {
                 <div className="flex gap-2 mt-3">
                   <button onClick={() => resetImport()} className="chip">{t('far.cancel')}</button>
                   <button onClick={confirmImport} disabled={!importPlantIds.length} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" style={{ background: importPlantIds.length ? '#16A34A' : '#94A3B8', opacity: importPlantIds.length ? 1 : 0.6 }}>
-                    ✓ Register {parsedRows.length * Math.max(1, importPlantIds.length)} asset{parsedRows.length * Math.max(1, importPlantIds.length) === 1 ? '' : 's'}
+                    ✓ {t('far.registerNAssets', { count: parsedRows.length * Math.max(1, importPlantIds.length) })}
                   </button>
                 </div>
               </>
@@ -774,11 +751,11 @@ export function FAR() {
             {/* Summary strip + expand toggle — the big list stays collapsed */}
             <div className="flex items-center justify-between flex-wrap gap-2 bg-slate-50 border border-slate-200 rounded-[10px] px-3.5 py-2.5">
               <div className="text-[13px] text-slate-600">
-                <strong>{assets.length}</strong> asset{assets.length === 1 ? '' : 's'} · <strong>{equipGroups.length}</strong> equipment type{equipGroups.length === 1 ? '' : 's'}
-                {plantsInFar.length > 1 && <span> · {plantsInFar.length} plants</span>}
+                <strong>{assets.length}</strong> {assets.length === 1 ? t('far.assetWord', 'asset') : t('far.assetsWord', 'assets')} · <strong>{equipGroups.length}</strong> {equipGroups.length === 1 ? t('far.equipTypeWord', 'equipment type') : t('far.equipTypesWord', 'equipment types')}
+                {plantsInFar.length > 1 && <span> · {t('far.nPlants', { defaultValue: '{{count}} plants', count: plantsInFar.length })}</span>}
               </div>
               <button onClick={() => setEquipOpenTable(o => !o)} className="text-sm font-semibold text-slate-700 hover:text-slate-900" style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
-                {equipOpenTable ? 'Hide register ▴' : 'Show register ▾'}
+                {equipOpenTable ? `${t('far.hideRegister', 'Hide register')} ▴` : `${t('far.showRegister', 'Show register')} ▾`}
               </button>
             </div>
 
@@ -786,25 +763,25 @@ export function FAR() {
               <div style={{ marginTop: 14 }}>
                 {plantsInFar.length > 1 && (
                   <div className="flex gap-2 mb-3 flex-wrap">
-                    <button onClick={() => setEquipPlantFilter([])} className={`chip${equipPlantFilter.length === 0 ? ' active' : ''}`}>All plants</button>
+                    <button onClick={() => setEquipPlantFilter([])} className={`chip${equipPlantFilter.length === 0 ? ' active' : ''}`}>{t('common.allPlants')}</button>
                     {plantsInFar.map(p => (
                       <button key={p.id} onClick={() => setEquipPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])} className={`chip${equipPlantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
                     ))}
-                    {equipPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>combined</span>}
+                    {equipPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>{t('far.combined', 'combined')}</span>}
                   </div>
                 )}
-                <input value={equipSearch} onChange={e => setEquipSearch(e.target.value)} placeholder="Search equipment type or mark…" style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 12px', fontSize: 13, marginBottom: 10, outline: 'none', background: '#fff' }} />
+                <input value={equipSearch} onChange={e => setEquipSearch(e.target.value)} placeholder={t('far.searchEquipPh', 'Search equipment type or mark…')} style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 12px', fontSize: 13, marginBottom: 10, outline: 'none', background: '#fff' }} />
                 <div className="overflow-x-auto scroll-x" style={{ maxHeight: 460 }}>
                   <table className="dt2">
                     <thead>
                       <tr>
-                        <Th sortKey="type" s={groupSort}>Equipment Type</Th>
-                        <Th sortKey="count" s={groupSort} firstDir="desc" className="num">Count</Th>
-                        <th>Make</th><th>Model</th><th>Capacity</th><th>Year</th><th>Identification Marks</th><th></th>
+                        <Th sortKey="type" s={groupSort}>{t('far.thEquipmentType', 'Equipment Type')}</Th>
+                        <Th sortKey="count" s={groupSort} firstDir="desc" className="num">{t('far.thCount', 'Count')}</Th>
+                        <th>{t('far.thMake', 'Make')}</th><th>{t('far.thModel')}</th><th>{t('far.thCapacity')}</th><th>{t('far.thYear')}</th><th>{t('far.thIdMarks', 'Identification Marks')}</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {groupSort.sorted.length === 0 && <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{assets.length === 0 ? t('far.noAssetsYet') : 'No equipment matches.'}</td></tr>}
+                      {groupSort.sorted.length === 0 && <tr><td colSpan={8} className="text-center text-slate-400 py-6 text-sm">{assets.length === 0 ? t('far.noAssetsYet') : t('far.noEquipmentMatches', 'No equipment matches.')}</td></tr>}
                       {groupPg.pageRows.map(g => {
                         const open = expandedType === g.type;
                         const make = repVal(g.assets.map(a => a.make));
@@ -822,7 +799,7 @@ export function FAR() {
                               <td className="text-slate-500 text-xs">{model.text}{model.mixed ? ' …' : ''}</td>
                               <td className="text-slate-500 text-xs">{cap.text}{cap.mixed ? ' …' : ''}</td>
                               <td className="text-slate-500 text-xs">{yr}</td>
-                              <td className="text-slate-500 text-xs">{marks.slice(0, 3).join(', ')}{marks.length > 3 ? ` +${marks.length - 3} more` : ''}</td>
+                              <td className="text-slate-500 text-xs">{marks.slice(0, 3).join(', ')}{marks.length > 3 ? ` ${t('far.nMore', { defaultValue: '+{{count}} more', count: marks.length - 3 })}` : ''}</td>
                               <td><span className="text-xs text-slate-400">{open ? '▴' : '▾'}</span></td>
                             </tr>
                             {open && (
@@ -838,7 +815,7 @@ export function FAR() {
                     </tbody>
                   </table>
                 </div>
-                <TablePaginationV2 controls={groupPg.controls} label="types" />
+                <TablePaginationV2 controls={groupPg.controls} label={t('far.nounTypes', 'types')} />
               </div>
             )}
           </>
@@ -847,25 +824,25 @@ export function FAR() {
       </div>
 
       {/* Slide panel */}
-      <SlidePanel open={open} onClose={handleClose} title={t('far.panelTitle')} subtitle="FAR · Purchase">
+      <SlidePanel open={open} onClose={handleClose} title={t('far.panelTitle')} subtitle={t('far.panelSubtitle', 'FAR · Purchase')}>
         <PanelField label={t('far.fldIdMark')}>
-          <PanelInput placeholder="e.g. SCPL-PM-047, SHD-Compressor-3" value={form.mark} onChange={e => set('mark', e.target.value)} />
+          <PanelInput placeholder={t('far.phIdMark', 'e.g. SCPL-PM-047, SHD-Compressor-3')} value={form.mark} onChange={e => set('mark', e.target.value)} />
         </PanelField>
 
         <PanelRow>
           <PanelField label={t('far.fldModel')}>
-            <PanelInput placeholder="e.g. Atlas Copco GA-22" value={form.model} onChange={e => set('model', e.target.value)} />
+            <PanelInput placeholder={t('far.phModel', 'e.g. Atlas Copco GA-22')} value={form.model} onChange={e => set('model', e.target.value)} />
           </PanelField>
           <PanelField label={t('far.fldCapacity')}>
-            <PanelInput placeholder="e.g. 5 MT, 22 kW" value={form.capacity} onChange={e => set('capacity', e.target.value)} />
+            <PanelInput placeholder={t('far.phCapacity', 'e.g. 5 MT, 22 kW')} value={form.capacity} onChange={e => set('capacity', e.target.value)} />
           </PanelField>
         </PanelRow>
 
         <PanelRow>
           <PanelField label={t('far.fldOrigin')}>
             <PanelSelect value={form.origin} onChange={e => set('origin', e.target.value)}>
-              <option>India</option>
-              <option>Import</option>
+              <option value="India">{t('far.originIndia', 'India')}</option>
+              <option value="Import">{t('far.originImport', 'Import')}</option>
             </PanelSelect>
           </PanelField>
           <PanelField label={t('far.fldYearOfPurchase')}>
@@ -875,10 +852,10 @@ export function FAR() {
 
         <PanelRow>
           <PanelField label={t('far.fldTaxableValue')}>
-            <PanelInput placeholder="e.g. ₹ 4,20,000" value={form.value} onChange={e => set('value', e.target.value)} />
+            <PanelInput placeholder={t('far.phTaxableValue', 'e.g. ₹ 4,20,000')} value={form.value} onChange={e => set('value', e.target.value)} />
           </PanelField>
           <PanelField label={t('far.fldInvoiceNo')}>
-            <PanelInput placeholder="e.g. INV-2024-1234" value={form.invoice} onChange={e => set('invoice', e.target.value)} />
+            <PanelInput placeholder={t('far.phInvoiceNo', 'e.g. INV-2024-1234')} value={form.invoice} onChange={e => set('invoice', e.target.value)} />
           </PanelField>
         </PanelRow>
 
@@ -945,14 +922,14 @@ export function FAR() {
               <Row k={t('far.rowFinancialYear')} v={drillEntry.fy} />
               <Row k={t('far.rowRaisedAt')} v={fmtDT(drillEntry.created_at)} />
               <Row k={t('far.rowClosedAt')} v={drillEntry.closed_at ? fmtDT(drillEntry.closed_at) : t('far.openDash')} />
-              {drillEntry.procuredQty > 0 && <Row k="Qty procured" v={String(drillEntry.procuredQty)} />}
+              {drillEntry.procuredQty > 0 && <Row k={t('far.rowQtyProcured', 'Qty procured')} v={String(drillEntry.procuredQty)} />}
               {drillEntry.busyRef && <Row k={t('far.rowBusyRef')} v={drillEntry.busyRef} />}
               <div style={{ marginTop: 14, padding: '14px 16px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#15803D' }}>{drillEntry.procuredQty > 0 ? 'Procurement cost' : t('far.cost')}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#15803D' }}>{drillEntry.procuredQty > 0 ? t('far.procurementCost', 'Procurement cost') : t('far.cost')}</span>
                 <span style={{ fontSize: 18, fontWeight: 800, color: '#15803D' }}>{drillEntry.cost ? inr(drillEntry.cost) : t('far.inHouseNoPart')}</span>
               </div>
               {drillEntry.billUrl && (
-                <a href={drillEntry.billUrl} target="_blank" rel="noreferrer" style={{ display: 'block', textAlign: 'center', marginTop: 10, fontSize: 12, color: '#2563EB' }}>View supplier bill ↗</a>
+                <a href={drillEntry.billUrl} target="_blank" rel="noreferrer" style={{ display: 'block', textAlign: 'center', marginTop: 10, fontSize: 12, color: '#2563EB' }}>{t('far.viewSupplierBill', 'View supplier bill')} ↗</a>
               )}
               <a href="/dashboard/purchase/maint" style={{ display: 'block', textAlign: 'center', marginTop: 14, fontSize: 12, color: '#2563EB' }}>{t('far.openInMaintenance')} →</a>
             </div>

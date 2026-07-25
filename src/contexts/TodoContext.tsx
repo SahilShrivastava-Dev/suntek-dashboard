@@ -48,7 +48,7 @@ const URGENT_KEY = 'urgent-alerts';
 export function TodoProvider({ children }: { children: React.ReactNode }) {
   const { activeProfile, activePersonId, roles } = useRoleContext();
   const { scopeQuery, ready: scopeReady, plants } = usePlantScope();
-  const { notifications } = useNotifications();
+  const { notifications, isNotificationStale } = useNotifications();
 
   const [dbSections, setDbSections] = useState<TodoSectionResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -144,12 +144,15 @@ export function TodoProvider({ children }: { children: React.ReactNode }) {
   const urgentSection = useMemo<TodoSectionResult | null>(() => {
     const def = TODO_SECTIONS.find((s) => s.key === URGENT_KEY);
     if (!def) return null;
-    const ctx: TodoCtx = { ...buildBaseCtx(), notifications };
+    const ctx: TodoCtx = { ...buildBaseCtx(), notifications, isNotificationCompleted: isNotificationStale };
     if (!def.appliesTo(ctx)) return null;
-    const items = buildUrgentItems(notifications);
+    // Alerts whose workflow has since closed — or that can't be opened at all
+    // (dead maintenance links with no ticket id) — are dropped: neither is
+    // pending work, and the badge count must match what the page shows.
+    const items = buildUrgentItems(notifications, isNotificationStale);
     if (items.length === 0) return null;
     return { key: def.key, titleKey: def.titleKey, icon: def.icon, tone: def.tone, columns: def.columns, items };
-  }, [notifications, buildBaseCtx]);
+  }, [notifications, isNotificationStale, buildBaseCtx]);
 
   // ── Merge + order by the registry's priority ────────────────────────────────
   const sections = useMemo(() => {

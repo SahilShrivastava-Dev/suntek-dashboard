@@ -1,18 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useRoleContext } from '../../contexts/RoleContext';
 import { ProfileAvatar } from './ProfileSwitcher';
 import type { MockProfile } from '../../lib/profiles';
 
 // Access badge for the role list
 function AccessBadge({ profile }: { profile: MockProfile }) {
+  const { t } = useTranslation();
   if (profile.standaloneOnly) {
-    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">App only</span>;
+    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">{t('topbar.accessAppOnly', 'App only')}</span>;
   }
   if (profile.allowedDashboardRoutes.includes('*')) {
-    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 whitespace-nowrap">Full</span>;
+    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 whitespace-nowrap">{t('topbar.accessFull', 'Full')}</span>;
   }
-  return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 whitespace-nowrap">{profile.allowedDashboardRoutes.length} views</span>;
+  return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 whitespace-nowrap">{t('topbar.accessNViews', { defaultValue: '{{count}} views', count: profile.allowedDashboardRoutes.length })}</span>;
 }
 
 /**
@@ -22,6 +24,7 @@ function AccessBadge({ profile }: { profile: MockProfile }) {
  */
 export function RoleSwitchButton() {
   const { activeProfile, allProfiles, switchProfile, canSwitch } = useRoleContext();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -47,7 +50,7 @@ export function RoleSwitchButton() {
     <div ref={ref} className="relative">
       {/* ⇅ trigger — matches the bell button styling */}
       <button
-        title="Switch / preview role"
+        title={t('topbar.switchPreviewRole', 'Switch / preview role')}
         onClick={() => setOpen((o) => !o)}
         className={`w-9 h-9 max-[390px]:w-8 max-[390px]:h-8 md:w-10 md:h-10 shrink-0 rounded-[10px] border flex items-center justify-center transition-colors ${
           open ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600'
@@ -62,8 +65,8 @@ export function RoleSwitchButton() {
       {open && (
         <div className="absolute right-0 top-full mt-2 w-[290px] bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden">
           <div className="px-4 pt-4 pb-3 border-b border-slate-100 bg-slate-50/60">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Preview as role</div>
-            <div className="text-[12px] text-slate-500 mt-0.5">Switch to see role-specific views &amp; access</div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{t('topbar.previewAsRole', 'Preview as role')}</div>
+            <div className="text-[12px] text-slate-500 mt-0.5">{t('topbar.previewAsRoleHint', 'Switch to see role-specific views & access')}</div>
           </div>
 
           <div className="p-2 max-h-[420px] overflow-y-auto">
@@ -83,7 +86,7 @@ export function RoleSwitchButton() {
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-[13px] font-bold leading-tight truncate">{profile.name}</span>
                       {isActive && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 whitespace-nowrap">active</span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 whitespace-nowrap">{t('topbar.activeBadge', 'active')}</span>
                       )}
                     </div>
                     <div className="text-[11px] font-semibold text-slate-600 mt-0.5">{profile.roleLabel}</div>
@@ -98,7 +101,7 @@ export function RoleSwitchButton() {
           </div>
 
           <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/60">
-            <div className="text-[11px] text-slate-400 text-center">Role preview mode · Navigation adapts per role</div>
+            <div className="text-[11px] text-slate-400 text-center">{t('topbar.rolePreviewFooter', 'Role preview mode · Navigation adapts per role')}</div>
           </div>
         </div>
       )}

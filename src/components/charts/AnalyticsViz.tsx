@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 // ── DSO Arc Gauge ─────────────────────────────────────────────────────────────
 // Semicircle: left=0 days, right=90 days. Zones: green 0-30, amber 30-60, red 60+
@@ -9,6 +10,7 @@ function pt(cx: number, cy: number, r: number, angleDeg: number) {
 }
 
 export function DSOGauge({ value }: { value: number }) {
+  const { t } = useTranslation();
   const cx = 70, cy = 80, r = 52, sw = 11;
   // angle mapping: 0 days→180°, 90 days→0°
   const angleDeg = (v: number) => 180 - (v / 90) * 180;
@@ -42,7 +44,7 @@ export function DSOGauge({ value }: { value: number }) {
       <text x="126" y="84" fontSize="8" fill="#94A3B8">90</text>
       {/* Center value */}
       <text x={cx} y="64" textAnchor="middle" fontSize="22" fontWeight="800" fill={color}>{value}</text>
-      <text x={cx} y="76" textAnchor="middle" fontSize="9" fill="#94A3B8">days</text>
+      <text x={cx} y="76" textAnchor="middle" fontSize="9" fill="#94A3B8">{t('common.days', 'days')}</text>
     </svg>
   );
 }
@@ -113,8 +115,9 @@ const CONC_COLORS = ['#F47651', '#FB923C', '#FDBA74', '#FCD9C5', '#FEF3C7', '#E2
 export function ConcentrationBar({ segments }: {
   segments: { name: string; sharePct: number }[];
 }) {
+  const { t } = useTranslation();
   const others = Math.max(0, 100 - segments.reduce((s, c) => s + c.sharePct, 0));
-  const all = [...segments, { name: 'Others', sharePct: +others.toFixed(1) }];
+  const all = [...segments, { name: t('common.others', 'Others'), sharePct: +others.toFixed(1) }];
   let x = 0;
   return (
     <div>
@@ -138,7 +141,7 @@ export function ConcentrationBar({ segments }: {
         ))}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <div style={{ width: 8, height: 8, borderRadius: 2, background: '#E2E8F0', flexShrink: 0 }}/>
-          <span style={{ fontSize: 10, color: '#94A3B8' }}>Others {others.toFixed(1)}%</span>
+          <span style={{ fontSize: 10, color: '#94A3B8' }}>{t('common.others', 'Others')} {others.toFixed(1)}%</span>
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { SlidePanel } from '../SlidePanel';
 import { MentionTextarea } from './MentionTextarea';
 import { MentionText } from './MentionText';
@@ -64,6 +65,7 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
   const [posting, setPosting] = useState(false);
   const [count, setCount] = useState(0);
 
+  const { t } = useTranslation();
   const { activeProfile, activePersonId } = useRoleContext();
   const { addNotification } = useNotifications();
   const people = useDirectory();
@@ -174,7 +176,7 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
         if (ccTargets.length) {
           await addNotification({
             target_roles: ccTargets,
-            title: `${actor.name} CC’d you`,
+            title: t('common.ccdYou', { defaultValue: '{{name}} CC’d you', name: actor.name }),
             body: `${entityLabel}: “${truncate(text)}”`,
             type: 'info',
             route: route ?? null,
@@ -188,12 +190,14 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
       const notified =
         mentionIds.filter((id) => id !== actor.id).length +
         cc.filter((id) => id !== actor.id && !mentionIds.includes(id)).length;
-      toast.success(notified ? `Note posted · ${notified} notified` : 'Note posted');
+      toast.success(notified
+        ? t('common.notePostedNotified', { defaultValue: 'Note posted · {{count}} notified', count: notified })
+        : t('common.notePosted', 'Note posted'));
       setBody('');
       setMentionIds([]);
       await load();
     } catch {
-      toast.error('Could not post note');
+      toast.error(t('common.notePostFailed', 'Could not post note'));
     } finally {
       setPosting(false);
     }
@@ -203,16 +207,16 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
     <>
       <button type="button" onClick={() => { setLoading(true); setOpen(true); }} className={triggerClassName} style={iconOnly ? undefined : { display: 'inline-flex', alignItems: 'center', gap: 5 }}>
         <MessageSquare size={13} />
-        {!iconOnly && <span>Notes{(notes.length || count) ? ` · ${notes.length || count}` : ''}</span>}
+        {!iconOnly && <span>{t('common.notes', 'Notes')}{(notes.length || count) ? ` · ${notes.length || count}` : ''}</span>}
       </button>
 
-      <SlidePanel open={open} onClose={() => setOpen(false)} title="Notes & tags" subtitle={entityLabel}>
+      <SlidePanel open={open} onClose={() => setOpen(false)} title={t('common.notesAndTags', 'Notes & tags')} subtitle={entityLabel}>
         {/* Existing thread */}
         {loading ? (
-          <div style={{ fontSize: 13, color: '#94A3B8', padding: '8px 0' }}>Loading…</div>
+          <div style={{ fontSize: 13, color: '#94A3B8', padding: '8px 0' }}>{t('common.loading', 'Loading…')}</div>
         ) : notes.length === 0 ? (
           <div style={{ fontSize: 13, color: '#94A3B8', padding: '4px 0 12px' }}>
-            No notes yet. Add one below — type <strong>@</strong> to tag a teammate.
+            {t('common.notesEmptyPre', 'No notes yet. Add one below — type')} <strong>@</strong> {t('common.notesEmptyPost', 'to tag a teammate.')}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
@@ -228,7 +232,7 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
             value={body}
             onChange={setBody}
             onMentionsChange={setMentionIds}
-            placeholder="Write a note… type @ to tag someone for a heads-up"
+            placeholder={t('common.notesPlaceholder', 'Write a note… type @ to tag someone for a heads-up')}
             excludeIds={[actor.id]}
           />
         </div>
@@ -242,7 +246,7 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
             onClick={() => setOpen(false)}
             style={{ flex: 1, padding: '11px 0', borderRadius: 24, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', fontFamily: 'inherit' }}
           >
-            Close
+            {t('common.close', 'Close')}
           </button>
           <button
             type="button"
@@ -250,7 +254,7 @@ export function NotesButton({ entityType, entityId, entityLabel, route, triggerC
             disabled={!body.trim() || posting}
             style={{ flex: 2, padding: '11px 0', borderRadius: 24, border: 'none', background: !body.trim() || posting ? '#CBD5E1' : '#F47651', fontSize: 13, fontWeight: 700, color: '#fff', cursor: !body.trim() || posting ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
           >
-            {posting ? 'Posting…' : 'Post note'}
+            {posting ? t('common.posting', 'Posting…') : t('common.postNote', 'Post note')}
           </button>
         </div>
       </SlidePanel>

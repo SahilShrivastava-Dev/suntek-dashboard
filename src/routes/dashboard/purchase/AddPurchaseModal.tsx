@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
-import { insertRows } from '../../../lib/db';
+import { callRpc } from '../../../lib/db';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { useRoleContext } from '../../../contexts/RoleContext';
-import { deriveEquipment, normalizeUnit } from '../../../lib/store/parseStockFile';
+import { normalizeUnit } from '../../../lib/store/parseStockFile';
 import { parseBill, matchCandidates, type ParsedBill, type StockLite } from '../../../lib/store/purchaseParse';
 import { reconcileBillAmount } from '../../../lib/nvidiaOcr';
+import { normalizeGstin, isValidGstin } from '../../../lib/utils/gst';
 import { ProgressBar, useFakeProgress } from '../../../components/ui/ProgressBar';
 
 type StockItem = StockLite & { plant_id: string | null };
@@ -28,17 +30,26 @@ function errMsg(e: unknown): string {
   const o = e as { message?: string; details?: string; hint?: string };
   return o.message || o.details || o.hint || JSON.stringify(e);
 }
-const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim();
 let seq = 0;
 const nextKey = () => `l${++seq}`;
 
+/** Local calendar date as YYYY-MM-DD (never toISOString — that shifts IST past midnight). */
+function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /** Self-contained purchase → stock modal. Drops into any tab; loads its own
- *  plants + stock (plant-scoped) so callers only wire open/onClose/onApplied. */
+ *  plants + stock (plant-scoped) so callers only wire open/onClose/onApplied.
+ *  Submission is a single atomic, idempotent RPC (apply_stock_purchase): the
+ *  receipt (vendor, amount, GST, invoice, bill) is persisted and the register
+ *  increments happen server-side in one transaction. */
 export function AddPurchaseModal({ open, onClose, onApplied }: {
   open: boolean;
   onClose: () => void;
   onApplied: () => void;
 }) {
+  const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
   const { scopeQuery, allowedPlants } = usePlantScope();
   const actorName = activeProfile.name;
@@ -53,9 +64,23 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
   const [cloudUrl, setCloudUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  const [fieldErr, setFieldErr] = useState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);
   const [parseProg, setParseProg] = useState<{ page: number; pages: number }>({ page: 0, pages: 0 });
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // ── Purchase header fields (persisted onto the receipt) ────────────────────
+  const [vendor, setVendor] = useState('');
+  const [amount, setAmount] = useState('');           // total bill amount (₹)
+  const [gstNo, setGstNo] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState(localToday());
+  const [notes, setNotes] = useState('');
+  const [knownVendors, setKnownVendors] = useState<string[]>([]);
+  const [dupInvoice, setDupInvoice] = useState(false);
+  // Idempotency key: generated once per editing session, reused across retries,
+  // so a network retry can never double-apply the same purchase.
+  const [receiptId, setReceiptId] = useState<string>(() => crypto.randomUUID());
 
   // Reading a bill is a single vision-model call with no streamed %; ease a bar
   // toward 85% while it runs and let per-page progress pull it forward.
@@ -74,15 +99,41 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
       setPlants(base);
       setPlantId(prev => prev || base[0]?.id || '');
       setStock(si || []);
+      // Vendor suggestions from past receipts (best-effort — table may predate migration 53).
+      try {
+        const { data: vs } = await supabase.from('stock_purchase_receipts')
+          .select('vendor_name').order('created_at', { ascending: false }).limit(200)
+          .returns<{ vendor_name: string }[]>();
+        if (alive && vs) setKnownVendors([...new Set(vs.map(v => v.vendor_name).filter(Boolean))]);
+      } catch { /* suggestions only */ }
     })();
     return () => { alive = false; };
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stockForPlant = useMemo(() => stock.filter(s => s.plant_id === plantId), [stock, plantId]);
 
+  // Soft duplicate-invoice warning (never blocks): same plant + invoice number.
+  useEffect(() => {
+    const inv = invoiceNo.trim();
+    if (!inv || !plantId) { setDupInvoice(false); return; }
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await supabase.from('stock_purchase_receipts')
+          .select('id').eq('plant_id', plantId).eq('invoice_no', inv).neq('id', receiptId).limit(1)
+          .returns<{ id: string }[]>();
+        if (alive) setDupInvoice(!!data?.length);
+      } catch { if (alive) setDupInvoice(false); }
+    }, 400);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [invoiceNo, plantId, receiptId]);
+
   function reset() {
     setMode('choose'); setStage('choose'); setLines([]); setBill(null);
-    setCloudUrl(null); setFileName(''); setErr(null); setAppliedCount(0);
+    setCloudUrl(null); setFileName(''); setErr(null); setFieldErr(null); setAppliedCount(0);
+    setVendor(''); setAmount(''); setGstNo(''); setInvoiceNo(''); setNotes('');
+    setPurchaseDate(localToday()); setDupInvoice(false);
+    setReceiptId(crypto.randomUUID());
   }
   function close() { reset(); onClose(); }
 
@@ -99,12 +150,18 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
         setCloudUrl(up.secure_url);
       } catch { /* archive is best-effort */ }
       const parsed = await parseBill(file, info => setParseProg(info));
-      if (!parsed.lineItems.length) throw new Error('No line items could be read from this bill. Try a clearer scan, or add them manually.');
+      if (!parsed.lineItems.length) throw new Error(t('addPurchase.errNoLines', 'No line items could be read from this bill. Try a clearer scan, or add them manually.'));
       setBill(parsed);
       setLines(parsed.lineItems.map(li => {
         const name = (li.description || '').trim();
         return { key: nextKey(), name, qty: li.quantity != null ? String(li.quantity) : '', unit: li.unit || '', amount: li.amount ?? null, choice: bestChoice(name) };
       }));
+      // Prefill the purchase header from the OCR'd bill (all editable).
+      if (parsed.supplierName) setVendor(parsed.supplierName);
+      if (parsed.supplierGstin) setGstNo(normalizeGstin(parsed.supplierGstin));
+      if (parsed.invoiceNumber) setInvoiceNo(parsed.invoiceNumber);
+      const total = parsed.totalAmount ?? parsed.subTotal;
+      if (total != null && total > 0) setAmount(String(total));
       setStage('edit');
     } catch (e) { setErr(errMsg(e)); setStage('error'); }
   }
@@ -118,46 +175,63 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
     updateLine(key, { name, choice: bestChoice(name) });
   }
 
+  /** Map RPC error strings to friendly, translated messages. */
+  function friendlyRpcError(raw: string): string {
+    if (/PGRST202|Could not find the function|schema cache/i.test(raw))
+      return t('addPurchase.errMigration', 'The purchase service is not installed yet — run migration 53_stock_purchases.sql in Supabase, then retry.');
+    if (/forbidden: missing capability/i.test(raw))
+      return t('addPurchase.errForbidden', 'You do not have permission to add purchases. Ask an admin for the "Add purchases to stock" allowance.');
+    if (/forbidden: plant out of scope/i.test(raw))
+      return t('addPurchase.errScope', 'This plant is outside your data scope.');
+    if (/not_authenticated/i.test(raw))
+      return t('addPurchase.errAuth', 'Your session has expired — sign in again.');
+    return raw;
+  }
+
   async function apply() {
     const valid = lines.filter(l => l.name.trim() && (Number(l.qty) || 0) > 0);
-    if (!valid.length) { setErr('Add at least one item with a quantity.'); setStage('error'); return; }
+    if (!valid.length) { setFieldErr(t('addPurchase.errNoItems', 'Add at least one item with a quantity.')); return; }
+    if (!vendor.trim()) { setFieldErr(t('addPurchase.errVendor', 'Vendor name is required.')); return; }
+    const amountN = Number(amount);
+    if (amount.trim() === '' || !Number.isFinite(amountN) || amountN < 0) {
+      setFieldErr(t('addPurchase.errAmount', 'Enter the total bill amount (₹) — 0 or more.')); return;
+    }
+    const gstNorm = normalizeGstin(gstNo);
+    if (gstNorm && !isValidGstin(gstNorm)) {
+      setFieldErr(t('addPurchase.errGst', 'That GST number does not look valid (expected 15 characters like 22AAAAA0000A1Z5).')); return;
+    }
+    setFieldErr(null);
     setStage('saving');
-    const refLabel = bill?.invoiceNumber ? `invoice ${bill.invoiceNumber}` : 'manual purchase';
     try {
-      let count = 0;
-      for (const ln of valid) {
-        const qty = Number(ln.qty) || 0;
-        // create-new but the name already exists in this plant → increment (avoids unique clash)
-        let targetId = ln.choice !== 'new' ? ln.choice : (stockForPlant.find(s => norm(s.item_name) === norm(ln.name))?.id ?? null);
-        if (targetId) {
-          const { data: si } = await (supabase.from('store_items') as any).select('*').eq('id', targetId).single();
-          if (!si) continue;
-          const newOnHand = Number(si.on_hand) + qty;
-          await (supabase.from('store_items') as any)
-            .update({ procured_qty: Number(si.procured_qty) + qty, on_hand: newOnHand, updated_at: new Date().toISOString() }).eq('id', targetId);
-          await insertRows('store_stock_events', {
-            item_id: targetId, plant_id: plantId, event_type: 'procure', qty_delta: qty, on_hand_after: newOnHand,
-            ref: refLabel, justification: `Purchased ${qty} · ${ln.name}${cloudUrl ? ' · bill on file' : ''}`, actor_name: actorName,
-          });
-        } else {
-          const { equipment, model } = deriveEquipment(ln.name.trim());
-          const { data: created } = await (supabase.from('store_items') as any).insert({
-            plant_id: plantId, item_name: ln.name.trim(), unit: normalizeUnit(ln.unit), equipment, model,
-            baseline_qty: 0, procured_qty: qty, issued_qty: 0, manual_delta: 0, on_hand: qty,
-          }).select('id').single();
-          if (created?.id) await insertRows('store_stock_events', {
-            item_id: created.id, plant_id: plantId, event_type: 'procure', qty_delta: qty, on_hand_after: qty,
-            ref: refLabel, justification: `New item from purchase · ${ln.name}`, actor_name: actorName,
-          });
-        }
-        count++;
-      }
-      await insertRows('activity_logs', {
-        equipment: `Purchase: ${count} item(s)`, type: 'stock_purchase', date: new Date().toISOString().slice(0, 10),
-        done_by: actorName, plant_id: plantId,
-        note: `${refLabel}${bill?.supplierName ? ` · ${bill.supplierName}` : ''}${cloudUrl ? ` · bill: ${cloudUrl}` : ''}`,
-      });
-      setAppliedCount(count); setStage('done'); onApplied();
+      const payload = {
+        id: receiptId,
+        plant_id: plantId,
+        vendor_name: vendor.trim(),
+        amount: amountN,
+        gst_no: gstNorm || null,
+        invoice_no: invoiceNo.trim() || null,
+        purchase_date: purchaseDate || null,
+        bill_url: cloudUrl,
+        notes: notes.trim() || null,
+        source: mode === 'bill' ? 'bill' : 'manual',
+        actor_name: actorName,
+        lines: valid.map(ln => {
+          const qty = Number(ln.qty) || 0;
+          return {
+            item_name: ln.name.trim(),
+            qty,
+            unit: normalizeUnit(ln.unit) || null,
+            unit_price: ln.amount != null && qty > 0 ? ln.amount / qty : null,
+            amount: ln.amount,
+            store_item_id: ln.choice !== 'new' ? ln.choice : null,
+          };
+        }),
+      };
+      const { data: result, error } = await callRpc<{ already_applied?: boolean; lines_applied?: number }>('apply_stock_purchase', { payload });
+      if (error) throw new Error(friendlyRpcError(error.message || ''));
+      setAppliedCount(result?.lines_applied ?? valid.length);
+      setStage('done');
+      onApplied();
     } catch (e) { setErr(errMsg(e)); setStage('error'); }
   }
 
@@ -174,15 +248,15 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
     <div style={overlay} onClick={() => { if (stage !== 'parsing' && stage !== 'saving') close(); }}>
       <div style={{ ...modal, width: stage === 'edit' ? 'min(760px, 100%)' : 'min(460px, 100%)' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <div style={{ fontSize: 15, fontWeight: 700 }}>Add purchase to stock</div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{t('addPurchase.title', 'Add purchase to stock')}</div>
           <button onClick={close} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer', color: '#94A3B8' }}>×</button>
         </div>
-        <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 14 }}>New stock bought is added to the register — matched items increment, new items are created.</div>
+        <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 14 }}>{t('addPurchase.subtitle', 'New stock bought is added to the register — matched items increment, new items are created.')}</div>
 
         {/* Plant picker (always) */}
         {plants.length > 1 && stage === 'choose' && (
           <div style={{ marginBottom: 14 }}>
-            <div style={label}>Plant</div>
+            <div style={label}>{t('addPurchase.plant', 'Plant')}</div>
             <select value={plantId} onChange={e => setPlantId(e.target.value)} style={{ ...inputStyle, width: '100%' }}>
               {plants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
@@ -192,12 +266,12 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
         {stage === 'choose' && (
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={() => { setMode('bill'); fileRef.current?.click(); }} style={{ ...btnGhost, flex: 1, padding: '18px 12px', borderColor: '#C7D2FE' }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: '#4338CA' }}>📄 Upload bill (AI)</div>
-              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3 }}>Image or PDF — auto-reads items & quantities</div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#4338CA' }}>📄 {t('addPurchase.uploadBill', 'Upload bill (AI)')}</div>
+              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3 }}>{t('addPurchase.uploadBillSub', 'Image or PDF — auto-reads items & quantities')}</div>
             </button>
             <button onClick={startManual} style={{ ...btnGhost, flex: 1, padding: '18px 12px' }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: '#334155' }}>✎ Enter manually</div>
-              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3 }}>Type item + quantity</div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#334155' }}>✎ {t('addPurchase.enterManually', 'Enter manually')}</div>
+              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 3 }}>{t('addPurchase.enterManuallySub', 'Type item + quantity')}</div>
             </button>
             <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
               onChange={e => { const f = e.target.files?.[0]; if (f) handleBill(f); e.target.value = ''; }} />
@@ -208,9 +282,11 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
           <div style={{ padding: '16px 0 8px' }}>
             <ProgressBar
               pct={billProgress.pct}
-              label={parseProg.pages > 1 ? `Reading the bill… page ${parseProg.page} of ${parseProg.pages}` : `Reading the bill… (${fileName})`}
+              label={parseProg.pages > 1
+                ? t('addPurchase.readingPage', { defaultValue: 'Reading the bill… page {{page}} of {{pages}}', page: parseProg.page, pages: parseProg.pages })
+                : t('addPurchase.reading', { defaultValue: 'Reading the bill… ({{file}})', file: fileName })}
             />
-            <div style={{ fontSize: 11, color: '#94A3B8' }}>AI is extracting items &amp; quantities — this can take a few seconds.</div>
+            <div style={{ fontSize: 11, color: '#94A3B8' }}>{t('addPurchase.readingSub', 'AI is extracting items & quantities — this can take a few seconds.')}</div>
           </div>
         )}
 
@@ -218,11 +294,54 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
           <div>
             {mode === 'bill' && bill && (
               <div style={{ fontSize: 12, color: '#475569', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
-                {bill.invoiceNumber ? <>Invoice <strong>{bill.invoiceNumber}</strong>{bill.supplierName ? ` · ${bill.supplierName}` : ''} · </> : null}
-                <strong>{lines.length}</strong> item(s) read from {bill.pages} page(s).
-                {totalMismatch && <span style={{ color: '#B45309' }}> ⚠ line amounts (₹{Math.round(amountSum).toLocaleString('en-IN')}) don't reconcile with the bill's pre-tax total (₹{recon.expected != null ? Math.round(recon.expected).toLocaleString('en-IN') : '?'}) — verify quantities.</span>}
+                {bill.invoiceNumber ? <>{t('addPurchase.invoice', 'Invoice')} <strong>{bill.invoiceNumber}</strong>{bill.supplierName ? ` · ${bill.supplierName}` : ''} · </> : null}
+                <strong>{lines.length}</strong> {t('addPurchase.itemsReadFrom', { defaultValue: 'item(s) read from {{pages}} page(s).', pages: bill.pages })}
+                {totalMismatch && <span style={{ color: '#B45309' }}> ⚠ {t('addPurchase.reconWarn', { defaultValue: "line amounts (₹{{sum}}) don't reconcile with the bill's pre-tax total (₹{{expected}}) — verify quantities.", sum: Math.round(amountSum).toLocaleString('en-IN'), expected: recon.expected != null ? Math.round(recon.expected).toLocaleString('en-IN') : '?' })}</span>}
               </div>
             )}
+
+            {/* ── Purchase details (persisted onto the receipt) ─────────────── */}
+            <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: 10, marginBottom: 10, background: '#FAFBFC' }}>
+              <div style={{ ...label, marginBottom: 8 }}>{t('addPurchase.detailsHeader', 'Purchase details')}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
+                <div>
+                  <div style={label}>{t('addPurchase.vendor', 'Vendor name')} *</div>
+                  <input value={vendor} onChange={e => setVendor(e.target.value)} list="ap-vendors"
+                    placeholder={t('addPurchase.vendorPh', 'e.g. Sharma Traders')} style={{ ...inputStyle, width: '100%' }} />
+                  <datalist id="ap-vendors">{knownVendors.map(v => <option key={v} value={v} />)}</datalist>
+                </div>
+                <div>
+                  <div style={label}>{t('addPurchase.amount', 'Total bill amount (₹)')} *</div>
+                  <input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)}
+                    placeholder="0.00" style={{ ...inputStyle, width: '100%' }} />
+                </div>
+                <div>
+                  <div style={label}>{t('addPurchase.gst', 'GST no. (optional)')}</div>
+                  <input value={gstNo} onChange={e => setGstNo(e.target.value.toUpperCase())}
+                    placeholder="22AAAAA0000A1Z5" style={{ ...inputStyle, width: '100%', ...(gstNo && !isValidGstin(gstNo) ? { borderColor: '#F59E0B' } : {}) }} />
+                </div>
+                <div>
+                  <div style={label}>{t('addPurchase.invoiceNo', 'Invoice no. (optional)')}</div>
+                  <input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)}
+                    placeholder="INV-000" style={{ ...inputStyle, width: '100%' }} />
+                </div>
+                <div>
+                  <div style={label}>{t('addPurchase.date', 'Purchase date')}</div>
+                  <input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} style={{ ...inputStyle, width: '100%' }} />
+                </div>
+                <div>
+                  <div style={label}>{t('addPurchase.notes', 'Notes (optional)')}</div>
+                  <input value={notes} onChange={e => setNotes(e.target.value)}
+                    placeholder={t('addPurchase.notesPh', 'anything worth remembering')} style={{ ...inputStyle, width: '100%' }} />
+                </div>
+              </div>
+              {dupInvoice && (
+                <div style={{ fontSize: 11.5, color: '#B45309', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, padding: '6px 8px', marginTop: 8 }}>
+                  ⚠ {t('addPurchase.dupInvoice', 'A purchase with this invoice number already exists for this plant — double-check before saving (saving anyway is allowed).')}
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {lines.map(ln => {
                 const cands = candidatesFor(ln.name);
@@ -231,13 +350,13 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
                 return (
                   <div key={ln.key} style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: 10 }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                      <input value={ln.name} onChange={e => setName(ln.key, e.target.value)} placeholder="Item name" style={{ ...inputStyle, flex: 1 }} />
-                      <input type="number" value={ln.qty} onChange={e => updateLine(ln.key, { qty: e.target.value })} placeholder="Qty" style={{ ...inputStyle, width: 80 }} />
+                      <input value={ln.name} onChange={e => setName(ln.key, e.target.value)} placeholder={t('addPurchase.itemName', 'Item name')} style={{ ...inputStyle, flex: 1 }} />
+                      <input type="number" value={ln.qty} onChange={e => updateLine(ln.key, { qty: e.target.value })} placeholder={t('addPurchase.qty', 'Qty')} style={{ ...inputStyle, width: 80 }} />
                       {lines.length > 1 && <button onClick={() => setLines(ls => ls.filter(l => l.key !== ln.key))} style={{ border: 'none', background: 'none', color: '#DC2626', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>×</button>}
                     </div>
                     {/* Match confirmation: top-3 candidates + create-new */}
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
-                      <span style={{ fontSize: 10.5, color: '#94A3B8', textTransform: 'uppercase', fontWeight: 600 }}>{cands.length ? 'Same as?' : 'No match —'}</span>
+                      <span style={{ fontSize: 10.5, color: '#94A3B8', textTransform: 'uppercase', fontWeight: 600 }}>{cands.length ? t('addPurchase.sameAs', 'Same as?') : t('addPurchase.noMatch', 'No match —')}</span>
                       {cands.map(c => (
                         <button key={c.id} onClick={() => updateLine(ln.key, { choice: c.id })}
                           style={{ ...pill, borderColor: ln.choice === c.id ? '#16A34A' : '#E2E8F0', background: ln.choice === c.id ? '#F0FDF4' : '#fff', color: ln.choice === c.id ? '#16A34A' : '#475569' }}>
@@ -246,32 +365,35 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
                       ))}
                       <button onClick={() => updateLine(ln.key, { choice: 'new' })}
                         style={{ ...pill, borderColor: ln.choice === 'new' ? '#7C3AED' : '#E2E8F0', background: ln.choice === 'new' ? '#FAF5FF' : '#fff', color: ln.choice === 'new' ? '#7C3AED' : '#475569' }}>
-                        ＋ Create new
+                        ＋ {t('addPurchase.createNew', 'Create new')}
                       </button>
                     </div>
                     <div style={{ fontSize: 11, color: '#64748B', marginTop: 6 }}>
                       {chosen ? <>→ <strong>{chosen.item_name}</strong>: {chosen.on_hand} + {qtyN} = <strong style={{ color: '#16A34A' }}>{chosen.on_hand + qtyN}</strong></>
-                        : <>→ new item <strong>{ln.name || '—'}</strong> with qty <strong style={{ color: '#7C3AED' }}>{qtyN}</strong></>}
+                        : <>→ {t('addPurchase.newItemWith', 'new item')} <strong>{ln.name || '—'}</strong> {t('addPurchase.withQty', 'with qty')} <strong style={{ color: '#7C3AED' }}>{qtyN}</strong></>}
                     </div>
                   </div>
                 );
               })}
             </div>
             <button onClick={() => setLines(ls => [...ls, { key: nextKey(), name: '', qty: '', unit: '', amount: null, choice: 'new' }])}
-              style={{ width: '100%', padding: '8px', borderRadius: 10, border: '1.5px dashed #CBD5E1', background: '#fff', color: '#475569', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit', margin: '10px 0' }}>+ Add line</button>
+              style={{ width: '100%', padding: '8px', borderRadius: 10, border: '1.5px dashed #CBD5E1', background: '#fff', color: '#475569', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit', margin: '10px 0' }}>+ {t('addPurchase.addLine', 'Add line')}</button>
+            {fieldErr && (
+              <div style={{ fontSize: 12.5, color: '#DC2626', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>{fieldErr}</div>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={close} style={btnGhost}>Cancel</button>
-              <button onClick={apply} style={{ ...btnPrimary, flex: 1 }}>Add to stock</button>
+              <button onClick={close} style={btnGhost}>{t('addPurchase.cancel', 'Cancel')}</button>
+              <button onClick={apply} style={{ ...btnPrimary, flex: 1 }}>{t('addPurchase.addToStock', 'Add to stock')}</button>
             </div>
           </div>
         )}
 
-        {stage === 'saving' && <div style={{ fontSize: 13, color: '#475569', padding: '20px 0' }}>Updating the register…</div>}
+        {stage === 'saving' && <div style={{ fontSize: 13, color: '#475569', padding: '20px 0' }}>{t('addPurchase.saving', 'Updating the register…')}</div>}
 
         {stage === 'done' && (
           <div>
-            <div style={{ fontSize: 13, color: '#16A34A', marginBottom: 14 }}>✓ Added {appliedCount} item(s) to the stock register.</div>
-            <button onClick={close} style={{ ...btnPrimary, width: '100%' }}>Done</button>
+            <div style={{ fontSize: 13, color: '#16A34A', marginBottom: 14 }}>✓ {t('addPurchase.done', { defaultValue: 'Added {{count}} item(s) to the stock register.', count: appliedCount })}</div>
+            <button onClick={close} style={{ ...btnPrimary, width: '100%' }}>{t('addPurchase.doneBtn', 'Done')}</button>
           </div>
         )}
 
@@ -279,8 +401,8 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
           <div>
             <div style={{ fontSize: 13, color: '#DC2626', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: 10, marginBottom: 12 }}>{err}</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setStage(lines.length ? 'edit' : 'choose')} style={{ ...btnGhost, flex: 1 }}>Back</button>
-              <button onClick={close} style={{ ...btnPrimary, flex: 1 }}>Close</button>
+              <button onClick={() => { setErr(null); setStage(lines.length ? 'edit' : 'choose'); }} style={{ ...btnGhost, flex: 1 }}>{t('addPurchase.back', 'Back')}</button>
+              <button onClick={close} style={{ ...btnPrimary, flex: 1 }}>{t('addPurchase.close', 'Close')}</button>
             </div>
           </div>
         )}

@@ -60,6 +60,9 @@ export interface TodoCtx {
   scopeQuery: <T>(q: T, opts?: { plantCol?: string; unitCol?: string }) => T;
   plantName: (plantId: string | null | undefined) => string;
   notifications: AppNotification[];
+  /** True when the workflow a notification points at is already closed — such
+   *  rows are history, not pending work, so To-Do must drop them. */
+  isNotificationCompleted?: (n: AppNotification) => boolean;
 }
 
 export interface TodoSectionDef {
@@ -163,10 +166,15 @@ function ticketItem(
 }
 
 /** Urgent-alerts rows come from the in-memory notifications feed (no query), so
- *  this is exported for TodoContext to reuse — keeping the shape in one place. */
-export function buildUrgentItems(notifications: AppNotification[]): TodoItem[] {
+ *  this is exported for TodoContext to reuse — keeping the shape in one place.
+ *  Notifications whose linked workflow is already closed are excluded: the feed
+ *  itself is an immutable audit trail, but To-Do only lists actionable work. */
+export function buildUrgentItems(
+  notifications: AppNotification[],
+  isCompleted: (n: AppNotification) => boolean = () => false,
+): TodoItem[] {
   const isUrgent = (n: AppNotification) => n.type === 'urgent' || n.type === 'critical';
-  return notifications.filter(isUrgent).slice(0, ROW_CAP).map((n) => ({
+  return notifications.filter((n) => isUrgent(n) && !isCompleted(n)).slice(0, ROW_CAP).map((n) => ({
     id: n.id,
     route: n.route || '/dashboard',
     title: n.title,
@@ -451,7 +459,7 @@ export const TODO_SECTIONS: TodoSectionDef[] = [
       { key: 'status', labelKey: 'todo.col.severity', align: 'right' },
     ],
     appliesTo: (ctx) => hasRole(ctx, 'admin', 'unit_head'),
-    fetch: async (ctx) => buildUrgentItems(ctx.notifications),
+    fetch: async (ctx) => buildUrgentItems(ctx.notifications, ctx.isNotificationCompleted),
   },
 
   // ── Updates on requests I raised (now in someone else's court) ────────────

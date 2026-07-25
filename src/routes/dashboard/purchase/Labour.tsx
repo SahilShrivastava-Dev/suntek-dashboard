@@ -46,7 +46,7 @@ export function Labour() {
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
   async function handleSave() {
-    await notifyMentions(form.reason, { entityLabel: 'Labour rate update', route: '/dashboard/purchase/labour' });
+    await notifyMentions(form.reason, { entityLabel: t('labour.entityLabel', 'Labour rate update'), route: '/dashboard/purchase/labour' });
     setSaved(true);
     setTimeout(() => { setOpen(false); setSaved(false); }, 1600);
   }

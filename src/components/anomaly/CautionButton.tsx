@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
 import { useAnomalies } from '../../contexts/AnomalyContext';
@@ -12,6 +13,7 @@ const ICON_COLOR: Record<Severity, string> = { urgent: '#DC2626', warning: '#D97
 const DOT: Record<Severity, string> = { urgent: '#DC2626', warning: '#D97706', info: '#2563EB' };
 
 export function CautionButton() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { activeProfile } = useRoleContext();
   const { findings, criticalCount, urgentCount, loading } = useAnomalies();
@@ -48,18 +50,18 @@ export function CautionButton() {
   function formatAge(ts: string) {
     const diff = Date.now() - new Date(ts).getTime();
     const m = Math.floor(diff / 60000);
-    if (m < 1) return 'just now';
-    if (m < 60) return `${m}m ago`;
+    if (m < 1) return t('time.justNow');
+    if (m < 60) return t('time.minutesAgo', { count: m });
     const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
-    return `${Math.floor(h / 24)}d ago`;
+    if (h < 24) return t('time.hoursAgo', { count: h });
+    return t('time.daysAgo', { count: Math.floor(h / 24) });
   }
 
   return (
     <>
       <button
         ref={btnRef}
-        title="Anomaly detection"
+        title={t('anomaly.detectionTitle', 'Anomaly detection')}
         className={`w-9 h-9 max-[390px]:w-8 max-[390px]:h-8 md:w-10 md:h-10 shrink-0 rounded-[10px] border flex items-center justify-center relative ${open ? 'bg-slate-900 border-slate-900' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
         onClick={() => setOpen(v => !v)}
       >
@@ -90,9 +92,9 @@ export function CautionButton() {
           <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid #F1F5F9', flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>Anomaly detection</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>{t('anomaly.detectionTitle', 'Anomaly detection')}</div>
                 <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
-                  {urgentCount} urgent · {criticalCount} flagged
+                  {t('anomaly.urgentFlaggedCount', { defaultValue: '{{urgent}} urgent · {{flagged}} flagged', urgent: urgentCount, flagged: criticalCount })}
                 </div>
               </div>
               <button
@@ -103,7 +105,7 @@ export function CautionButton() {
                   padding: '4px 8px', borderRadius: 8, fontFamily: 'inherit',
                 }}
               >
-                Open dashboard →
+                {t('anomaly.openDashboard', 'Open dashboard →')}
               </button>
             </div>
           </div>
@@ -111,11 +113,11 @@ export function CautionButton() {
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {loading ? (
               <div style={{ padding: '32px 18px', textAlign: 'center', color: '#94A3B8', fontSize: 12 }}>
-                Scanning live data…
+                {t('anomaly.scanningLiveData')}
               </div>
             ) : findings.length === 0 ? (
               <div style={{ padding: '40px 18px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
-                No anomalies detected · all clear
+                {t('anomaly.allClear', 'No anomalies detected · all clear')}
               </div>
             ) : (
               findings.map(f => (

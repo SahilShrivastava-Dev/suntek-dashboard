@@ -24,7 +24,7 @@ import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import type { AppNotification } from '../../../contexts/NotificationsContext';
 import type { Database } from '../../../lib/database.types';
 import {
-  FREQ_OPTIONS, FREQ_LABEL, STATUS_CFG, STAGE_LABELS,
+  FREQ_OPTIONS, FREQ_LABEL, STATUS_CFG, STAGE_LABELS, STAGE_LABEL_KEYS, INHOUSE_STAGE_LABEL_KEYS,
   statusBadge, formatDate, daysFromNow, dueDateLabel, calculateNextDue,
   PhotoUploader, StageStrip, EMERGENCY_STAGES, INHOUSE_STAGES, INHOUSE_STAGE_LABELS, AVAILABLE_STAGES,
 } from './maintenance/shared';
@@ -63,6 +63,7 @@ function FarEquipField({ value, assets, onChange, onPick }: {
   onChange: (v: string) => void;
   onPick: (asset: FarAssetLite | null) => void;
 }) {
+  const { t } = useTranslation();
   const [focus, setFocus] = React.useState(false);
   const [active, setActive] = React.useState(0);
   const suggestions = React.useMemo(() => suggestAssets(value, assets), [value, assets]);
@@ -82,7 +83,7 @@ function FarEquipField({ value, assets, onChange, onPick }: {
         onFocus={() => setFocus(true)}
         onBlur={() => window.setTimeout(() => setFocus(false), 150)}
         onKeyDown={onKeyDown}
-        placeholder="Search the FAR — e.g. Cooling Tower CT-1, Melter M1"
+        placeholder={t('maint.farSearchPlaceholder', 'Search the FAR — e.g. Cooling Tower CT-1, Melter M1')}
         style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
       {focus && suggestions.length > 0 && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10, marginTop: 4, boxShadow: '0 10px 30px rgba(0,0,0,0.15)', maxHeight: 240, overflowY: 'auto' }}>
@@ -108,6 +109,7 @@ function PartNameField({ value, stock, onChange, onPick }: {
   onChange: (v: string) => void;
   onPick: (item: StoreStockItem | null) => void;
 }) {
+  const { t } = useTranslation();
   const [focus, setFocus] = React.useState(false);
   const [active, setActive] = React.useState(0);
   const suggestions = React.useMemo(() => suggestParts(value, stock), [value, stock]);
@@ -128,7 +130,7 @@ function PartNameField({ value, stock, onChange, onPick }: {
         onFocus={() => setFocus(true)}
         onBlur={() => window.setTimeout(() => setFocus(false), 150)}
         onKeyDown={onKeyDown}
-        placeholder={stock.length ? 'Type to search store — e.g. Acid Pump seal' : 'e.g. Mechanical seal, O-ring kit'}
+        placeholder={stock.length ? t('maint.partSearchPlaceholder', 'Type to search store — e.g. Acid Pump seal') : t('maint.partExamplePlaceholder', 'e.g. Mechanical seal, O-ring kit')}
         style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
       />
       {focus && suggestions.length > 0 && (
@@ -139,7 +141,7 @@ function PartNameField({ value, stock, onChange, onPick }: {
               onMouseDown={e => { e.preventDefault(); choose(s); }}
               style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: i === active ? '#F1F5F9' : '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
               <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.item_name}</span>
-              <span style={{ color: s.on_hand > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.on_hand > 0 ? `${s.on_hand} in stock` : 'out of stock'}</span>
+              <span style={{ color: s.on_hand > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.on_hand > 0 ? t('maint.inStockCount', { defaultValue: '{{n}} in stock', n: s.on_hand }) : t('maint.outOfStock', 'out of stock')}</span>
             </button>
           ))}
         </div>
@@ -282,11 +284,21 @@ async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?
 const ASSIGNABLE_ROLE_IDS = ['technician_shd', 'store_manager_maint', 'factory_operator', 'unit_head'];
 
 // Common deficiencies a reviewer can tick when sending a ticket back for changes.
+// The English value is what gets persisted; the key translates the chip at render.
 const CHANGE_ISSUE_TAGS = [
   'Blurry / unclear photo', 'Missing photo', 'Incomplete description',
   'Incorrect information', 'Missing maintenance details', 'Missing asset information',
   'Incorrect assessment',
 ];
+const CHANGE_TAG_KEYS: Record<string, string> = {
+  'Blurry / unclear photo': 'maint.tagBlurryPhoto',
+  'Missing photo': 'maint.tagMissingPhoto',
+  'Incomplete description': 'maint.tagIncompleteDescription',
+  'Incorrect information': 'maint.tagIncorrectInformation',
+  'Missing maintenance details': 'maint.tagMissingMaintDetails',
+  'Missing asset information': 'maint.tagMissingAssetInfo',
+  'Incorrect assessment': 'maint.tagIncorrectAssessment',
+};
 
 // ── Jharkhand procurement units — store requests route to the matching store manager.
 type Unit = 'chlorides' | 'plasticiser';
@@ -338,6 +350,7 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -384,8 +397,8 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
       <button
         ref={btnRef}
         onClick={toggle}
-        title="Manage schedule"
-        aria-label="Manage schedule"
+        title={t('maint.manageSchedule', 'Manage schedule')}
+        aria-label={t('maint.manageSchedule', 'Manage schedule')}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
@@ -407,7 +420,7 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
         }}>
           <button role="menuitem" style={item} onClick={run(onRevise)} onMouseEnter={e => (e.currentTarget.style.background = '#F1F5F9')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-            Revise
+            {t('maint.revise', 'Revise')}
           </button>
           <button role="menuitem" style={item} onClick={run(onToggle)} onMouseEnter={e => (e.currentTarget.style.background = '#F1F5F9')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
             {isActive ? (
@@ -415,16 +428,16 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
             ) : (
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
             )}
-            {isActive ? 'Pause' : 'Resume'}
+            {isActive ? t('maint.pause', 'Pause') : t('maint.resume', 'Resume')}
           </button>
           <button role="menuitem" style={item} onClick={run(onDuplicate)} onMouseEnter={e => (e.currentTarget.style.background = '#F1F5F9')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-            Duplicate
+            {t('maint.duplicate', 'Duplicate')}
           </button>
           <div style={{ height: 1, background: '#F1F5F9', margin: '4px 0' }} />
           <button role="menuitem" disabled={deleting} style={{ ...item, color: '#DC2626' }} onClick={run(onDelete)} onMouseEnter={e => (e.currentTarget.style.background = '#FEF2F2')} onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-            {deleting ? 'Deleting…' : 'Delete'}
+            {deleting ? t('maint.deleting', 'Deleting…') : t('maint.delete', 'Delete')}
           </button>
         </div>,
         document.body
@@ -446,6 +459,16 @@ export function Maintenance() {
   const screenBlacklist = useBlacklistGuard();
   const actionBusyRef = useRef(false); // guards one-shot workflow actions from double-clicks
   const role = activeProfile.id;
+
+  // Translated status label for a ticket status (falls back to the raw config label).
+  const statusLabel = (s: string) => {
+    const cfg = STATUS_CFG[s];
+    if (!cfg) return s;
+    return cfg.labelKey ? t(cfg.labelKey, cfg.label) : cfg.label;
+  };
+  // Translate a stage-label map (StageStrip labels / renderStageDetail heading).
+  const trStageLabels = (labels: Record<string, string>, keys: Record<string, string>) =>
+    Object.fromEntries(Object.entries(labels).map(([k, v]) => [k, keys[k] ? t(keys[k], v) : v]));
 
   // Real people (from the DB directory) an admin can assign a task to — those
   // whose role is in ASSIGNABLE_ROLE_IDS. baseRoleId is the directory entry's role.
@@ -810,7 +833,7 @@ export function Maintenance() {
       ]
     : [
         { value: 'all', label: t('common.allStatus') },
-        ...[...new Set(emergencyTickets.map(t => t.status))].map(s => ({ value: s, label: STATUS_CFG[s]?.label ?? s })),
+        ...[...new Set(emergencyTickets.map(tk => tk.status))].map(s => ({ value: s, label: statusLabel(s) })),
       ];
 
   // Click-to-sort for the three maintenance tables (sorts feed pagination below).
@@ -886,7 +909,7 @@ export function Maintenance() {
       // A technician raising their own job is implicitly assigned to themselves.
       assigned_to: isTechnician ? activeProfile.name : null,
     }).select('*, plants(name)').single();
-    if (error) { toast.error(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(t('maint.failedMsg', { defaultValue: 'Failed: {{message}}', message: error.message })); return; }
 
     // Optional: photo of the broken/defective item(s) attached at raise time.
     if (newTicket && raisePhotoBlob) {
@@ -933,7 +956,7 @@ export function Maintenance() {
     );
     if (hits.length) {
       const h = hits[0];
-      toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+      toast.error(t('maint.blacklistMatchToast', { defaultValue: '⚠ "{{value}}" ≈ blacklisted {{type}} "{{name}}" ({{pct}}%). Admin notified.', value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
     }
 
     setRaiseSaved(true);
@@ -969,23 +992,23 @@ export function Maintenance() {
       entityLabel: editForm.equipment || 'Ticket', route: `/dashboard/purchase/maint?ticket=${selectedTicket.id}`,
     });
     setEditingTicket(false);
-    toast.success('Ticket updated');
+    toast.success(t('maint.ticketUpdated', 'Ticket updated'));
     await loadData();
   }
 
-  async function handleDeleteTicket(t: TicketRow) {
+  async function handleDeleteTicket(tk: TicketRow) {
     if (!isAdmin) return;
-    if (!window.confirm(`Delete ticket "${t.equipment || t.title}"? This permanently removes it and cannot be undone.`)) return;
+    if (!window.confirm(t('maint.confirmDeleteTicket', { defaultValue: 'Delete ticket "{{name}}"? This permanently removes it and cannot be undone.', name: tk.equipment || tk.title }))) return;
     // Remove dependent store-request rows first (FK: maintenance_store_requests.ticket_id).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().eq('ticket_id', t.id);
-    if (srErr) { toast.error(`Delete failed: ${srErr.message}`); return; }
+    const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().eq('ticket_id', tk.id);
+    if (srErr) { toast.error(t('maint.deleteFailedMsg', { defaultValue: 'Delete failed: {{message}}', message: srErr.message })); return; }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase.from('maintenance_tickets') as any).delete().eq('id', t.id);
-    if (error) { toast.error(`Delete failed: ${error.message}`); return; }
-    setTickets((prev) => prev.filter((x) => x.id !== t.id));
-    if (selectedTicket?.id === t.id) { setSelectedTicket(null); setEditingTicket(false); }
-    toast.success('Ticket deleted');
+    const { error } = await (supabase.from('maintenance_tickets') as any).delete().eq('id', tk.id);
+    if (error) { toast.error(t('maint.deleteFailedMsg', { defaultValue: 'Delete failed: {{message}}', message: error.message })); return; }
+    setTickets((prev) => prev.filter((x) => x.id !== tk.id));
+    if (selectedTicket?.id === tk.id) { setSelectedTicket(null); setEditingTicket(false); }
+    toast.success(t('maint.ticketDeleted', 'Ticket deleted'));
   }
 
   // ── Request Changes / Resubmit loop ─────────────────────────────────────────
@@ -1002,7 +1025,7 @@ export function Maintenance() {
   async function submitRequestChanges() {
     if (!selectedTicket || savingRevision) return;
     const reason = [changeTags.join(', '), changeReason.trim()].filter(Boolean).join(' — ');
-    if (!reason) { toast.error('Add a note on what needs fixing'); return; }
+    if (!reason) { toast.error(t('maint.addFixNote', 'Add a note on what needs fixing')); return; }
     setSavingRevision(true);
     try {
       const nowIso = new Date().toISOString();
@@ -1020,9 +1043,9 @@ export function Maintenance() {
       await notifyTicketWatchers(selectedTicket, `Changes requested: ${selectedTicket.equipment}`, reason, 'warning');
       setSelectedTicket((t) => t ? { ...t, status: 'changes_requested', revision_prev_status: prevStatus, revision_reason: reason, revision_requested_by: activeProfile.name, revision_requested_at: nowIso, revision_count: (t.revision_count ?? 0) + 1 } : t);
       setRequestingChanges(false); setChangeReason(''); setChangeTags([]);
-      toast.success('Sent back to technician for changes');
+      toast.success(t('maint.sentBackToTechToast', 'Sent back to technician for changes'));
       await loadData();
-    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); }
+    } catch (e) { toast.error(t('maint.failedMsg', { defaultValue: 'Failed: {{message}}', message: e instanceof Error ? e.message : String(e) })); }
     finally { setSavingRevision(false); }
   }
 
@@ -1038,7 +1061,7 @@ export function Maintenance() {
   // it paused at so the reviewer picks up right where they left off.
   async function submitResubmit() {
     if (!selectedTicket || savingRevision) return;
-    if (!resubmitForm.equipment.trim()) { toast.error('Equipment is required'); return; }
+    if (!resubmitForm.equipment.trim()) { toast.error(t('maint.equipmentRequired', 'Equipment is required')); return; }
     setSavingRevision(true);
     try {
       let newPhotoUrl: string | null = null;
@@ -1069,9 +1092,9 @@ export function Maintenance() {
       await notifyTicketWatchers(selectedTicket, `Ticket resubmitted: ${resubmitForm.equipment}`, 'Updated and resubmitted for review', 'info');
       setSelectedTicket((t) => t ? { ...t, equipment: resubmitForm.equipment, title, description: resubmitForm.description || null, status: restoreStatus, revision_reason: null, plants: plant ? { name: plant.name } : t.plants, defective_raise_photo_url: newPhotoUrl ?? t.defective_raise_photo_url } : t);
       setResubmitting(false); setResubmitPhotoBlob(null);
-      toast.success('Resubmitted for review');
+      toast.success(t('maint.resubmittedForReview', 'Resubmitted for review'));
       await loadData();
-    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); setUploading(false); }
+    } catch (e) { toast.error(t('maint.failedMsg', { defaultValue: 'Failed: {{message}}', message: e instanceof Error ? e.message : String(e) })); setUploading(false); }
     finally { setSavingRevision(false); }
   }
 
@@ -1080,7 +1103,7 @@ export function Maintenance() {
     if (!isAdmin) return;
     const ids = emergencyTickets.map((t) => t.id);
     if (!ids.length) return;
-    if (!window.confirm(`Delete ALL ${ids.length} emergency tickets? This permanently removes every emergency ticket and cannot be undone.`)) return;
+    if (!window.confirm(t('maint.confirmDeleteAllTickets', { defaultValue: 'Delete ALL {{count}} emergency tickets? This permanently removes every emergency ticket and cannot be undone.', count: ids.length }))) return;
     setDeletingAll(true);
     try {
       // Delete in chunks so a long id list doesn't blow the URL length limit.
@@ -1089,14 +1112,14 @@ export function Maintenance() {
         // Remove dependent store-request rows first (FK: maintenance_store_requests.ticket_id).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().in('ticket_id', chunk);
-        if (srErr) { toast.error(`Delete failed: ${srErr.message}`); return; }
+        if (srErr) { toast.error(t('maint.deleteFailedMsg', { defaultValue: 'Delete failed: {{message}}', message: srErr.message })); return; }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error } = await (supabase.from('maintenance_tickets') as any).delete().in('id', chunk);
-        if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+        if (error) { toast.error(t('maint.deleteFailedMsg', { defaultValue: 'Delete failed: {{message}}', message: error.message })); return; }
       }
       setTickets((prev) => prev.filter((t) => !ids.includes(t.id)));
       setSelectedTicket(null); setEditingTicket(false);
-      toast.success(`Deleted ${ids.length} emergency tickets`);
+      toast.success(t('maint.deletedNTickets', { defaultValue: 'Deleted {{count}} emergency tickets', count: ids.length }));
     } finally {
       setDeletingAll(false);
     }
@@ -1122,7 +1145,7 @@ export function Maintenance() {
     setGenerating(true);
     try {
       const rows = reportTickets();
-      if (!rows.length) { toast.error('No tickets match these filters'); return; }
+      if (!rows.length) { toast.error(t('maint.noTicketsMatchFilters', 'No tickets match these filters')); return; }
       const ids = rows.map((t) => t.id);
 
       // Enrich each ticket with its full trail: store-request lifecycle,
@@ -1219,10 +1242,10 @@ export function Maintenance() {
         exportToCsv(`maintenance-activity-${today}`, NOTE_COLUMNS, noteRows, preamble);
       }
 
-      toast.success(`Report ready · ${csvRows.length} tickets exported`);
+      toast.success(t('maint.reportReady', { defaultValue: 'Report ready · {{count}} tickets exported', count: csvRows.length }));
       setShowReport(false);
     } catch (err) {
-      toast.error(`Report failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(t('maint.reportFailedMsg', { defaultValue: 'Report failed: {{message}}', message: err instanceof Error ? err.message : String(err) }));
     } finally {
       setGenerating(false);
     }
@@ -1289,7 +1312,7 @@ export function Maintenance() {
       }
       setCompletingSchedule(null); setCompletionBlob(null); setUploadPct(0); setCompletionChecklist([]);
       await loadData();
-    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
+    } catch (err) { toast.error(t('maint.uploadFailedMsg', { defaultValue: 'Upload failed: {{message}}', message: err instanceof Error ? err.message : String(err) })); }
     finally { setUploading(false); }
   }
 
@@ -1301,15 +1324,15 @@ export function Maintenance() {
         await updateRows('maintenance_tickets', { status: 'closed', closed_at: new Date().toISOString() }).eq('id', ticket.id);
         if (sched) await advanceSchedule(sched);
         notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance verified: ${ticket.title}`, body: `${ticket.equipment} · verified by ${activeProfile.name}`, type: 'info', route: maintRoute(ticket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
-        toast.success('Verified & closed');
+        toast.success(t('maint.verifiedClosed', 'Verified & closed'));
       } else {
         await updateRows('maintenance_tickets', { status: 'open' }).eq('id', ticket.id);
         notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance sent back: ${ticket.title}`, body: `${ticket.equipment} · ${activeProfile.name} asked for rework`, type: 'warning', route: maintRoute(ticket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
-        toast.success('Sent back for rework');
+        toast.success(t('maint.sentBackForRework', 'Sent back for rework'));
       }
       setVerifyingTicket(null);
       await loadData();
-    } catch (e) { toast.error(`Failed: ${e instanceof Error ? e.message : String(e)}`); }
+    } catch (e) { toast.error(t('maint.failedMsg', { defaultValue: 'Failed: {{message}}', message: e instanceof Error ? e.message : String(e) })); }
   }
 
   async function handleRaiseStoreReq() {
@@ -1407,7 +1430,7 @@ export function Maintenance() {
       await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Fixed in-house by ${activeProfile.name}.`);
       setSelectedTicket(null); setCompletionBlob(null); setUploadPct(0);
       await loadData();
-    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
+    } catch (err) { toast.error(t('maint.uploadFailedMsg', { defaultValue: 'Upload failed: {{message}}', message: err instanceof Error ? err.message : String(err) })); }
     finally { setUploading(false); }
   }
 
@@ -1436,7 +1459,7 @@ export function Maintenance() {
     // The register is the default; overriding its quantity needs a justification.
     const overrode = available && regQty != null && enteredQty != null && enteredQty !== regQty;
     if (overrode && !storeDecisionForm.qtyJustification.trim()) {
-      toast.error('Your count differs from the register — please add a justification.');
+      toast.error(t('maint.qtyDiffersJustify', 'Your count differs from the register — please add a justification.'));
       return;
     }
     actionBusyRef.current = true;   // guard against a double-submit creating two shortfall rows
@@ -1545,7 +1568,7 @@ export function Maintenance() {
     notify({ target_roles: ['purchase_manager', 'admin'], title: `Procured — Purchase Manager to bill: ${req.part_name}`, body: `BUSY ref: ${busyRef}${supplier ? ` · ${supplier}` : ''} — Purchase Manager to upload the bill.`, type: 'info', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket?.plant_id ?? null, unit_id: selectedTicket?.unit_id ?? null });
     if (supplier) {
       const hits = await screenBlacklist([{ value: supplier, label: 'Supplier' }], { workflow: 'Maintenance Procurement', source: 'entry', entityLabel: selectedTicket.equipment });
-      if (hits.length) { const h = hits[0]; toast.error(`⚠ Supplier "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`); }
+      if (hits.length) { const h = hits[0]; toast.error(t('maint.blacklistSupplierToast', { defaultValue: '⚠ Supplier "{{value}}" ≈ blacklisted {{type}} "{{name}}" ({{pct}}%). Admin notified.', value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) })); }
     }
     setBusyRef(''); setSupplierName(''); setPurchaseQty(''); setActingReqId(null);
     await refreshAfterItemChange();
@@ -1558,7 +1581,7 @@ export function Maintenance() {
     if (!selectedTicket || !dispatchBlob) return;
     const declaredItems = parseInt(pmForm.itemsCount, 10);
     const declaredTotal = parseFloat(pmForm.billTotal.replace(/[^0-9.]/g, ''));
-    if (!declaredItems || !declaredTotal) { toast.error('Enter the number of items and the total bill amount.'); return; }
+    if (!declaredItems || !declaredTotal) { toast.error(t('maint.enterItemsAndTotal', 'Enter the number of items and the total bill amount.')); return; }
     setUploading(true);
     setBusyPhase('verifying');
     try {
@@ -1619,13 +1642,13 @@ export function Maintenance() {
 
       if (mismatch) {
         const ocrTotalTxt = ocrTotal != null ? `₹${ocrTotal.toLocaleString('en-IN')}` : '₹?';
-        toast.error(`⚠ Bill total mismatch — you entered ₹${declaredTotal.toLocaleString('en-IN')}, OCR read ${ocrTotalTxt}. Submitted, but admin has been notified to verify.`);
+        toast.error(t('maint.billMismatchToast', { defaultValue: '⚠ Bill total mismatch — you entered ₹{{declared}}, OCR read {{ocr}}. Submitted, but admin has been notified to verify.', declared: declaredTotal.toLocaleString('en-IN'), ocr: ocrTotalTxt }));
         notify({ target_roles: ['admin', 'unit_head'], title: `⚠ Bill total mismatch flagged: ${selectedTicket.equipment}`, body: `${activeProfile.name} declared ₹${declaredTotal.toLocaleString('en-IN')} (${declaredItems} line item${declaredItems === 1 ? '' : 's'}); OCR read ${ocrTotalTxt}. Please verify the bill.`, type: 'urgent', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
       }
       await notifyTicketWatchers(selectedTicket, `Bill uploaded: ${selectedTicket.equipment}`, `${activeProfile.name} uploaded the supplier bill — items en route to store.`);
       setDispatchBlob(null); setUploadPct(0); setPmForm({ itemsCount: '', billTotal: '' });
       await refreshAfterItemChange();
-    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
+    } catch (err) { toast.error(t('maint.uploadFailedMsg', { defaultValue: 'Upload failed: {{message}}', message: err instanceof Error ? err.message : String(err) })); }
     finally { setUploading(false); setBusyPhase('uploading'); }
   }
 
@@ -1636,9 +1659,9 @@ export function Maintenance() {
     if (!selectedTicket) return;
     const fromOwnStore = req.store_decision === 'available';
     if (fromOwnStore) {
-      if (!handoverNotes.trim() && !handoverPhotoBlob) { toast.error("Please add a short description (why you're providing this part) or a part photo before confirming handover."); return; }
+      if (!handoverNotes.trim() && !handoverPhotoBlob) { toast.error(t('maint.handoverNeedDescription', "Please add a short description (why you're providing this part) or a part photo before confirming handover.")); return; }
     } else if (!handoverInvoiceBlob && !handoverPhotoBlob) {
-      toast.error('Please upload at least the invoice or part photo before confirming handover.'); return;
+      toast.error(t('maint.handoverNeedInvoice', 'Please upload at least the invoice or part photo before confirming handover.')); return;
     }
     setUploading(true);
     try {
@@ -1723,7 +1746,7 @@ export function Maintenance() {
       });
       setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); setUploadPct(0); setActingReqId(null);
       await refreshAfterItemChange();
-    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
+    } catch (err) { toast.error(t('maint.uploadFailedMsg', { defaultValue: 'Upload failed: {{message}}', message: err instanceof Error ? err.message : String(err) })); }
     finally { setUploading(false); }
   }
 
@@ -1752,7 +1775,7 @@ export function Maintenance() {
       await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Defective part → ${defectiveDecision} · closed by ${activeProfile.name}.`);
       setSelectedTicket(null); setDefectiveBlob(null); setDefectiveDecision(''); setUploadPct(0);
       await loadData();
-    } catch (err) { toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`); }
+    } catch (err) { toast.error(t('maint.uploadFailedMsg', { defaultValue: 'Upload failed: {{message}}', message: err instanceof Error ? err.message : String(err) })); }
     finally { setUploading(false); }
   }
 
@@ -1816,9 +1839,9 @@ export function Maintenance() {
     const next = !s.is_active;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await updateRows('maintenance_schedules', { is_active: next }).eq('id', s.id);
-    if (error) { toast.error(`Failed: ${error.message}`); return; }
+    if (error) { toast.error(t('maint.failedMsg', { defaultValue: 'Failed: {{message}}', message: error.message })); return; }
     setSchedules(prev => prev.map(x => (x.id === s.id ? { ...x, is_active: next } : x)));
-    toast.success(next ? 'Schedule resumed' : 'Schedule paused');
+    toast.success(next ? t('maint.scheduleResumed', 'Schedule resumed') : t('maint.schedulePaused', 'Schedule paused'));
   }
 
   // Delete a schedule.
@@ -1829,7 +1852,7 @@ export function Maintenance() {
   //    unlinked (schedule_id → null) so the maintenance history stays intact.
   async function handleDeleteSchedule(s: ScheduleRow) {
     if (!isAdmin || deletingScheduleId) return;
-    if (!window.confirm(`Delete schedule "${s.title}"? This stops auto-ticket generation and removes any pending tickets it created (started/completed ones are kept for history). This cannot be undone.`)) return;
+    if (!window.confirm(t('maint.confirmDeleteSchedule', { defaultValue: 'Delete schedule "{{name}}"? This stops auto-ticket generation and removes any pending tickets it created (started/completed ones are kept for history). This cannot be undone.', name: s.title }))) return;
     setDeletingScheduleId(s.id);
     try {
       const pendingIds = tickets.filter(t => t.schedule_id === s.id && t.status === 'open').map(t => t.id);
@@ -1837,24 +1860,24 @@ export function Maintenance() {
         // Remove dependent store-request rows first (FK: maintenance_store_requests.ticket_id).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: srErr } = await (supabase.from('maintenance_store_requests') as any).delete().in('ticket_id', pendingIds);
-        if (srErr) { toast.error(`Delete failed: ${srErr.message}`); return; }
+        if (srErr) { toast.error(t('maint.deleteFailedMsg', { defaultValue: 'Delete failed: {{message}}', message: srErr.message })); return; }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: tdErr } = await (supabase.from('maintenance_tickets') as any).delete().in('id', pendingIds);
-        if (tdErr) { toast.error(`Delete failed: ${tdErr.message}`); return; }
+        if (tdErr) { toast.error(t('maint.deleteFailedMsg', { defaultValue: 'Delete failed: {{message}}', message: tdErr.message })); return; }
       }
       // Unlink any remaining (worked-on/closed) tickets so the FK clears but history survives.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error: tErr } = await (supabase.from('maintenance_tickets') as any).update({ schedule_id: null }).eq('schedule_id', s.id);
-      if (tErr) { toast.error(`Delete failed: ${tErr.message}`); return; }
+      if (tErr) { toast.error(t('maint.deleteFailedMsg', { defaultValue: 'Delete failed: {{message}}', message: tErr.message })); return; }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (supabase.from('maintenance_schedules') as any).delete().eq('id', s.id);
-      if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+      if (error) { toast.error(t('maint.deleteFailedMsg', { defaultValue: 'Delete failed: {{message}}', message: error.message })); return; }
       setSchedules(prev => prev.filter(x => x.id !== s.id));
       // Update local tickets so the periodic KPIs recompute instantly.
       setTickets(prev => prev
         .filter(t => !pendingIds.includes(t.id))
         .map(t => (t.schedule_id === s.id ? { ...t, schedule_id: null } : t)));
-      toast.success('Schedule deleted');
+      toast.success(t('maint.scheduleDeleted', 'Schedule deleted'));
     } finally {
       setDeletingScheduleId(null);
     }
@@ -1884,10 +1907,10 @@ export function Maintenance() {
     if (editingSchedule) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await updateRows('maintenance_schedules', payload).eq('id', editingSchedule.id);
-      if (error) { toast.error(`Failed: ${error.message}`); return; }
+      if (error) { toast.error(t('maint.failedMsg', { defaultValue: 'Failed: {{message}}', message: error.message })); return; }
     } else {
       const { error } = await insertRows('maintenance_schedules', { ...payload, is_active: true });
-      if (error) { toast.error(`Failed: ${error.message}`); return; }
+      if (error) { toast.error(t('maint.failedMsg', { defaultValue: 'Failed: {{message}}', message: error.message })); return; }
     }
     // If the assignee is restricted, alert admin + unit head immediately.
     if (scheduleForm.assignedTo && (!editingSchedule || reassigned)) {
@@ -1908,62 +1931,62 @@ export function Maintenance() {
 
   // ── Read-only stage history (click a stage in the strip) ────────────────────
   function renderStageDetail(stage: string) {
-    const t = selectedTicket;
-    if (!t) return null;
+    const tk = selectedTicket;
+    if (!tk) return null;
     const sr = selectedStoreReq;
-    const label = STAGE_LABELS[stage] || stage;
+    const label = STAGE_LABEL_KEYS[stage] ? t(STAGE_LABEL_KEYS[stage], STAGE_LABELS[stage]) : (STAGE_LABELS[stage] || stage);
 
     const photo = (url: string | null | undefined, cap: string) => url ? (
       <div style={{ marginTop: 8 }}>
         <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>{cap}</div>
         <img src={url} alt={cap} style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 10, border: '1px solid #E2E8F0' }} />
-        <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 4 }}>Open full image ↗</a>
+        <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 4 }}>{t('maint.openFullImage', 'Open full image ↗')}</a>
       </div>
     ) : null;
     const line = (k: string, v: React.ReactNode) => (v || v === 0) ? (
       <div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}><span style={{ color: '#94A3B8' }}>{k}: </span><strong>{v}</strong></div>
     ) : null;
 
-    let body: React.ReactNode = <div style={{ fontSize: 12.5, color: '#94A3B8' }}>No details captured for this step.</div>;
+    let body: React.ReactNode = <div style={{ fontSize: 12.5, color: '#94A3B8' }}>{t('maint.noStepDetails', 'No details captured for this step.')}</div>;
     switch (stage) {
       case 'open':
-        body = <>{line('Raised by', t.raised_by)}{line('Role', roleLabelFor(t.raised_role, roles))}{line('When', formatDate(t.created_at))}{t.description && <div style={{ fontSize: 12.5, color: '#334155', marginTop: 6 }}><MentionText text={t.description} /></div>}</>;
+        body = <>{line(t('maint.colRaisedBy', 'Raised by'), tk.raised_by)}{line(t('maint.roleLabel', 'Role'), roleLabelFor(tk.raised_role, roles))}{line(t('maint.whenLabel', 'When'), formatDate(tk.created_at))}{tk.description && <div style={{ fontSize: 12.5, color: '#334155', marginTop: 6 }}><MentionText text={tk.description} /></div>}</>;
         break;
       case 'in_progress':
-        body = <>{line('Handled by', t.assigned_to || t.raised_by)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>{sr ? 'Needs a part — store request raised.' : 'Decided to fix in-house.'}</div></>;
+        body = <>{line(t('maint.handledBy', 'Handled by'), tk.assigned_to || tk.raised_by)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>{sr ? t('maint.needsPartStoreRaised', 'Needs a part — store request raised.') : t('maint.decidedInhouse', 'Decided to fix in-house.')}</div></>;
         break;
       case 'pending_store':
-        if (sr) body = <>{line('Part requested', sr.part_name)}{line('Qty', sr.quantity)}{line('Specification', sr.specification)}{line('Store decision', sr.store_decision)}{line('Qty in store', sr.qty_in_store)}{line('Shelf', sr.shelf_location)}{line('Condition', sr.part_condition)}</>;
+        if (sr) body = <>{line(t('maint.partRequested', 'Part requested'), sr.part_name)}{line(t('maint.qtyLabel', 'Qty'), sr.quantity)}{line(t('maint.specificationLabel', 'Specification'), sr.specification)}{line(t('maint.storeDecisionLabel', 'Store decision'), sr.store_decision)}{line(t('maint.qtyInStoreLabel', 'Qty in store'), sr.qty_in_store)}{line(t('maint.shelfLabel', 'Shelf'), sr.shelf_location)}{line(t('maint.conditionLabel', 'Condition'), sr.part_condition)}</>;
         break;
       case 'pending_unit_head':
-        if (sr) body = <>{line('Unit head decision', sr.unit_head_approval)}{line('Part availability', sr.store_decision)}</>;
+        if (sr) body = <>{line(t('maint.unitHeadDecision', 'Unit head decision'), sr.unit_head_approval)}{line(t('maint.partAvailability', 'Part availability'), sr.store_decision)}</>;
         break;
       case 'pending_purchase': {
         const pr = storeReqs.find(r => r.store_decision === 'unavailable' || r.purchase_required) ?? sr;
-        if (pr) body = <>{line('Qty procured', pr.quantity)}{line('BUSY transaction ref', pr.busy_transaction_ref)}{line('Supplier', pr.supplier_name)}{line('Unit head', pr.unit_head_approval === 'approved' ? 'Approved procurement' : pr.unit_head_approval)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>External procurement for the quantity not in store.</div></>;
+        if (pr) body = <>{line(t('maint.qtyProcured', 'Qty procured'), pr.quantity)}{line(t('maint.busyTransactionRef', 'BUSY transaction ref'), pr.busy_transaction_ref)}{line(t('maint.supplierLabel', 'Supplier'), pr.supplier_name)}{line(t('maint.unitHeadLabel', 'Unit head'), pr.unit_head_approval === 'approved' ? t('maint.approvedProcurement', 'Approved procurement') : pr.unit_head_approval)}<div style={{ fontSize: 12.5, color: '#334155', marginTop: 5 }}>{t('maint.externalProcurementNote', 'External procurement for the quantity not in store.')}</div></>;
         break;
       }
       case 'pending_purchase_manager': {
         const pr = storeReqs.find(r => r.store_decision === 'unavailable' || r.purchase_required) ?? sr;
-        const amount = t.pm_bill_total ?? pr?.total_price ?? null;
-        if (pr) body = <>{line('Qty procured', pr.quantity)}{line('Purchase amount', amount != null ? `₹ ${Number(amount).toLocaleString('en-IN')}` : null)}{line('Items on bill', t.pm_items_count)}{line('Supplier', pr.supplier_name)}{line('BUSY ref', pr.busy_transaction_ref)}{line('Purchase Manager', t.pm_billed_by)}{line('Billed on', t.pm_billed_at ? formatDate(t.pm_billed_at) : null)}{line('Bill verified', pr.bill_verified ? 'Yes' : '—')}{photo(t.pm_bill_url || pr.handover_invoice_url, 'Supplier bill (Purchase Manager)')}</>;
+        const amount = tk.pm_bill_total ?? pr?.total_price ?? null;
+        if (pr) body = <>{line(t('maint.qtyProcured', 'Qty procured'), pr.quantity)}{line(t('maint.purchaseAmount', 'Purchase amount'), amount != null ? `₹ ${Number(amount).toLocaleString('en-IN')}` : null)}{line(t('maint.itemsOnBill', 'Items on bill'), tk.pm_items_count)}{line(t('maint.supplierLabel', 'Supplier'), pr.supplier_name)}{line(t('maint.busyRefLabel', 'BUSY ref'), pr.busy_transaction_ref)}{line(t('maint.purchaseManagerLabel', 'Purchase Manager'), tk.pm_billed_by)}{line(t('maint.billedOn', 'Billed on'), tk.pm_billed_at ? formatDate(tk.pm_billed_at) : null)}{line(t('maint.billVerifiedLabel', 'Bill verified'), pr.bill_verified ? t('maint.yes', 'Yes') : '—')}{photo(tk.pm_bill_url || pr.handover_invoice_url, t('maint.supplierBillPmCaption', 'Supplier bill (Purchase Manager)'))}</>;
         break;
       }
       case 'pending_handover':
-        if (sr) body = <>{line('Receipt confirmed', sr.handover_confirmed_at ? formatDate(sr.handover_confirmed_at) : '—')}{line('Notes', sr.handover_notes)}{photo(sr.handover_invoice_url, 'Bill / invoice')}{photo(sr.handover_photo_url, 'Part received photo')}</>;
+        if (sr) body = <>{line(t('maint.receiptConfirmed', 'Receipt confirmed'), sr.handover_confirmed_at ? formatDate(sr.handover_confirmed_at) : '—')}{line(t('maint.notesLabel', 'Notes'), sr.handover_notes)}{photo(sr.handover_invoice_url, t('maint.billInvoiceCaption', 'Bill / invoice'))}{photo(sr.handover_photo_url, t('maint.partReceivedPhoto', 'Part received photo'))}</>;
         break;
       case 'pending_defective_return':
-        body = <>{line('Defective part decision', t.defective_part_decision)}{photo(t.defective_part_photo_url, 'Defective part photo')}</>;
+        body = <>{line(t('maint.defectivePartDecision', 'Defective part decision'), tk.defective_part_decision)}{photo(tk.defective_part_photo_url, t('maint.defectivePartPhoto', 'Defective part photo'))}</>;
         break;
       case 'closed':
-        body = <>{line('Closed at', t.closed_at ? formatDate(t.closed_at) : '—')}{line('Defective part', t.defective_part_decision)}{photo(t.completion_photo_url, 'Completion photo')}</>;
+        body = <>{line(t('maint.closedAtLabel', 'Closed at'), tk.closed_at ? formatDate(tk.closed_at) : '—')}{line(t('maint.defectivePartLabel', 'Defective part'), tk.defective_part_decision)}{photo(tk.completion_photo_url, t('maint.completionPhoto', 'Completion photo'))}</>;
         break;
     }
 
     return (
       <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16, marginBottom: 16, background: '#FCFCFD' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: '#0F172A' }}>{label} — what happened <span style={{ fontWeight: 500, color: '#94A3B8' }}>(read-only)</span></div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: '#0F172A' }}>{t('maint.stageWhatHappened', { defaultValue: '{{stage}} — what happened', stage: label })} <span style={{ fontWeight: 500, color: '#94A3B8' }}>{t('maint.readOnlySuffix', '(read-only)')}</span></div>
           <button onClick={() => setViewStage(null)} style={{ border: 'none', background: 'transparent', color: '#94A3B8', cursor: 'pointer', fontSize: 16, lineHeight: 1, fontFamily: 'inherit' }}>×</button>
         </div>
         {body}
@@ -1975,26 +1998,26 @@ export function Maintenance() {
 
   function renderTicketActions() {
     if (!selectedTicket) return null;
-    const t = selectedTicket;
+    const tk = selectedTicket;
     const status = selectedTicket.status;
     // Persisted first decision — drives the body so an open ticket is never re-asked.
-    const decision = ticketDecision(t.title, storeReqs.length > 0);
+    const decision = ticketDecision(tk.title, storeReqs.length > 0);
 
     if (status === 'closed') {
       return (
         <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 14, padding: 16 }}>
-          <div style={{ fontWeight: 700, color: '#16A34A', marginBottom: 8 }}>Ticket closed</div>
+          <div style={{ fontWeight: 700, color: '#16A34A', marginBottom: 8 }}>{t('maint.ticketClosed', 'Ticket closed')}</div>
           {selectedTicket.completion_photo_url && (
             <>
               <img src={selectedTicket.completion_photo_url} alt="Completion" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 10, marginTop: 4 }} />
-              <a href={selectedTicket.completion_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 6 }}>View in Cloudinary ↗</a>
+              <a href={selectedTicket.completion_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 6 }}>{t('maint.viewInCloudinary', 'View in Cloudinary ↗')}</a>
             </>
           )}
           {selectedStoreReq?.handover_invoice_url && (
-            <a href={selectedStoreReq.handover_invoice_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 4 }}>View handover invoice ↗</a>
+            <a href={selectedStoreReq.handover_invoice_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#2563EB', display: 'block', marginTop: 4 }}>{t('maint.viewHandoverInvoice', 'View handover invoice ↗')}</a>
           )}
           {selectedTicket.defective_part_decision && (
-            <div style={{ fontSize: 12, marginTop: 8, color: '#475569' }}>Defective part: <strong style={{ textTransform: 'capitalize' }}>{selectedTicket.defective_part_decision}</strong></div>
+            <div style={{ fontSize: 12, marginTop: 8, color: '#475569' }}>{t('maint.defectivePartLabel', 'Defective part')}: <strong style={{ textTransform: 'capitalize' }}>{selectedTicket.defective_part_decision}</strong></div>
           )}
         </div>
       );
@@ -2006,17 +2029,17 @@ export function Maintenance() {
         const validItems = storeItems.filter(it => it.partName.trim()).length;
         return (
           <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
-            <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 13 }}>Store request — parts needed</div>
-            <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 12 }}>Add every part this breakdown needs. Each is tracked and approved individually.</div>
+            <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 13 }}>{t('maint.storeRequestPartsNeeded', 'Store request — parts needed')}</div>
+            <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 12 }}>{t('maint.storeRequestHint', 'Add every part this breakdown needs. Each is tracked and approved individually.')}</div>
             {storeItems.map((it, idx) => (
               <div key={idx} style={{ border: '1px solid #F1F5F9', borderRadius: 12, padding: 12, marginBottom: 10, background: '#FCFCFD' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: '#64748B' }}>Item {idx + 1}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#64748B' }}>{t('maint.itemN', { defaultValue: 'Item {{n}}', n: idx + 1 })}</span>
                   {storeItems.length > 1 && (
-                    <button onClick={() => setStoreItems(items => items.filter((_, i) => i !== idx))} style={{ border: 'none', background: 'transparent', color: '#DC2626', cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'inherit' }}>✕ Remove</button>
+                    <button onClick={() => setStoreItems(items => items.filter((_, i) => i !== idx))} style={{ border: 'none', background: 'transparent', color: '#DC2626', cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'inherit' }}>{t('maint.removeItem', '✕ Remove')}</button>
                   )}
                 </div>
-                <PanelField label="Part name *">
+                <PanelField label={t('maint.partNameRequired', 'Part name *')}>
                   <PartNameField
                     value={it.partName}
                     stock={storeStock}
@@ -2024,14 +2047,14 @@ export function Maintenance() {
                     onPick={picked => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, storeItemId: picked?.id ?? null, unit: picked?.unit || x.unit } : x))}
                   />
                   {it.storeItemId
-                    ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to store stock — availability will be checked automatically.</div>
-                    : (storeStock.length > 0 && it.partName.trim().length > 1 && <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>Not in store list — will be treated as a new part to procure.</div>)}
+                    ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>{t('maint.linkedToStoreStock', '✓ Linked to store stock — availability will be checked automatically.')}</div>
+                    : (storeStock.length > 0 && it.partName.trim().length > 1 && <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>{t('maint.notInStoreList', 'Not in store list — will be treated as a new part to procure.')}</div>)}
                 </PanelField>
                 <PanelRow>
-                  <PanelField label="Quantity">
-                    <PanelInput type="number" value={it.quantity} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} placeholder="e.g. 2" />
+                  <PanelField label={t('maint.quantityLabel', 'Quantity')}>
+                    <PanelInput type="number" value={it.quantity} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} placeholder={t('maint.qtyPlaceholder2', 'e.g. 2')} />
                   </PanelField>
-                  <PanelField label="Unit">
+                  <PanelField label={t('maint.unitLabel', 'Unit')}>
                     <PanelSelect value={it.unit} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, unit: e.target.value } : x))}>
                       {STORE_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                       {/* keep a registry-supplied unit selectable even if it's outside the standard list */}
@@ -2039,15 +2062,15 @@ export function Maintenance() {
                     </PanelSelect>
                   </PanelField>
                 </PanelRow>
-                <PanelField label="Specification / quality">
-                  <PanelTextarea value={it.specification} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, specification: e.target.value } : x))} placeholder="Brand, size, grade, tolerance…" />
+                <PanelField label={t('maint.specificationQuality', 'Specification / quality')}>
+                  <PanelTextarea value={it.specification} onChange={e => setStoreItems(items => items.map((x, i) => i === idx ? { ...x, specification: e.target.value } : x))} placeholder={t('maint.specPlaceholder', 'Brand, size, grade, tolerance…')} />
                 </PanelField>
               </div>
             ))}
-            <button onClick={() => setStoreItems(items => [...items, { ...BLANK_ITEM }])} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1.5px dashed #CBD5E1', background: '#fff', color: '#475569', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit', marginBottom: 12 }}>+ Add another item</button>
+            <button onClick={() => setStoreItems(items => [...items, { ...BLANK_ITEM }])} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1.5px dashed #CBD5E1', background: '#fff', color: '#475569', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit', marginBottom: 12 }}>{t('maint.addAnotherItem', '+ Add another item')}</button>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
-              <button onClick={handleRaiseStoreReq} disabled={!validItems} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !validItems ? 0.5 : 1 }}>Send {validItems > 1 ? `${validItems} items` : 'to Store Manager'}</button>
+              <button onClick={() => { setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>{t('common.cancel', 'Cancel')}</button>
+              <button onClick={handleRaiseStoreReq} disabled={!validItems} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !validItems ? 0.5 : 1 }}>{validItems > 1 ? t('maint.sendNItems', { defaultValue: 'Send {{n}} items', n: validItems }) : t('maint.sendToStoreManager', 'Send to Store Manager')}</button>
             </div>
           </div>
         );
@@ -2056,9 +2079,9 @@ export function Maintenance() {
       if (decision === 'inhouse') {
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>In-house repair — start when you begin work.</div>
+            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>{t('maint.inhouseStartHint', 'In-house repair — start when you begin work.')}</div>
             <button onClick={startRepair} style={{ padding: '12px 16px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', textAlign: 'center', fontFamily: 'inherit' }}>
-              ✓ Start in-house repair
+              {t('maint.startInhouseRepair', '✓ Start in-house repair')}
             </button>
           </div>
         );
@@ -2066,12 +2089,12 @@ export function Maintenance() {
       // Legacy/undecided ticket only (no persisted path) → let them choose once.
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 4 }}>What needs to happen?</div>
+          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 4 }}>{t('maint.whatNeedsToHappen', 'What needs to happen?')}</div>
           <button onClick={startRepair} style={{ padding: '12px 16px', borderRadius: 12, border: '1px solid #16A34A', background: '#F0FDF4', color: '#16A34A', fontWeight: 700, fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
-            ✓ Can fix in-house — start working on it
+            {t('maint.canFixInhouseStart', '✓ Can fix in-house — start working on it')}
           </button>
           <button onClick={() => setShowStoreForm(true)} style={{ padding: '12px 16px', borderRadius: 12, border: '1px solid #F47651', background: '#FFF7F5', color: '#F47651', fontWeight: 700, fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
-            🔧 Need a part from store — raise request
+            {t('maint.needPartRaiseRequest', '🔧 Need a part from store — raise request')}
           </button>
         </div>
       );
@@ -2081,11 +2104,11 @@ export function Maintenance() {
     if (status === 'in_progress' && (isTechnician || isAdmin)) {
       return (
         <div>
-          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 12 }}>Upload photo proof to close ticket</div>
-          <PhotoUploader onBlobReady={setCompletionBlob} label="Completion photo" hint="Photo of the fixed equipment / completed repair" />
+          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 12 }}>{t('maint.uploadPhotoProofClose', 'Upload photo proof to close ticket')}</div>
+          <PhotoUploader onBlobReady={setCompletionBlob} label={t('maint.completionPhoto', 'Completion photo')} hint={t('maint.completionPhotoHint', 'Photo of the fixed equipment / completed repair')} />
           {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
           <button onClick={closeInHouse} disabled={!completionBlob || uploading} style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: (!completionBlob || uploading) ? 0.5 : 1 }}>
-            {uploading ? 'Uploading…' : 'Close ticket — repair complete'}
+            {uploading ? t('maint.uploadingEllipsis', 'Uploading…') : t('maint.closeTicketRepairComplete', 'Close ticket — repair complete')}
           </button>
         </div>
       );
@@ -2095,7 +2118,7 @@ export function Maintenance() {
     // Each item card shows its own stage + the action for the current role.
     // Items flow independently; the Purchase Manager bills the procured ones
     // together below. The ticket status is a roll-up of the least-advanced item.
-    const ticketUnit = (t.unit as Unit | null) || null;
+    const ticketUnit = (tk.unit as Unit | null) || null;
     const storeManagerCanAct = isAdmin || (isStoreManager && (
       role === 'store_manager_maint' || role === 'warehouse_manager' || !ticketUnit || myStoreUnit === ticketUnit
     ));
@@ -2104,13 +2127,13 @@ export function Maintenance() {
     const awaitTxt: React.CSSProperties = { fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '10px 0', marginTop: 6 };
 
     const STAGE_BADGE: Record<ItemStage, { label: string; bg: string; color: string }> = {
-      store: { label: 'Store check', bg: '#FFF7ED', color: '#EA580C' },
-      unit_head: { label: 'Unit head', bg: '#F5F3FF', color: '#7C3AED' },
-      purchase: { label: 'Procure', bg: '#EFF6FF', color: '#2563EB' },
-      purchase_manager: { label: 'Awaiting bill', bg: '#FDF4FF', color: '#A21CAF' },
-      handover: { label: 'Handover', bg: '#FAF5FF', color: '#9333EA' },
-      done: { label: 'Done', bg: '#F0FDF4', color: '#16A34A' },
-      rejected: { label: 'Rejected', bg: '#FEF2F2', color: '#DC2626' },
+      store: { label: t('maint.badgeStoreCheck', 'Store check'), bg: '#FFF7ED', color: '#EA580C' },
+      unit_head: { label: t('maint.unitHeadLabel', 'Unit head'), bg: '#F5F3FF', color: '#7C3AED' },
+      purchase: { label: t('maint.badgeProcure', 'Procure'), bg: '#EFF6FF', color: '#2563EB' },
+      purchase_manager: { label: t('maint.badgeAwaitingBill', 'Awaiting bill'), bg: '#FDF4FF', color: '#A21CAF' },
+      handover: { label: t('maint.badgeHandover', 'Handover'), bg: '#FAF5FF', color: '#9333EA' },
+      done: { label: t('common.done', 'Done'), bg: '#F0FDF4', color: '#16A34A' },
+      rejected: { label: t('maint.badgeRejected', 'Rejected'), bg: '#FEF2F2', color: '#DC2626' },
     };
 
     const procuredAwaitingBill = storeReqs.filter(r => itemStage(r) === 'purchase_manager');
@@ -2139,13 +2162,13 @@ export function Maintenance() {
                 <div style={{ minWidth: 0 }}>
                   {grouped ? (
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: '#475569' }}>
-                      {req.store_decision === 'available' ? '① From store' : req.store_decision === 'unavailable' ? '② Procurement' : 'Store check'} · Qty {req.quantity ?? '—'}{req.quantity != null && req.unit ? ` ${req.unit}` : ''}
+                      {req.store_decision === 'available' ? t('maint.trackFromStore', '① From store') : req.store_decision === 'unavailable' ? t('maint.trackProcurement', '② Procurement') : t('maint.badgeStoreCheck', 'Store check')} · {t('maint.qtyLabel', 'Qty')} {req.quantity ?? '—'}{req.quantity != null && req.unit ? ` ${req.unit}` : ''}
                     </div>
                   ) : (
                     <>
                       <div style={{ fontSize: 14, fontWeight: 700 }}>{req.part_name}</div>
                       <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
-                        {req.quantity ? `Qty ${req.quantity}${req.unit ? ` ${req.unit}` : ''}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
+                        {req.quantity ? `${t('maint.qtyLabel', 'Qty')} ${req.quantity}${req.unit ? ` ${req.unit}` : ''}` : ''}{req.specification ? `${req.quantity ? ' · ' : ''}${req.specification}` : ''}
                       </div>
                     </>
                   )}
@@ -2165,119 +2188,119 @@ export function Maintenance() {
                 <div style={{ marginTop: 12 }}>
                   {storeSuggestions.length > 0 && (
                     <div style={{ border: '1px solid #BBF7D0', background: '#F0FDF4', borderRadius: 10, padding: 10, marginBottom: 10 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#16A34A', marginBottom: 6 }}>{linkedStock ? 'Linked to your store stock' : 'Closest match in your store — is it one of these?'}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#16A34A', marginBottom: 6 }}>{linkedStock ? t('maint.linkedToYourStoreStock', 'Linked to your store stock') : t('maint.closestMatchInStore', 'Closest match in your store — is it one of these?')}</div>
                       {storeSuggestions.map(mi => (
                         <div key={mi.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '3px 0' }}>
-                          <span style={{ fontSize: 12.5, color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mi.item_name} · <strong style={{ color: mi.on_hand > 0 ? '#16A34A' : '#DC2626' }}>{mi.on_hand} in stock</strong></span>
-                          <button onClick={() => setStoreDecisionForm(f => ({ ...f, available: mi.on_hand > 0, qtyInStore: String(mi.on_hand), registerQty: Number(mi.on_hand) }))} style={{ border: '1px solid #16A34A', background: '#fff', color: '#16A34A', borderRadius: 8, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>Use {mi.on_hand}</button>
+                          <span style={{ fontSize: 12.5, color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mi.item_name} · <strong style={{ color: mi.on_hand > 0 ? '#16A34A' : '#DC2626' }}>{t('maint.inStockCount', { defaultValue: '{{n}} in stock', n: mi.on_hand })}</strong></span>
+                          <button onClick={() => setStoreDecisionForm(f => ({ ...f, available: mi.on_hand > 0, qtyInStore: String(mi.on_hand), registerQty: Number(mi.on_hand) }))} style={{ border: '1px solid #16A34A', background: '#fff', color: '#16A34A', borderRadius: 8, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>{t('maint.useQty', { defaultValue: 'Use {{n}}', n: mi.on_hand })}</button>
                         </div>
                       ))}
-                      <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 5 }}>Quantity comes from the uploaded stock file — you just confirm it, or correct it with a reason.</div>
+                      <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 5 }}>{t('maint.qtyFromStockFile', 'Quantity comes from the uploaded stock file — you just confirm it, or correct it with a reason.')}</div>
                     </div>
                   )}
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 8 }}>Is this part in store?</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 8 }}>{t('maint.isThisPartInStore', 'Is this part in store?')}</div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                     {([true, false] as const).map(v => (
-                      <button key={String(v)} onClick={() => setStoreDecisionForm(f => ({ ...f, available: v }))} style={{ flex: 1, padding: '10px', borderRadius: 10, border: `2px solid ${storeDecisionForm.available === v ? (v ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: storeDecisionForm.available === v ? (v ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', color: storeDecisionForm.available === v ? (v ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>{v ? '✓ In stock' : '✗ Not in stock'}</button>
+                      <button key={String(v)} onClick={() => setStoreDecisionForm(f => ({ ...f, available: v }))} style={{ flex: 1, padding: '10px', borderRadius: 10, border: `2px solid ${storeDecisionForm.available === v ? (v ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: storeDecisionForm.available === v ? (v ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', color: storeDecisionForm.available === v ? (v ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>{v ? t('maint.inStockYes', '✓ In stock') : t('maint.inStockNo', '✗ Not in stock')}</button>
                     ))}
                   </div>
                   {storeDecisionForm.available === true && (
                     <>
                       <PanelRow>
-                        <PanelField label={regQty != null ? `Qty available · register says ${regQty}` : 'Qty available'}><PanelInput type="number" value={storeDecisionForm.qtyInStore} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyInStore: e.target.value }))} placeholder="e.g. 3" /></PanelField>
-                        <PanelField label="Shelf / bin"><PanelInput value={storeDecisionForm.shelfLocation} onChange={e => setStoreDecisionForm(f => ({ ...f, shelfLocation: e.target.value }))} placeholder="Rack B-12" /></PanelField>
+                        <PanelField label={regQty != null ? t('maint.qtyAvailableRegisterSays', { defaultValue: 'Qty available · register says {{n}}', n: regQty }) : t('maint.qtyAvailable', 'Qty available')}><PanelInput type="number" value={storeDecisionForm.qtyInStore} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyInStore: e.target.value }))} placeholder={t('maint.qtyPlaceholder3', 'e.g. 3')} /></PanelField>
+                        <PanelField label={t('maint.shelfBin', 'Shelf / bin')}><PanelInput value={storeDecisionForm.shelfLocation} onChange={e => setStoreDecisionForm(f => ({ ...f, shelfLocation: e.target.value }))} placeholder={t('maint.shelfPlaceholder', 'Rack B-12')} /></PanelField>
                       </PanelRow>
                       {willSplit && (
                         <div style={{ fontSize: 11.5, color: '#7C3AED', background: '#FAF5FF', border: '1px solid #E9D5FF', borderRadius: 8, padding: '7px 10px', marginTop: 6 }}>
-                          ⤿ Only {enteredQty} of {reqQty} in store → <strong>{enteredQty} issued now</strong>, <strong>{reqQty - (enteredQty ?? 0)} sent to procurement</strong> automatically.
+                          {t('maint.splitOnlyInStore', { defaultValue: '⤿ Only {{have}} of {{need}} in store → ', have: enteredQty, need: reqQty })}<strong>{t('maint.splitIssuedNow', { defaultValue: '{{n}} issued now', n: enteredQty })}</strong>, <strong>{t('maint.splitSentToProcurement', { defaultValue: '{{n}} sent to procurement', n: reqQty - (enteredQty ?? 0) })}</strong>{t('maint.splitAutomatically', ' automatically.')}
                         </div>
                       )}
                       {qtyDiffers && (
                         <div style={{ marginTop: 6 }}>
-                          <div style={{ fontSize: 11, color: '#B45309', marginBottom: 4 }}>⚠ Register says <strong>{regQty}</strong>, you entered <strong>{enteredQty}</strong> — a justification is required.</div>
-                          <PanelTextarea value={storeDecisionForm.qtyJustification} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyJustification: e.target.value }))} placeholder="Why does your count differ from the register? e.g. 2 damaged units removed; file not yet updated." />
+                          <div style={{ fontSize: 11, color: '#B45309', marginBottom: 4 }}>{t('maint.regSaysPrefix', '⚠ Register says ')}<strong>{regQty}</strong>{t('maint.youEnteredInfix', ', you entered ')}<strong>{enteredQty}</strong>{t('maint.justifyRequiredSuffix', ' — a justification is required.')}</div>
+                          <PanelTextarea value={storeDecisionForm.qtyJustification} onChange={e => setStoreDecisionForm(f => ({ ...f, qtyJustification: e.target.value }))} placeholder={t('maint.qtyJustifyPlaceholder', 'Why does your count differ from the register? e.g. 2 damaged units removed; file not yet updated.')} />
                         </div>
                       )}
                     </>
                   )}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => { setActingReqId(null); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }} style={cancelBtn}>Cancel</button>
-                    <button onClick={() => submitStoreDecision(req)} disabled={storeDecisionForm.available === null || needJustify} style={{ ...primaryBtn('#F47651'), flex: 2, opacity: (storeDecisionForm.available === null || needJustify) ? 0.4 : 1 }}>Submit to unit head</button>
+                    <button onClick={() => { setActingReqId(null); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); }} style={cancelBtn}>{t('common.cancel', 'Cancel')}</button>
+                    <button onClick={() => submitStoreDecision(req)} disabled={storeDecisionForm.available === null || needJustify} style={{ ...primaryBtn('#F47651'), flex: 2, opacity: (storeDecisionForm.available === null || needJustify) ? 0.4 : 1 }}>{t('maint.submitToUnitHead', 'Submit to unit head')}</button>
                   </div>
                 </div>
                 );
               })() : (
-                <button onClick={() => { const linked = req.store_item_id ? storeStock.find(x => x.id === req.store_item_id) : null; setActingReqId(req.id); setStoreDecisionForm({ ...BLANK_STORE_DECISION, available: linked ? Number(linked.on_hand) > 0 : null, qtyInStore: linked ? String(linked.on_hand) : '', registerQty: linked ? Number(linked.on_hand) : null }); }} style={{ ...primaryBtn('#F47651'), width: '100%', marginTop: 10 }}>Check availability</button>
-              )) : <div style={awaitTxt}>Awaiting store manager…</div>)}
+                <button onClick={() => { const linked = req.store_item_id ? storeStock.find(x => x.id === req.store_item_id) : null; setActingReqId(req.id); setStoreDecisionForm({ ...BLANK_STORE_DECISION, available: linked ? Number(linked.on_hand) > 0 : null, qtyInStore: linked ? String(linked.on_hand) : '', registerQty: linked ? Number(linked.on_hand) : null }); }} style={{ ...primaryBtn('#F47651'), width: '100%', marginTop: 10 }}>{t('maint.checkAvailability', 'Check availability')}</button>
+              )) : <div style={awaitTxt}>{t('maint.awaitingStoreManager', 'Awaiting store manager…')}</div>)}
 
               {/* UNIT HEAD */}
               {s === 'unit_head' && ((isUnitHead || isAdmin) ? (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ fontSize: 12, color: req.store_decision === 'available' ? '#16A34A' : '#DC2626', marginBottom: 8 }}>
-                    Store says: <strong>{req.store_decision === 'available' ? 'In stock' : 'Not in stock'}</strong>{req.store_decision === 'available' && req.qty_in_store ? ` · Qty ${req.qty_in_store}` : ''}
+                    {t('maint.storeSays', 'Store says:')} <strong>{req.store_decision === 'available' ? t('maint.inStock', 'In stock') : t('maint.notInStock', 'Not in stock')}</strong>{req.store_decision === 'available' && req.qty_in_store ? ` · ${t('maint.qtyLabel', 'Qty')} ${req.qty_in_store}` : ''}
                   </div>
                   <input
                     value={rejectReason}
                     onChange={(e) => setRejectReason(e.target.value)}
-                    placeholder="Reason if rejecting (optional)"
+                    placeholder={t('maint.rejectReasonPlaceholder', 'Reason if rejecting (optional)')}
                     style={{ width: '100%', padding: '7px 10px', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', marginBottom: 8 }}
                   />
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => unitHeadApprove(req, true)} style={{ ...primaryBtn('#16A34A'), flex: 2 }}>{req.store_decision === 'available' ? 'Approve handover' : 'Approve procurement'}</button>
-                    <button onClick={() => unitHeadApprove(req, false)} style={{ ...primaryBtn('#DC2626'), flex: 1 }}>Reject</button>
+                    <button onClick={() => unitHeadApprove(req, true)} style={{ ...primaryBtn('#16A34A'), flex: 2 }}>{req.store_decision === 'available' ? t('maint.approveHandover', 'Approve handover') : t('maint.approveProcurement', 'Approve procurement')}</button>
+                    <button onClick={() => unitHeadApprove(req, false)} style={{ ...primaryBtn('#DC2626'), flex: 1 }}>{t('maint.reject', 'Reject')}</button>
                   </div>
                 </div>
-              ) : <div style={awaitTxt}>Awaiting unit head approval…</div>)}
+              ) : <div style={awaitTxt}>{t('maint.awaitingUnitHeadApproval', 'Awaiting unit head approval…')}</div>)}
 
               {/* PURCHASE (procurement) */}
               {s === 'purchase' && ((isUnitHead || isAdmin) ? (acting ? (
                 <div style={{ marginTop: 10 }}>
-                  <PanelField label="BUSY transaction reference *"><PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder="e.g. PUR/2026/04421" /></PanelField>
+                  <PanelField label={t('maint.busyTransactionRefRequired', 'BUSY transaction reference *')}><PanelInput value={busyRef} onChange={e => setBusyRef(e.target.value)} placeholder={t('maint.busyRefPlaceholder', 'e.g. PUR/2026/04421')} /></PanelField>
                   <PanelRow>
-                    <PanelField label={`Qty purchased · need ${req.quantity ?? 0}`}><PanelInput type="number" value={purchaseQty} onChange={e => setPurchaseQty(e.target.value)} placeholder={`${req.quantity ?? ''}`} /></PanelField>
-                    <PanelField label="Supplier / vendor"><PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="e.g. Madan Chemicals" /></PanelField>
+                    <PanelField label={t('maint.qtyPurchasedNeed', { defaultValue: 'Qty purchased · need {{n}}', n: req.quantity ?? 0 })}><PanelInput type="number" value={purchaseQty} onChange={e => setPurchaseQty(e.target.value)} placeholder={`${req.quantity ?? ''}`} /></PanelField>
+                    <PanelField label={t('maint.supplierVendor', 'Supplier / vendor')}><PanelInput value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder={t('maint.supplierPlaceholder', 'e.g. Madan Chemicals')} /></PanelField>
                   </PanelRow>
                   {req.store_item_id && (parseFloat(purchaseQty) || 0) > (Number(req.quantity) || 0) && (
                     <div style={{ fontSize: 11.5, color: '#7C3AED', background: '#FAF5FF', border: '1px solid #E9D5FF', borderRadius: 8, padding: '6px 10px', marginBottom: 8 }}>
-                      Bought in bulk → {req.quantity} to the technician, <strong>{(parseFloat(purchaseQty) || 0) - (Number(req.quantity) || 0)} added to store stock</strong> on handover.
+                      {t('maint.boughtInBulkPrefix', { defaultValue: 'Bought in bulk → {{n}} to the technician, ', n: req.quantity })}<strong>{t('maint.addedToStoreStock', { defaultValue: '{{n}} added to store stock', n: (parseFloat(purchaseQty) || 0) - (Number(req.quantity) || 0) })}</strong>{t('maint.onHandoverSuffix', ' on handover.')}
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => { setActingReqId(null); setBusyRef(''); setSupplierName(''); setPurchaseQty(''); }} style={cancelBtn}>Cancel</button>
-                    <button onClick={() => markPurchased(req)} disabled={!busyRef.trim()} style={{ ...primaryBtn('#7C3AED'), flex: 2, opacity: !busyRef.trim() ? 0.5 : 1 }}>Mark purchased</button>
+                    <button onClick={() => { setActingReqId(null); setBusyRef(''); setSupplierName(''); setPurchaseQty(''); }} style={cancelBtn}>{t('common.cancel', 'Cancel')}</button>
+                    <button onClick={() => markPurchased(req)} disabled={!busyRef.trim()} style={{ ...primaryBtn('#7C3AED'), flex: 2, opacity: !busyRef.trim() ? 0.5 : 1 }}>{t('maint.markPurchased', 'Mark purchased')}</button>
                   </div>
                 </div>
               ) : (
-                <button onClick={() => { setActingReqId(req.id); setBusyRef(''); setSupplierName(''); setPurchaseQty(String(req.quantity ?? '')); }} style={{ ...primaryBtn('#7C3AED'), width: '100%', marginTop: 10 }}>Procure — enter BUSY ref</button>
-              )) : <div style={awaitTxt}>Unit head procuring…</div>)}
+                <button onClick={() => { setActingReqId(req.id); setBusyRef(''); setSupplierName(''); setPurchaseQty(String(req.quantity ?? '')); }} style={{ ...primaryBtn('#7C3AED'), width: '100%', marginTop: 10 }}>{t('maint.procureEnterBusyRef', 'Procure — enter BUSY ref')}</button>
+              )) : <div style={awaitTxt}>{t('maint.unitHeadProcuring', 'Unit head procuring…')}</div>)}
 
-              {s === 'purchase_manager' && <div style={awaitTxt}>Procured ({req.busy_transaction_ref || 'ref pending'}) · awaiting purchase bill below…</div>}
+              {s === 'purchase_manager' && <div style={awaitTxt}>{t('maint.procuredAwaitingBill', { defaultValue: 'Procured ({{ref}}) · awaiting purchase bill below…', ref: req.busy_transaction_ref || t('maint.refPending', 'ref pending') })}</div>}
 
               {/* HANDOVER */}
               {s === 'handover' && (storeManagerCanAct ? (acting ? (
                 <div style={{ marginTop: 10 }}>
                   {fromOwnStore ? (
                     <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 4 }}>Reason / description</div>
-                      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>Issued from own store — no bill. Note why you're providing this part (condition, source shelf, any caveat).</div>
-                      <textarea value={handoverNotes} onChange={e => setHandoverNotes(e.target.value)} placeholder="e.g. Issued from Rack B-12 — spare seal in good condition, replaces the worn one." rows={3} style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none' }} />
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 4 }}>{t('maint.reasonDescription', 'Reason / description')}</div>
+                      <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>{t('maint.issuedFromOwnStoreHint', "Issued from own store — no bill. Note why you're providing this part (condition, source shelf, any caveat).")}</div>
+                      <textarea value={handoverNotes} onChange={e => setHandoverNotes(e.target.value)} placeholder={t('maint.handoverNotesPlaceholder', 'e.g. Issued from Rack B-12 — spare seal in good condition, replaces the worn one.')} rows={3} style={{ width: '100%', boxSizing: 'border-box', border: '1px solid #E2E8F0', borderRadius: 10, padding: '9px 11px', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none' }} />
                     </div>
                   ) : (
-                    <PhotoUploader onBlobReady={setHandoverInvoiceBlob} label="Invoice / bill" hint="Photo of the invoice or purchase bill" />
+                    <PhotoUploader onBlobReady={setHandoverInvoiceBlob} label={t('maint.invoiceBill', 'Invoice / bill')} hint={t('maint.invoiceBillHint', 'Photo of the invoice or purchase bill')} />
                   )}
-                  <PhotoUploader onBlobReady={setHandoverPhotoBlob} label="Part photo" hint="Photo of the part being handed over" />
+                  <PhotoUploader onBlobReady={setHandoverPhotoBlob} label={t('maint.partPhoto', 'Part photo')} hint={t('maint.partPhotoHint', 'Photo of the part being handed over')} />
                   {uploading && <UploadBar pct={uploadPct} color="#9333EA" />}
                   <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button onClick={() => { setActingReqId(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); }} style={cancelBtn}>Cancel</button>
-                    <button onClick={() => confirmHandover(req)} disabled={!canConfirmHandover || uploading} style={{ ...primaryBtn('#9333EA'), flex: 2, opacity: (!canConfirmHandover || uploading) ? 0.5 : 1 }}>{uploading ? `Uploading… ${uploadPct}%` : 'Confirm handover'}</button>
+                    <button onClick={() => { setActingReqId(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); }} style={cancelBtn}>{t('common.cancel', 'Cancel')}</button>
+                    <button onClick={() => confirmHandover(req)} disabled={!canConfirmHandover || uploading} style={{ ...primaryBtn('#9333EA'), flex: 2, opacity: (!canConfirmHandover || uploading) ? 0.5 : 1 }}>{uploading ? t('maint.uploadingPct', { defaultValue: 'Uploading… {{pct}}%', pct: uploadPct }) : t('maint.confirmHandover', 'Confirm handover')}</button>
                   </div>
                 </div>
               ) : (
-                <button onClick={() => { setActingReqId(req.id); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); }} style={{ ...primaryBtn('#9333EA'), width: '100%', marginTop: 10 }}>Hand over to technician</button>
-              )) : <div style={awaitTxt}>Store manager to hand over…</div>)}
+                <button onClick={() => { setActingReqId(req.id); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setHandoverNotes(''); }} style={{ ...primaryBtn('#9333EA'), width: '100%', marginTop: 10 }}>{t('maint.handOverToTechnician', 'Hand over to technician')}</button>
+              )) : <div style={awaitTxt}>{t('maint.storeManagerToHandOver', 'Store manager to hand over…')}</div>)}
 
-              {s === 'done' && <div style={{ fontSize: 12, color: '#16A34A', marginTop: 8, fontWeight: 600 }}>✓ Handed over{req.handover_confirmed_at ? ` · ${formatDate(req.handover_confirmed_at)}` : ''}</div>}
-              {s === 'rejected' && <div style={{ fontSize: 12, color: '#DC2626', marginTop: 8 }}>Rejected by unit head.</div>}
+              {s === 'done' && <div style={{ fontSize: 12, color: '#16A34A', marginTop: 8, fontWeight: 600 }}>{t('maint.handedOver', '✓ Handed over')}{req.handover_confirmed_at ? ` · ${formatDate(req.handover_confirmed_at)}` : ''}</div>}
+              {s === 'rejected' && <div style={{ fontSize: 12, color: '#DC2626', marginTop: 8 }}>{t('maint.rejectedByUnitHead', 'Rejected by unit head.')}</div>}
             </div>
           );
           };
@@ -2303,16 +2326,16 @@ export function Maintenance() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{g.part_name}</div>
-                    <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>Two parallel tracks — each is delivered to the technician as it completes.</div>
+                    <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>{t('maint.twoParallelTracks', 'Two parallel tracks — each is delivered to the technician as it completes.')}</div>
                   </div>
-                  {allDone && <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#DCFCE7', color: '#16A34A', whiteSpace: 'nowrap' }}>DONE</span>}
+                  {allDone && <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#DCFCE7', color: '#16A34A', whiteSpace: 'nowrap' }}>{t('maint.doneUpper', 'DONE')}</span>}
                 </div>
                 {/* Fulfilment summary — how the requested qty is being delivered */}
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11.5, color: '#64748B', marginTop: 8, background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: '7px 10px' }}>
-                  <span>Requested <strong style={{ color: '#334155' }}>{requestedQty}</strong></span>
-                  <span>· From store <strong style={{ color: '#16A34A' }}>{issuedQty}</strong></span>
-                  <span>· Procured <strong style={{ color: '#7C3AED' }}>{procuredQty}</strong></span>
-                  <span>· Delivered <strong style={{ color: deliveredQty >= requestedQty ? '#16A34A' : '#D97706' }}>{deliveredQty}/{requestedQty}</strong></span>
+                  <span>{t('maint.requestedLabel', 'Requested')} <strong style={{ color: '#334155' }}>{requestedQty}</strong></span>
+                  <span>· {t('maint.fromStoreLabel', 'From store')} <strong style={{ color: '#16A34A' }}>{issuedQty}</strong></span>
+                  <span>· {t('maint.procuredLabel', 'Procured')} <strong style={{ color: '#7C3AED' }}>{procuredQty}</strong></span>
+                  <span>· {t('maint.deliveredLabel', 'Delivered')} <strong style={{ color: deliveredQty >= requestedQty ? '#16A34A' : '#D97706' }}>{deliveredQty}/{requestedQty}</strong></span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>{sorted.map(r => renderReq(r, true))}</div>
               </div>
@@ -2321,31 +2344,31 @@ export function Maintenance() {
         })()}
 
         {(isUnitHead || isAdmin) && storeReqs.some(r => itemStage(r) === 'store') && ticketUnit && (
-          <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>⇄ Reroute to {UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser']} store</button>
+          <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{t('maint.rerouteToStore', { defaultValue: '⇄ Reroute to {{unit}} store', unit: UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser'] })}</button>
         )}
 
         {/* PURCHASE MANAGER — aggregate bill for all procured items */}
         {procuredAwaitingBill.length > 0 && (isPurchaseManager || isAdmin) && (
           <div style={{ border: '1px solid #F5D0FE', borderRadius: 14, padding: 14, background: '#FDF4FF' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#A21CAF', textTransform: 'uppercase', marginBottom: 4 }}>Purchase Manager — bill {procuredAwaitingBill.length} procured item(s)</div>
-            <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>One supplier bill covers all procured items (incl. GST). OCR verifies the <strong>total amount</strong> against the photo; the line-item count is recorded for reference.</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#A21CAF', textTransform: 'uppercase', marginBottom: 4 }}>{t('maint.pmBillHeading', { defaultValue: 'Purchase Manager — bill {{n}} procured item(s)', n: procuredAwaitingBill.length })}</div>
+            <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>{t('maint.pmBillIntroPre', 'One supplier bill covers all procured items (incl. GST). OCR verifies the ')}<strong>{t('maint.pmBillTotalAmount', 'total amount')}</strong>{t('maint.pmBillIntroPost', ' against the photo; the line-item count is recorded for reference.')}</div>
             <PanelRow>
-              <PanelField label="No. of line items on bill *"><PanelInput type="number" value={pmForm.itemsCount} onChange={e => setPmForm(f => ({ ...f, itemsCount: e.target.value }))} placeholder={String(procuredAwaitingBill.length)} /></PanelField>
-              <PanelField label="Total bill amount (₹) *"><PanelInput value={pmForm.billTotal} onChange={e => setPmForm(f => ({ ...f, billTotal: e.target.value }))} placeholder="e.g. 177936.50" /></PanelField>
+              <PanelField label={t('maint.pmLineItemsLabel', 'No. of line items on bill *')}><PanelInput type="number" value={pmForm.itemsCount} onChange={e => setPmForm(f => ({ ...f, itemsCount: e.target.value }))} placeholder={String(procuredAwaitingBill.length)} /></PanelField>
+              <PanelField label={t('maint.pmTotalBillLabel', 'Total bill amount (₹) *')}><PanelInput value={pmForm.billTotal} onChange={e => setPmForm(f => ({ ...f, billTotal: e.target.value }))} placeholder={t('maint.pmBillTotalPlaceholder', 'e.g. 177936.50')} /></PanelField>
             </PanelRow>
-            <PhotoUploader onBlobReady={setDispatchBlob} label="Supplier bill photo *" hint="Clear photo of the full supplier bill" />
+            <PhotoUploader onBlobReady={setDispatchBlob} label={t('maint.supplierBillPhoto', 'Supplier bill photo *')} hint={t('maint.supplierBillPhotoHint', 'Clear photo of the full supplier bill')} />
             {uploading && <UploadBar pct={uploadPct} color="#A21CAF" phase={busyPhase} />}
-            <button onClick={submitPurchaseManagerBill} disabled={!dispatchBlob || uploading} style={{ ...primaryBtn('#A21CAF'), width: '100%', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>{uploading ? (busyPhase === 'verifying' ? 'Verifying bill…' : `Uploading… ${uploadPct}%`) : 'Upload bill — verify & mark en route'}</button>
+            <button onClick={submitPurchaseManagerBill} disabled={!dispatchBlob || uploading} style={{ ...primaryBtn('#A21CAF'), width: '100%', marginTop: 8, opacity: (!dispatchBlob || uploading) ? 0.5 : 1 }}>{uploading ? (busyPhase === 'verifying' ? t('maint.verifyingBill', 'Verifying bill…') : t('maint.uploadingPct', { defaultValue: 'Uploading… {{pct}}%', pct: uploadPct })) : t('maint.uploadBillVerify', 'Upload bill — verify & mark en route')}</button>
           </div>
         )}
-        {procuredAwaitingBill.length > 0 && !(isPurchaseManager || isAdmin) && <div style={awaitTxt}>Purchase Manager (Anshul) to upload the bill…</div>}
+        {procuredAwaitingBill.length > 0 && !(isPurchaseManager || isAdmin) && <div style={awaitTxt}>{t('maint.awaitingPmBill', 'Purchase Manager (Anshul) to upload the bill…')}</div>}
 
         {/* PM mismatch banner */}
-        {t.pm_mismatch && (
+        {tk.pm_mismatch && (
           <div style={{ border: '1px solid #FECACA', background: '#FEF2F2', borderRadius: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>⚠ Bill total mismatch</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#DC2626' }}>{t('maint.billTotalMismatch', '⚠ Bill total mismatch')}</div>
             <div style={{ fontSize: 11.5, color: '#7F1D1D', marginTop: 3 }}>
-              Declared total ₹{Number(t.pm_bill_total || 0).toLocaleString('en-IN')} · OCR read ₹{t.pm_ocr_total != null ? Number(t.pm_ocr_total).toLocaleString('en-IN') : '?'}. Please verify the bill{t.pm_ocr_items != null ? ` (OCR saw ${t.pm_ocr_items} line item${t.pm_ocr_items === 1 ? '' : 's'})` : ''}.
+              {t('maint.billMismatchDetail', { defaultValue: 'Declared total ₹{{declared}} · OCR read ₹{{read}}. Please verify the bill', declared: Number(tk.pm_bill_total || 0).toLocaleString('en-IN'), read: tk.pm_ocr_total != null ? Number(tk.pm_ocr_total).toLocaleString('en-IN') : '?' })}{tk.pm_ocr_items != null ? ` ${t('maint.ocrSawLineItems', { defaultValue: '(OCR saw {{n}} line items)', n: tk.pm_ocr_items })}` : ''}.
             </div>
           </div>
         )}
@@ -2353,17 +2376,17 @@ export function Maintenance() {
         {/* DEFECTIVE RETURN + close (technician) */}
         {status === 'pending_defective_return' && ((isTechnician || isAdmin) ? (
           <div style={{ border: '1px solid #FED7AA', borderRadius: 14, padding: 14, background: '#FFF7ED' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#EA580C', textTransform: 'uppercase', marginBottom: 8 }}>Return defective part & close</div>
-            <PhotoUploader onBlobReady={setDefectiveBlob} label="Photo of defective part" hint="Clear photo of the old/broken part" />
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#EA580C', textTransform: 'uppercase', marginBottom: 8 }}>{t('maint.returnDefectiveClose', 'Return defective part & close')}</div>
+            <PhotoUploader onBlobReady={setDefectiveBlob} label={t('maint.photoOfDefectivePart', 'Photo of defective part')} hint={t('maint.photoOfDefectivePartHint', 'Clear photo of the old/broken part')} />
             <div style={{ display: 'flex', gap: 8, margin: '10px 0' }}>
               {(['repair', 'scrap'] as const).map(d => (
-                <button key={d} onClick={() => setDefectiveDecision(d)} style={{ flex: 1, padding: '10px', borderRadius: 10, border: `2px solid ${defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: defectiveDecision === d ? (d === 'repair' ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', color: defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>{d === 'repair' ? '🔧 Repair' : '🗑 Scrap'}</button>
+                <button key={d} onClick={() => setDefectiveDecision(d)} style={{ flex: 1, padding: '10px', borderRadius: 10, border: `2px solid ${defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#E2E8F0'}`, background: defectiveDecision === d ? (d === 'repair' ? '#F0FDF4' : '#FEF2F2') : '#F8FAFC', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', color: defectiveDecision === d ? (d === 'repair' ? '#16A34A' : '#DC2626') : '#64748B', fontFamily: 'inherit' }}>{d === 'repair' ? t('maint.defectiveRepair', '🔧 Repair') : t('maint.defectiveScrap', '🗑 Scrap')}</button>
               ))}
             </div>
             {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
-            <button onClick={submitDefectiveReturn} disabled={!defectiveBlob || !defectiveDecision || uploading} style={{ ...primaryBtn('#F47651'), width: '100%', opacity: (!defectiveBlob || !defectiveDecision || uploading) ? 0.5 : 1 }}>{uploading ? 'Uploading…' : 'Submit & close ticket'}</button>
+            <button onClick={submitDefectiveReturn} disabled={!defectiveBlob || !defectiveDecision || uploading} style={{ ...primaryBtn('#F47651'), width: '100%', opacity: (!defectiveBlob || !defectiveDecision || uploading) ? 0.5 : 1 }}>{uploading ? t('maint.uploadingEllipsis', 'Uploading…') : t('maint.submitCloseTicket', 'Submit & close ticket')}</button>
           </div>
-        ) : <div style={awaitTxt}>Awaiting technician defective-part return…</div>)}
+        ) : <div style={awaitTxt}>{t('maint.awaitingDefectiveReturn', 'Awaiting technician defective-part return…')}</div>)}
       </div>
     );
   }
@@ -2381,7 +2404,9 @@ export function Maintenance() {
     : ticketPath === 'store'
       ? (anyProcured ? EMERGENCY_STAGES : AVAILABLE_STAGES)
       : EMERGENCY_STAGES;
-  const wfLabels = ticketPath === 'inhouse' ? INHOUSE_STAGE_LABELS : STAGE_LABELS;
+  const wfLabels = ticketPath === 'inhouse'
+    ? trStageLabels(INHOUSE_STAGE_LABELS, INHOUSE_STAGE_LABEL_KEYS)
+    : trStageLabels(STAGE_LABELS, STAGE_LABEL_KEYS);
 
   // ── Blacklist guard ─────────────────────────────────────────────────────────
   // A ticket assigned to (or raised by) a restricted person is flagged. We check
@@ -2391,14 +2416,16 @@ export function Maintenance() {
   // themselves locked out by the dashboard-level overlay.
   const blacklistHit = (() => {
     if (!selectedTicket || !blacklistReady) return null;
-    const candidates: { who: string; name: string | null }[] = [
-      { who: 'assigned to', name: selectedTicket.assigned_to },
-      { who: 'raised by',   name: selectedTicket.raised_by   },
+    // `who` stays English (it is persisted into the notification body); `whoLabel`
+    // is the translated copy rendered in the banner.
+    const candidates: { who: string; whoLabel: string; name: string | null }[] = [
+      { who: 'assigned to', whoLabel: t('maint.whoAssignedTo', 'assigned to'), name: selectedTicket.assigned_to },
+      { who: 'raised by',   whoLabel: t('maint.whoRaisedBy', 'raised by'),     name: selectedTicket.raised_by   },
     ];
     for (const c of candidates) {
       if (!c.name) continue;
       const entry = isPersonBlacklisted(c.name);
-      if (entry) return { entry, who: c.who, name: c.name };
+      if (entry) return { entry, who: c.who, whoLabel: c.whoLabel, name: c.name };
     }
     return null;
   })();
@@ -2435,8 +2462,8 @@ export function Maintenance() {
 
       {loadError ? (
         <ErrorState
-          title="Couldn't load maintenance"
-          message="The maintenance tickets and schedules failed to load. Check your connection and try again."
+          title={t('maint.loadErrorTitle', "Couldn't load maintenance")}
+          message={t('maint.loadErrorMessage', 'The maintenance tickets and schedules failed to load. Check your connection and try again.')}
           onRetry={() => { setLoading(true); setLoadError(false); loadData(); }}
         />
       ) : loading ? (
@@ -2492,10 +2519,10 @@ export function Maintenance() {
                     </td></tr>
                   )}
                   {periodicPg.pageRows.map(s => {
-                    const linkedTicket = tickets.find(t => t.schedule_id === s.id && t.status !== 'closed');
+                    const linkedTicket = tickets.find(tk => tk.schedule_id === s.id && tk.status !== 'closed');
                     const awaitingVerify = linkedTicket?.status === 'pending_unit_head';
                     const days = daysFromNow(s.next_due_at);
-                    const due = dueDateLabel(days);
+                    const due = dueDateLabel(days, t);
                     let statusKey = 'maint.schedStatusOnTrack'; let statusBg = '#DCFCE7'; let statusColor = '#16A34A';
                     if (awaitingVerify) { statusKey = ''; statusBg = '#EDE9FE'; statusColor = '#7C3AED'; }
                     else if (linkedTicket) { statusKey = 'maint.schedStatusTicketOpen'; statusBg = '#DBEAFE'; statusColor = '#2563EB'; }
@@ -2509,13 +2536,13 @@ export function Maintenance() {
                         <td className="text-slate-500">{t('maint.freq_' + s.frequency, FREQ_LABEL[s.frequency] || s.frequency)}</td>
                         <td className="text-slate-500 text-xs">{s.last_completed_at ? formatDate(s.last_completed_at) : '—'}</td>
                         <td style={{ color: due.color, fontWeight: 600, fontSize: 12 }}>{due.text}</td>
-                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{awaitingVerify ? 'Awaiting verification' : t(statusKey)}</span></td>
+                        <td><span className="badge" style={{ background: statusBg, color: statusColor }}>{awaitingVerify ? t('maint.awaitingVerification', 'Awaiting verification') : t(statusKey)}</span></td>
                         {(isTechnician || isAdmin || isUnitHead) && (
                           <td>
                             {awaitingVerify ? (
                               (isUnitHead || isAdmin)
-                                ? <ButtonV2 size="sm" onClick={() => setVerifyingTicket(linkedTicket!)} className="bg-[#7C3AED] text-white border-none hover:bg-[#6D28D9]">Verify</ButtonV2>
-                                : <span className="text-xs" style={{ color: '#7C3AED' }}>Awaiting verify</span>
+                                ? <ButtonV2 size="sm" onClick={() => setVerifyingTicket(linkedTicket!)} className="bg-[#7C3AED] text-white border-none hover:bg-[#6D28D9]">{t('maint.verify', 'Verify')}</ButtonV2>
+                                : <span className="text-xs" style={{ color: '#7C3AED' }}>{t('maint.awaitingVerify', 'Awaiting verify')}</span>
                             ) : (linkedTicket || (days !== null && days <= 0)) ? (
                               <ButtonV2 size="sm" variant="primary" onClick={() => setCompletingSchedule(s)}>
                                 {t('maint.markComplete')}
@@ -2596,20 +2623,20 @@ export function Maintenance() {
                   {emergencySort.sorted.length === 0 && (
                     <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noEmergencyTickets')}</td></tr>
                   )}
-                  {emergencyPg.pageRows.map(t => (
-                    <tr key={t.id} onClick={() => setSelectedTicket(t)} style={{ cursor: 'pointer' }}>
-                      <td className="font-mono text-xs text-slate-400">{t.id.slice(0, 8)}</td>
-                      <td className="font-semibold">{t.equipment}</td>
-                      <td>{t.plants?.name || '—'}</td>
-                      <td className="text-slate-500 text-xs">{t.description ? <MentionText text={t.description} /> : t.title}</td>
-                      <td>{statusBadge(t.status)}</td>
-                      <td className="text-slate-500 text-xs">{t.raised_by || '—'}</td>
-                      <td className="text-slate-500 text-xs">{formatDate(t.created_at)}</td>
+                  {emergencyPg.pageRows.map(tk => (
+                    <tr key={tk.id} onClick={() => setSelectedTicket(tk)} style={{ cursor: 'pointer' }}>
+                      <td className="font-mono text-xs text-slate-400">{tk.id.slice(0, 8)}</td>
+                      <td className="font-semibold">{tk.equipment}</td>
+                      <td>{tk.plants?.name || '—'}</td>
+                      <td className="text-slate-500 text-xs">{tk.description ? <MentionText text={tk.description} /> : tk.title}</td>
+                      <td>{statusBadge(tk.status, t)}</td>
+                      <td className="text-slate-500 text-xs">{tk.raised_by || '—'}</td>
+                      <td className="text-slate-500 text-xs">{formatDate(tk.created_at)}</td>
                       {isAdmin && (
                         <td>
                           <button
-                            onClick={(e) => { e.stopPropagation(); handleDeleteTicket(t); }}
-                            title="Delete ticket"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTicket(tk); }}
+                            title={t('maint.deleteTicketTitle', 'Delete ticket')}
                             style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#DC2626', fontSize: 13, padding: '2px 6px', lineHeight: 1 }}
                           >🗑</button>
                         </td>
@@ -2632,7 +2659,7 @@ export function Maintenance() {
           subtitle={t('maint.schedulesSub')}
           actions={(isAdmin || isUnitHead) && (
             <>
-              <ButtonV2 variant="outline" icon={<Upload />} onClick={() => setShowPMImport(true)}>Import PM workbook</ButtonV2>
+              <ButtonV2 variant="outline" icon={<Upload />} onClick={() => setShowPMImport(true)}>{t('maint.importPmWorkbook', 'Import PM workbook')}</ButtonV2>
               <ButtonV2 variant="accent" icon={<Plus />} onClick={openAddSchedule}>
                 {t('maint.addSchedule')}
               </ButtonV2>
@@ -2642,11 +2669,11 @@ export function Maintenance() {
           {/* Each plant maintains its own PM workbook — filter the register by plant. */}
           {schedulePlants.length > 1 && (
             <div className="flex gap-2 mb-3 flex-wrap px-5">
-              <button onClick={() => setSchedPlantFilter([])} className={`chip${schedPlantFilter.length === 0 ? ' active' : ''}`}>All plants</button>
+              <button onClick={() => setSchedPlantFilter([])} className={`chip${schedPlantFilter.length === 0 ? ' active' : ''}`}>{t('common.allPlants')}</button>
               {schedulePlants.map(p => (
                 <button key={p.id} onClick={() => setSchedPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])} className={`chip${schedPlantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
               ))}
-              {schedPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>combined</span>}
+              {schedPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>{t('maint.combined', 'combined')}</span>}
             </div>
           )}
           <div className="overflow-x-auto scroll-x">
@@ -2663,7 +2690,7 @@ export function Maintenance() {
                   <tr><td colSpan={(isAdmin || isUnitHead) ? 8 : 7} className="text-center text-slate-400 py-6 text-sm">{t('maint.noSchedulesDefined')}</td></tr>
                 )}
                 {schedulePg.pageRows.map(s => {
-                  const due = dueDateLabel(daysFromNow(s.next_due_at));
+                  const due = dueDateLabel(daysFromNow(s.next_due_at), t);
                   const paused = !s.is_active;
                   return (
                     <tr key={s.id} style={paused ? { opacity: 0.6 } : undefined}>
@@ -2709,8 +2736,8 @@ export function Maintenance() {
             onPick={a => setRaiseForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
           />
           {raiseForm.equipment.trim().length > 1 && (raiseForm.farAssetId
-            ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to FAR asset{raiseForm.equipmentMark ? ` · ${raiseForm.equipmentMark}` : ''}.</div>
-            : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>✎ Manual entry — not in the FAR (allowed; the notification flags it).</div>)}
+            ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>{t('maint.linkedToFarAsset', '✓ Linked to FAR asset')}{raiseForm.equipmentMark ? ` · ${raiseForm.equipmentMark}` : ''}.</div>
+            : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>{t('maint.manualEntryNotInFar', '✎ Manual entry — not in the FAR (allowed; the notification flags it).')}</div>)}
         </PanelField>
         {raisePlantIsJharkhand ? (
           <PanelRow>
@@ -2752,22 +2779,22 @@ export function Maintenance() {
       </SlidePanel>
 
       {/* ── PANEL: Complete periodic ─────────────────────────────────────── */}
-      <SlidePanel open={!!completingSchedule} onClose={() => { setCompletingSchedule(null); setCompletionBlob(null); }} title="Mark maintenance complete" subtitle={completingSchedule?.title || 'Periodic · Maintenance'} locked={uploading}>
+      <SlidePanel open={!!completingSchedule} onClose={() => { setCompletingSchedule(null); setCompletionBlob(null); }} title={t('maint.markMaintenanceComplete', 'Mark maintenance complete')} subtitle={completingSchedule?.title || t('maint.periodicMaintenanceSub', 'Periodic · Maintenance')} locked={uploading}>
         {completingSchedule && (
           <>
             {(() => { const ra = completingSchedule.requires_approval ?? (completingSchedule.frequency !== 'daily'); const doneN = completionChecklist.filter(c => c.done).length; return (
             <>
             <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>{completingSchedule.equipment}</div>
-              <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{FREQ_LABEL[completingSchedule.frequency]} maintenance · {completingSchedule.plants?.name || '—'}</div>
+              <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{t('maint.freqMaintenanceLine', { defaultValue: '{{freq}} maintenance', freq: t('maint.freq_' + completingSchedule.frequency, FREQ_LABEL[completingSchedule.frequency] || completingSchedule.frequency) })} · {completingSchedule.plants?.name || '—'}</div>
               {completingSchedule.description && <div style={{ fontSize: 12, color: '#475569', marginTop: 6 }}>{completingSchedule.description}</div>}
-              <div style={{ fontSize: 11.5, color: ra ? '#B45309' : '#16A34A', marginTop: 6, fontWeight: 600 }}>{ra ? '🔎 Needs unit-head verification after you submit.' : '✓ Daily task — closes automatically on submit.'}</div>
+              <div style={{ fontSize: 11.5, color: ra ? '#B45309' : '#16A34A', marginTop: 6, fontWeight: 600 }}>{ra ? t('maint.needsUnitHeadVerification', '🔎 Needs unit-head verification after you submit.') : t('maint.dailyTaskAutoCloses', '✓ Daily task — closes automatically on submit.')}</div>
             </div>
             {/* Checklist — technician ticks off each checkpoint */}
             {completionChecklist.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Checkpoints</span><span style={{ color: doneN === completionChecklist.length ? '#16A34A' : '#94A3B8' }}>{doneN}/{completionChecklist.length} done</span>
+                  <span>{t('maint.checkpoints', 'Checkpoints')}</span><span style={{ color: doneN === completionChecklist.length ? '#16A34A' : '#94A3B8' }}>{t('maint.nOfMDone', { defaultValue: '{{n}}/{{m}} done', n: doneN, m: completionChecklist.length })}</span>
                 </div>
                 <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, maxHeight: 220, overflowY: 'auto' }}>
                   {completionChecklist.map((c, i) => (
@@ -2782,10 +2809,10 @@ export function Maintenance() {
                 </div>
               </div>
             )}
-            <PhotoUploader onBlobReady={setCompletionBlob} label="Upload completion photo *" hint="Photo of the completed maintenance work as proof" />
+            <PhotoUploader onBlobReady={setCompletionBlob} label={t('maint.uploadCompletionPhoto', 'Upload completion photo *')} hint={t('maint.uploadCompletionPhotoHint', 'Photo of the completed maintenance work as proof')} />
             {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
             <PanelDivider />
-            <PanelFooter saved={false} onCancel={() => { setCompletingSchedule(null); setCompletionBlob(null); }} onSave={handleCompletePeriodicTicket} saveLabel={uploading ? `Uploading… ${uploadPct}%` : (ra ? 'Submit for verification' : 'Submit & close')} successLabel={ra ? 'Sent for verification' : 'Ticket closed'} successSub={ra ? 'Unit head notified to verify' : 'Next due date updated'} disabled={!completionBlob || uploading} requiredHint="Upload a photo to confirm completion" />
+            <PanelFooter saved={false} onCancel={() => { setCompletingSchedule(null); setCompletionBlob(null); }} onSave={handleCompletePeriodicTicket} saveLabel={uploading ? t('maint.uploadingPct', { defaultValue: 'Uploading… {{pct}}%', pct: uploadPct }) : (ra ? t('maint.submitForVerification', 'Submit for verification') : t('maint.submitAndClose', 'Submit & close'))} successLabel={ra ? t('maint.sentForVerification', 'Sent for verification') : t('maint.ticketClosed', 'Ticket closed')} successSub={ra ? t('maint.unitHeadNotifiedToVerify', 'Unit head notified to verify') : t('maint.nextDueDateUpdated', 'Next due date updated')} disabled={!completionBlob || uploading} requiredHint={t('maint.uploadPhotoToConfirm', 'Upload a photo to confirm completion')} />
             </>
             ); })()}
           </>
@@ -2793,16 +2820,16 @@ export function Maintenance() {
       </SlidePanel>
 
       {/* ── PANEL: Verify periodic (unit head) ───────────────────────────── */}
-      <SlidePanel open={!!verifyingTicket} onClose={() => setVerifyingTicket(null)} title="Verify maintenance" subtitle={verifyingTicket?.equipment || 'Periodic · Verification'}>
+      <SlidePanel open={!!verifyingTicket} onClose={() => setVerifyingTicket(null)} title={t('maint.verifyMaintenance', 'Verify maintenance')} subtitle={verifyingTicket?.equipment || t('maint.periodicVerificationSub', 'Periodic · Verification')}>
         {verifyingTicket && (
           <>
             <div style={{ background: '#F5F3FF', border: '1px solid #DDD6FE', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>{verifyingTicket.title}</div>
-              <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{verifyingTicket.equipment} · {verifyingTicket.plants?.name || '—'} · completed by {verifyingTicket.assigned_to || '—'}</div>
+              <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{verifyingTicket.equipment} · {verifyingTicket.plants?.name || '—'} · {t('maint.completedBy', { defaultValue: 'completed by {{name}}', name: verifyingTicket.assigned_to || '—' })}</div>
             </div>
             {Array.isArray(verifyingTicket.checklist) && verifyingTicket.checklist.length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6 }}>Checkpoints reported</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6 }}>{t('maint.checkpointsReported', 'Checkpoints reported')}</div>
                 <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, maxHeight: 220, overflowY: 'auto' }}>
                   {verifyingTicket.checklist.map((c, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 12px', borderBottom: i < verifyingTicket.checklist!.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
@@ -2816,13 +2843,13 @@ export function Maintenance() {
             )}
             {verifyingTicket.completion_photo_url && (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6 }}>Completion photo</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 6 }}>{t('maint.completionPhoto', 'Completion photo')}</div>
                 <a href={verifyingTicket.completion_photo_url} target="_blank" rel="noreferrer"><img src={verifyingTicket.completion_photo_url} alt="Completion" style={{ width: '100%', borderRadius: 10, border: '1px solid #E2E8F0' }} /></a>
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => verifyPeriodicTicket(verifyingTicket, false)} style={{ flex: 1, padding: '11px', borderRadius: 12, border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#DC2626', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>↩ Send back</button>
-              <button onClick={() => verifyPeriodicTicket(verifyingTicket, true)} style={{ flex: 2, padding: '11px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>✓ Verify &amp; close</button>
+              <button onClick={() => verifyPeriodicTicket(verifyingTicket, false)} style={{ flex: 1, padding: '11px', borderRadius: 12, border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#DC2626', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>{t('maint.sendBack', '↩ Send back')}</button>
+              <button onClick={() => verifyPeriodicTicket(verifyingTicket, true)} style={{ flex: 2, padding: '11px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>{t('maint.verifyAndClose', '✓ Verify & close')}</button>
             </div>
           </>
         )}
@@ -2832,8 +2859,8 @@ export function Maintenance() {
       <SlidePanel
         open={!!selectedTicket}
         onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); setRequestingChanges(false); setResubmitting(false); setChangeReason(''); setChangeTags([]); setResubmitPhotoBlob(null); setRejectReason(''); }}
-        title={selectedTicket?.equipment || 'Ticket detail'}
-        subtitle={`Emergency · ${selectedTicket?.plants?.name || 'Maintenance'}`}
+        title={selectedTicket?.equipment || t('maint.ticketDetail', 'Ticket detail')}
+        subtitle={`${t('maint.emergency')} · ${selectedTicket?.plants?.name || t('nav.maintenance')}`}
         locked={uploading}
       >
         {selectedTicket && (
@@ -2843,19 +2870,18 @@ export function Maintenance() {
             {blacklistHit && (
               <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  🚫 Restricted person on this ticket
+                  {t('maint.restrictedPersonOnTicket', '🚫 Restricted person on this ticket')}
                 </div>
                 <div style={{ fontSize: 12, color: '#7F1D1D', marginTop: 4, lineHeight: 1.5 }}>
-                  <strong>{blacklistHit.name}</strong> is {blacklistHit.who} this ticket but is on the active
-                  blacklist (<strong>{blacklistHit.entry.severity}</strong>). Reason: {blacklistHit.entry.reason}.
-                  <br />Admin &amp; Unit Head have been notified.
+                  <strong>{blacklistHit.name}</strong>{t('maint.blacklistIsWho', { defaultValue: ' is {{who}} this ticket but is on the active blacklist (', who: blacklistHit.whoLabel })}<strong>{blacklistHit.entry.severity}</strong>{t('maint.blacklistReason', { defaultValue: '). Reason: {{reason}}.', reason: blacklistHit.entry.reason })}
+                  <br />{t('maint.adminUnitHeadNotified', 'Admin & Unit Head have been notified.')}
                 </div>
               </div>
             )}
             <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>
-                #{selectedTicket.id.slice(0, 8)} · Raised by {selectedTicket.raised_by || '—'}
-                {selectedTicket.assigned_to && <> · Assigned to {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
+                #{selectedTicket.id.slice(0, 8)} · {t('maint.colRaisedBy', 'Raised by')} {selectedTicket.raised_by || '—'}
+                {selectedTicket.assigned_to && <> · {t('maint.colAssignedTo', 'Assigned to')} {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
                 {selectedTicket.unit && <> · <span style={{ color: '#A21CAF', fontWeight: 700 }}>{UNIT_LABELS[selectedTicket.unit as Unit] || selectedTicket.unit}</span></>}
               </div>
               {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><TicketDescription entityId={selectedTicket.id} text={selectedTicket.description} /></div>}
@@ -2867,102 +2893,102 @@ export function Maintenance() {
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                 <NotesButton entityType="maintenance_ticket" entityId={selectedTicket.id} entityLabel={selectedTicket.equipment || selectedTicket.title || 'Ticket'} route={`/dashboard/purchase/maint?ticket=${selectedTicket.id}`} />
                 {(isUnitHead || isAdmin) && !['closed', 'changes_requested'].includes(selectedTicket.status) && (
-                  <button onClick={() => { setChangeTags([]); setChangeReason(''); setRequestingChanges(true); }} className="chip" style={{ color: '#DC2626' }}>↩ Request Changes</button>
+                  <button onClick={() => { setChangeTags([]); setChangeReason(''); setRequestingChanges(true); }} className="chip" style={{ color: '#DC2626' }}>{t('maint.requestChangesChip', '↩ Request Changes')}</button>
                 )}
-                {isAdmin && <button onClick={() => startEdit(selectedTicket)} className="chip">✎ Edit</button>}
-                {isAdmin && <button onClick={() => handleDeleteTicket(selectedTicket)} className="chip" style={{ color: '#DC2626' }}>🗑 Delete</button>}
+                {isAdmin && <button onClick={() => startEdit(selectedTicket)} className="chip">{t('maint.editChip', '✎ Edit')}</button>}
+                {isAdmin && <button onClick={() => handleDeleteTicket(selectedTicket)} className="chip" style={{ color: '#DC2626' }}>{t('maint.deleteChip', '🗑 Delete')}</button>}
               </div>
             )}
 
             {editingTicket ? (
               <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Edit ticket (admin)</div>
-                <PanelField label="Equipment / asset">
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>{t('maint.editTicketAdmin', 'Edit ticket (admin)')}</div>
+                <PanelField label={t('maint.equipmentAssetPlain', 'Equipment / asset')}>
                   <PanelInput value={editForm.equipment} onChange={e => setEditForm(f => ({ ...f, equipment: e.target.value }))} />
                 </PanelField>
                 <PanelRow>
-                  <PanelField label="Plant">
+                  <PanelField label={t('common.plant')}>
                     <PanelSelect value={editForm.plant} onChange={e => setEditForm(f => ({ ...f, plant: e.target.value }))}>
-                      <option value="">— Select plant —</option>
+                      <option value="">{t('maint.selectPlant')}</option>
                       {plantNames.map(p => <option key={p}>{p}</option>)}
                     </PanelSelect>
                   </PanelField>
-                  <PanelField label="Status">
+                  <PanelField label={t('maint.colStatus')}>
                     <PanelSelect value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))}>
-                      {Object.keys(STATUS_CFG).map(s => <option key={s} value={s}>{STATUS_CFG[s].label}</option>)}
+                      {Object.keys(STATUS_CFG).map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                     </PanelSelect>
                   </PanelField>
                 </PanelRow>
-                <PanelField label="Issue description">
-                  <PanelTextarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} placeholder="What broke? Type @ to tag someone." />
+                <PanelField label={t('maint.issueDescription')}>
+                  <PanelTextarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} placeholder={t('maint.editDescPlaceholder', 'What broke? Type @ to tag someone.')} />
                 </PanelField>
                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                  <button onClick={() => setEditingTicket(false)} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
-                  <button onClick={saveEdit} disabled={!editForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !editForm.equipment.trim() ? 0.5 : 1 }}>Save changes</button>
+                  <button onClick={() => setEditingTicket(false)} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>{t('common.cancel', 'Cancel')}</button>
+                  <button onClick={saveEdit} disabled={!editForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: !editForm.equipment.trim() ? 0.5 : 1 }}>{t('maint.saveChanges', 'Save changes')}</button>
                 </div>
               </div>
             ) : requestingChanges ? (
               /* Reviewer: send back for correction */
               <div style={{ border: '1px solid #FCA5A5', borderRadius: 14, padding: 16, background: '#FFF7F7' }}>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>↩ Request changes</div>
-                <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Send this ticket back to the technician to correct. They edit the same ticket and resubmit for another review.</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>What needs fixing?</div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{t('maint.requestChangesTitle', '↩ Request changes')}</div>
+                <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>{t('maint.requestChangesSub', 'Send this ticket back to the technician to correct. They edit the same ticket and resubmit for another review.')}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{t('maint.whatNeedsFixing', 'What needs fixing?')}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                   {CHANGE_ISSUE_TAGS.map(tag => {
                     const on = changeTags.includes(tag);
-                    return <button key={tag} onClick={() => setChangeTags(s => on ? s.filter(x => x !== tag) : [...s, tag])} style={{ padding: '5px 10px', borderRadius: 999, border: '1px solid ' + (on ? '#DC2626' : '#E2E8F0'), background: on ? '#DC2626' : '#fff', color: on ? '#fff' : '#475569', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>{tag}</button>;
+                    return <button key={tag} onClick={() => setChangeTags(s => on ? s.filter(x => x !== tag) : [...s, tag])} style={{ padding: '5px 10px', borderRadius: 999, border: '1px solid ' + (on ? '#DC2626' : '#E2E8F0'), background: on ? '#DC2626' : '#fff', color: on ? '#fff' : '#475569', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>{CHANGE_TAG_KEYS[tag] ? t(CHANGE_TAG_KEYS[tag], tag) : tag}</button>;
                   })}
                 </div>
-                <PanelField label="Comment (required)">
-                  <PanelTextarea value={changeReason} onChange={e => setChangeReason(e.target.value)} placeholder="Explain what to correct. Type @ to tag someone." />
+                <PanelField label={t('maint.commentRequired', 'Comment (required)')}>
+                  <PanelTextarea value={changeReason} onChange={e => setChangeReason(e.target.value)} placeholder={t('maint.commentPlaceholder', 'Explain what to correct. Type @ to tag someone.')} />
                 </PanelField>
                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                  <button onClick={() => { setRequestingChanges(false); setChangeTags([]); setChangeReason(''); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
-                  <button onClick={submitRequestChanges} disabled={savingRevision || (!changeTags.length && !changeReason.trim())} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#DC2626', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: (savingRevision || (!changeTags.length && !changeReason.trim())) ? 0.5 : 1 }}>{savingRevision ? 'Sending…' : 'Send back to technician'}</button>
+                  <button onClick={() => { setRequestingChanges(false); setChangeTags([]); setChangeReason(''); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>{t('common.cancel', 'Cancel')}</button>
+                  <button onClick={submitRequestChanges} disabled={savingRevision || (!changeTags.length && !changeReason.trim())} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#DC2626', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: (savingRevision || (!changeTags.length && !changeReason.trim())) ? 0.5 : 1 }}>{savingRevision ? t('maint.sendingEllipsis', 'Sending…') : t('maint.sendBackToTechnician', 'Send back to technician')}</button>
                 </div>
               </div>
             ) : resubmitting ? (
               /* Technician: revise & resubmit the same ticket */
               <div style={{ border: '1px solid #E2E8F0', borderRadius: 14, padding: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>✎ Revise &amp; resubmit</div>
-                <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Fix what the reviewer flagged, then resubmit the same ticket for another review.</div>
-                {selectedTicket.revision_reason && <div style={{ fontSize: 12, color: '#7F1D1D', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '8px 10px', marginBottom: 12 }}><strong>Reviewer asked:</strong> {selectedTicket.revision_reason}</div>}
-                <PanelField label="Equipment / asset">
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{t('maint.reviseResubmitTitle', '✎ Revise & resubmit')}</div>
+                <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>{t('maint.reviseResubmitSub', 'Fix what the reviewer flagged, then resubmit the same ticket for another review.')}</div>
+                {selectedTicket.revision_reason && <div style={{ fontSize: 12, color: '#7F1D1D', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '8px 10px', marginBottom: 12 }}><strong>{t('maint.reviewerAsked', 'Reviewer asked:')}</strong> {selectedTicket.revision_reason}</div>}
+                <PanelField label={t('maint.equipmentAssetPlain', 'Equipment / asset')}>
                   <PanelInput value={resubmitForm.equipment} onChange={e => setResubmitForm(f => ({ ...f, equipment: e.target.value }))} />
                 </PanelField>
                 <PanelRow>
-                  <PanelField label="Plant">
+                  <PanelField label={t('common.plant')}>
                     <PanelSelect value={resubmitForm.plant} onChange={e => setResubmitForm(f => ({ ...f, plant: e.target.value }))}>
-                      <option value="">— Select plant —</option>
+                      <option value="">{t('maint.selectPlant')}</option>
                       {plantNames.map(p => <option key={p}>{p}</option>)}
                     </PanelSelect>
                   </PanelField>
-                  <PanelField label="Assessment">
+                  <PanelField label={t('maint.assessmentLabel', 'Assessment')}>
                     <PanelSelect value={resubmitForm.assessment} onChange={e => setResubmitForm(f => ({ ...f, assessment: e.target.value }))}>
-                      <option value="repairable">Can repair in-house</option>
-                      <option value="needs_part">Need a part</option>
+                      <option value="repairable">{t('maint.canRepair')}</option>
+                      <option value="needs_part">{t('maint.needAPart', 'Need a part')}</option>
                     </PanelSelect>
                   </PanelField>
                 </PanelRow>
-                <PanelField label="Issue description">
-                  <PanelTextarea value={resubmitForm.description} onChange={e => setResubmitForm(f => ({ ...f, description: e.target.value }))} placeholder="Describe the issue. Type @ to tag someone." />
+                <PanelField label={t('maint.issueDescription')}>
+                  <PanelTextarea value={resubmitForm.description} onChange={e => setResubmitForm(f => ({ ...f, description: e.target.value }))} placeholder={t('maint.resubmitDescPlaceholder', 'Describe the issue. Type @ to tag someone.')} />
                 </PanelField>
-                <PhotoUploader label="Replace photo (optional)" hint="Upload a clearer photo of the item" onBlobReady={setResubmitPhotoBlob} />
+                <PhotoUploader label={t('maint.replacePhotoOptional', 'Replace photo (optional)')} hint={t('maint.replacePhotoHint', 'Upload a clearer photo of the item')} onBlobReady={setResubmitPhotoBlob} />
                 <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                  <button onClick={() => { setResubmitting(false); setResubmitPhotoBlob(null); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>Cancel</button>
-                  <button onClick={submitResubmit} disabled={savingRevision || uploading || !resubmitForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: (savingRevision || uploading || !resubmitForm.equipment.trim()) ? 0.5 : 1 }}>{(savingRevision || uploading) ? 'Resubmitting…' : 'Resubmit for review'}</button>
+                  <button onClick={() => { setResubmitting(false); setResubmitPhotoBlob(null); }} style={{ flex: 1, padding: '10px', borderRadius: 12, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 13, fontFamily: 'inherit' }}>{t('common.cancel', 'Cancel')}</button>
+                  <button onClick={submitResubmit} disabled={savingRevision || uploading || !resubmitForm.equipment.trim()} style={{ flex: 2, padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit', opacity: (savingRevision || uploading || !resubmitForm.equipment.trim()) ? 0.5 : 1 }}>{(savingRevision || uploading) ? t('maint.resubmittingEllipsis', 'Resubmitting…') : t('maint.resubmitForReview', 'Resubmit for review')}</button>
                 </div>
               </div>
             ) : selectedTicket.status === 'changes_requested' ? (
               /* Paused for correction — show the reviewer's request + resubmit CTA */
               <div style={{ border: '1px solid #FCA5A5', background: '#FEF2F2', borderRadius: 14, padding: 14 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>↩ Changes requested{selectedTicket.revision_count ? ` · cycle ${selectedTicket.revision_count}` : ''}</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6 }}>{t('maint.changesRequestedTitle', '↩ Changes requested')}{selectedTicket.revision_count ? ` · ${t('maint.cycleN', { defaultValue: 'cycle {{n}}', n: selectedTicket.revision_count })}` : ''}</div>
                 {selectedTicket.revision_reason && <div style={{ fontSize: 12.5, color: '#7F1D1D', marginTop: 6, lineHeight: 1.5 }}>{selectedTicket.revision_reason}</div>}
-                <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 6 }}>Requested by {selectedTicket.revision_requested_by || '—'}{selectedTicket.revision_requested_at ? ` · ${formatDate(selectedTicket.revision_requested_at)}` : ''}</div>
+                <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 6 }}>{t('maint.requestedByName', { defaultValue: 'Requested by {{name}}', name: selectedTicket.revision_requested_by || '—' })}{selectedTicket.revision_requested_at ? ` · ${formatDate(selectedTicket.revision_requested_at)}` : ''}</div>
                 {(isTechnician || isAdmin) ? (
-                  <button onClick={() => startResubmit(selectedTicket)} style={{ marginTop: 12, width: '100%', padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit' }}>✎ Revise &amp; Resubmit</button>
+                  <button onClick={() => startResubmit(selectedTicket)} style={{ marginTop: 12, width: '100%', padding: '10px', borderRadius: 12, border: 'none', background: '#F47651', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit' }}>{t('maint.reviseResubmitBtn', '✎ Revise & Resubmit')}</button>
                 ) : (
-                  <div style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 10 }}>Waiting for the technician to correct &amp; resubmit.</div>
+                  <div style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 10 }}>{t('maint.waitingForTechnicianResubmit', 'Waiting for the technician to correct & resubmit.')}</div>
                 )}
               </div>
             ) : (
@@ -2976,11 +3002,11 @@ export function Maintenance() {
       <PMScheduleImport open={showPMImport} onClose={() => setShowPMImport(false)} onImported={loadData} />
 
       {/* ── PANEL: Add / revise schedule ─────────────────────────────────── */}
-      <SlidePanel open={showSchedulePanel} onClose={closeSchedulePanel} title={editingSchedule ? 'Revise maintenance schedule' : 'Add maintenance schedule'} subtitle="Schedule Setup · Maintenance">
-        <PanelField label="Task title *">
-          <PanelInput value={scheduleForm.title} onChange={e => setScheduleForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Boiler bearing check, Filter replacement" />
+      <SlidePanel open={showSchedulePanel} onClose={closeSchedulePanel} title={editingSchedule ? t('maint.reviseSchedulePanelTitle', 'Revise maintenance schedule') : t('maint.addSchedulePanelTitle', 'Add maintenance schedule')} subtitle={t('maint.schedulePanelSubtitle', 'Schedule Setup · Maintenance')}>
+        <PanelField label={t('maint.taskTitleRequired', 'Task title *')}>
+          <PanelInput value={scheduleForm.title} onChange={e => setScheduleForm(f => ({ ...f, title: e.target.value }))} placeholder={t('maint.taskTitlePlaceholder', 'e.g. Boiler bearing check, Filter replacement')} />
         </PanelField>
-        <PanelField label="Equipment * (from FAR)">
+        <PanelField label={t('maint.equipmentFromFar', 'Equipment * (from FAR)')}>
           <FarEquipField
             value={scheduleForm.equipment}
             assets={farAssets}
@@ -2988,74 +3014,74 @@ export function Maintenance() {
             onPick={a => setScheduleForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
           />
           {scheduleForm.equipment.trim().length > 1 && (scheduleForm.farAssetId
-            ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>✓ Linked to FAR asset{scheduleForm.equipmentMark ? ` · ${scheduleForm.equipmentMark}` : ''}.</div>
-            : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>⚠ Not a registered FAR asset — allowed, but add a reason below (admin is notified).</div>)}
+            ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>{t('maint.linkedToFarAsset', '✓ Linked to FAR asset')}{scheduleForm.equipmentMark ? ` · ${scheduleForm.equipmentMark}` : ''}.</div>
+            : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>{t('maint.notRegisteredFarAsset', '⚠ Not a registered FAR asset — allowed, but add a reason below (admin is notified).')}</div>)}
         </PanelField>
         {scheduleForm.equipment.trim().length > 1 && !scheduleForm.farAssetId && (
-          <PanelField label="Reason (equipment not in FAR)">
-            <PanelInput value={scheduleForm.unmatchedReason} onChange={e => setScheduleForm(f => ({ ...f, unmatchedReason: e.target.value }))} placeholder="e.g. Newly installed; FAR upload pending" />
+          <PanelField label={t('maint.reasonNotInFar', 'Reason (equipment not in FAR)')}>
+            <PanelInput value={scheduleForm.unmatchedReason} onChange={e => setScheduleForm(f => ({ ...f, unmatchedReason: e.target.value }))} placeholder={t('maint.reasonNotInFarPlaceholder', 'e.g. Newly installed; FAR upload pending')} />
           </PanelField>
         )}
         <PanelRow>
-          <PanelField label={scheduleForm.farAssetId ? 'Plant (set by FAR asset)' : 'Plant'}>
+          <PanelField label={scheduleForm.farAssetId ? t('maint.plantSetByFar', 'Plant (set by FAR asset)') : t('common.plant')}>
             <PanelSelect value={scheduleForm.plant} disabled={!!scheduleForm.farAssetId} onChange={e => setScheduleForm(f => ({ ...f, plant: e.target.value }))}>
-              <option value="">— All plants —</option>
+              <option value="">{t('maint.allPlantsOption', '— All plants —')}</option>
               {plantNames.map(p => <option key={p}>{p}</option>)}
             </PanelSelect>
-            {scheduleForm.farAssetId && <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>🔒 Locked to the FAR asset's plant.</div>}
+            {scheduleForm.farAssetId && <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{t('maint.lockedToFarPlant', "🔒 Locked to the FAR asset's plant.")}</div>}
           </PanelField>
-          <PanelField label="Frequency">
+          <PanelField label={t('maint.colFrequency')}>
             <PanelSelect value={scheduleForm.frequency} onChange={e => setScheduleForm(f => ({ ...f, frequency: e.target.value }))}>
-              {FREQ_OPTIONS.map(f => <option key={f} value={f}>{FREQ_LABEL[f]}</option>)}
+              {FREQ_OPTIONS.map(f => <option key={f} value={f}>{t('maint.freq_' + f, FREQ_LABEL[f] || f)}</option>)}
             </PanelSelect>
           </PanelField>
         </PanelRow>
         <PanelRow>
-          <PanelField label={editingSchedule ? 'Next due date' : 'First due date'}>
+          <PanelField label={editingSchedule ? t('maint.nextDueDate', 'Next due date') : t('maint.firstDueDate', 'First due date')}>
             <PanelInput type="date" value={scheduleForm.firstDue} onChange={e => setScheduleForm(f => ({ ...f, firstDue: e.target.value }))} />
           </PanelField>
-          <PanelField label="Continue until (optional)">
+          <PanelField label={t('maint.continueUntilOptional', 'Continue until (optional)')}>
             <PanelInput type="date" value={scheduleForm.until} onChange={e => setScheduleForm(f => ({ ...f, until: e.target.value }))} />
           </PanelField>
         </PanelRow>
         <PanelRow>
-          <PanelField label="Assign to">
+          <PanelField label={t('maint.assignTo', 'Assign to')}>
             <PanelSelect value={scheduleForm.assignedTo} onChange={e => setScheduleForm(f => ({ ...f, assignedTo: e.target.value }))}>
-              <option value="">— Unassigned —</option>
+              <option value="">{t('maint.unassignedOption', '— Unassigned —')}</option>
               {ASSIGNABLE_STAFF.map(s => <option key={s.name} value={s.name}>{s.label}</option>)}
               {/* Keep a current assignee selectable even if they're no longer in the standard staff list. */}
               {scheduleForm.assignedTo && !ASSIGNABLE_STAFF.some(s => s.name === scheduleForm.assignedTo) && (
-                <option value={scheduleForm.assignedTo}>{scheduleForm.assignedTo} (current)</option>
+                <option value={scheduleForm.assignedTo}>{scheduleForm.assignedTo} {t('maint.currentSuffix', '(current)')}</option>
               )}
             </PanelSelect>
           </PanelField>
         </PanelRow>
         {editingSchedule && (
           <div style={{ background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: '#0369A1' }}>
-            Reassign the owner here if the current person has left — the schedule and its history stay intact. Use <b>Pause</b> on the row to put it on hold instead.
+            {t('maint.reassignOwnerHintPre', 'Reassign the owner here if the current person has left — the schedule and its history stay intact. Use ')}<b>{t('maint.pause', 'Pause')}</b>{t('maint.reassignOwnerHintPost', ' on the row to put it on hold instead.')}
           </div>
         )}
         {scheduleForm.assignedTo && blacklistReady && isPersonBlacklisted(scheduleForm.assignedTo) && (
           <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 11, color: '#B91C1C', fontWeight: 600 }}>
-            🚫 {scheduleForm.assignedTo} is on the active blacklist. Admin &amp; Unit Head will be notified on save.
+            {t('maint.assigneeBlacklisted', { defaultValue: '🚫 {{name}} is on the active blacklist. Admin & Unit Head will be notified on save.', name: scheduleForm.assignedTo })}
           </div>
         )}
-        <PanelField label="Task description / checklist">
-          <PanelTextarea value={scheduleForm.description} onChange={e => setScheduleForm(f => ({ ...f, description: e.target.value }))} placeholder="Steps to complete, tools needed, safety precautions…" />
+        <PanelField label={t('maint.taskDescriptionChecklist', 'Task description / checklist')}>
+          <PanelTextarea value={scheduleForm.description} onChange={e => setScheduleForm(f => ({ ...f, description: e.target.value }))} placeholder={t('maint.taskDescPlaceholder', 'Steps to complete, tools needed, safety precautions…')} />
         </PanelField>
         <PanelDivider />
-        <PanelFooter saved={scheduleSaved} onCancel={closeSchedulePanel} onSave={handleSaveSchedule} saveLabel={savingSchedule ? 'Saving…' : (editingSchedule ? 'Save changes' : 'Save schedule')} successLabel={editingSchedule ? 'Schedule updated' : 'Schedule created'} successSub={editingSchedule ? 'Changes saved · next ticket uses new settings' : 'Ticket will auto-generate on due date'} disabled={!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule} requiredHint="Fill in title and equipment to create schedule" />
+        <PanelFooter saved={scheduleSaved} onCancel={closeSchedulePanel} onSave={handleSaveSchedule} saveLabel={savingSchedule ? t('maint.savingEllipsis', 'Saving…') : (editingSchedule ? t('maint.saveChanges', 'Save changes') : t('maint.saveSchedule', 'Save schedule'))} successLabel={editingSchedule ? t('maint.scheduleUpdated', 'Schedule updated') : t('maint.scheduleCreated', 'Schedule created')} successSub={editingSchedule ? t('maint.scheduleUpdatedSub', 'Changes saved · next ticket uses new settings') : t('maint.scheduleCreatedSub', 'Ticket will auto-generate on due date')} disabled={!scheduleForm.title.trim() || !scheduleForm.equipment.trim() || savingSchedule} requiredHint={t('maint.scheduleRequiredHint', 'Fill in title and equipment to create schedule')} />
       </SlidePanel>
 
       {/* ── PANEL: Create maintenance report (CSV) ───────────────────────────── */}
-      <SlidePanel open={showReport} onClose={() => setShowReport(false)} title="Create maintenance report" subtitle="Export · CSV">
+      <SlidePanel open={showReport} onClose={() => setShowReport(false)} title={t('maint.createReportPanelTitle', 'Create maintenance report')} subtitle={t('maint.createReportPanelSub', 'Export · CSV')}>
         <div style={{ fontSize: 12, color: '#64748B', marginBottom: 18, lineHeight: 1.5 }}>
-          Pick what to include. The CSV carries the full life of each ticket — maintenance ID, who raised it &amp; their role, who's tagged/watching, the whole part-procurement trail, every timestamp, and how it was resolved — plus a header noting who generated the report and when. Tick the box below to also export the @-mention/notes timeline as a second CSV.
+          {t('maint.reportIntro', "Pick what to include. The CSV carries the full life of each ticket — maintenance ID, who raised it & their role, who's tagged/watching, the whole part-procurement trail, every timestamp, and how it was resolved — plus a header noting who generated the report and when. Tick the box below to also export the @-mention/notes timeline as a second CSV.")}
         </div>
 
-        <PanelField label="Include ticket types">
+        <PanelField label={t('maint.includeTicketTypes', 'Include ticket types')}>
           <div style={{ display: 'flex', gap: 8 }}>
-            {([['emergency', '⚡ Emergency'], ['periodic', '🔄 Periodic']] as const).map(([key, label]) => {
+            {([['emergency', t('maint.reportEmergencyOption', '⚡ Emergency')], ['periodic', t('maint.reportPeriodicOption', '🔄 Periodic')]] as const).map(([key, label]) => {
               const on = reportForm[key];
               return (
                 <button
@@ -3074,38 +3100,38 @@ export function Maintenance() {
           </div>
         </PanelField>
 
-        <PanelField label="Status">
+        <PanelField label={t('maint.colStatus')}>
           <PanelSelect value={reportForm.status} onChange={e => setReportForm(f => ({ ...f, status: e.target.value }))}>
-            <option value="all">All statuses</option>
-            <option value="open">Open / in progress only</option>
-            <option value="closed">Closed only</option>
+            <option value="all">{t('maint.allStatuses', 'All statuses')}</option>
+            <option value="open">{t('maint.openInProgressOnly', 'Open / in progress only')}</option>
+            <option value="closed">{t('maint.closedOnly', 'Closed only')}</option>
           </PanelSelect>
         </PanelField>
 
         <PanelRow>
-          <PanelField label="From date (created)">
+          <PanelField label={t('maint.fromDateCreated', 'From date (created)')}>
             <PanelInput type="date" value={reportForm.from} onChange={e => setReportForm(f => ({ ...f, from: e.target.value }))} />
           </PanelField>
-          <PanelField label="To date (created)">
+          <PanelField label={t('maint.toDateCreated', 'To date (created)')}>
             <PanelInput type="date" value={reportForm.to} onChange={e => setReportForm(f => ({ ...f, to: e.target.value }))} />
           </PanelField>
         </PanelRow>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#334155', cursor: 'pointer', marginBottom: 8 }}>
           <input type="checkbox" checked={reportForm.includeNotes} onChange={e => setReportForm(f => ({ ...f, includeNotes: e.target.checked }))} />
-          Also export the notes / @-mention activity log (second CSV)
+          {t('maint.alsoExportNotes', 'Also export the notes / @-mention activity log (second CSV)')}
         </label>
 
         <PanelDivider />
         <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12, textAlign: 'center' }}>
-          <strong style={{ color: '#0F172A' }}>{reportTickets().length}</strong> ticket{reportTickets().length === 1 ? '' : 's'} match these filters
+          <strong style={{ color: '#0F172A' }}>{reportTickets().length}</strong> {t('maint.ticketsMatchFilters', 'tickets match these filters')}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button type="button" onClick={() => setShowReport(false)} style={{ flex: 1, padding: '11px 0', borderRadius: 24, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 13, fontWeight: 600, color: '#475569', cursor: 'pointer', fontFamily: 'inherit' }}>
-            Cancel
+            {t('common.cancel', 'Cancel')}
           </button>
           <button type="button" onClick={generateReport} disabled={generating || reportTickets().length === 0} style={{ flex: 2, padding: '11px 0', borderRadius: 24, border: 'none', background: (generating || reportTickets().length === 0) ? '#CBD5E1' : '#F47651', fontSize: 13, fontWeight: 700, color: '#fff', cursor: (generating || reportTickets().length === 0) ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
-            {generating ? 'Generating…' : 'Generate CSV report'}
+            {generating ? t('maint.generatingEllipsis', 'Generating…') : t('maint.generateCsvReport', 'Generate CSV report')}
           </button>
         </div>
       </SlidePanel>
@@ -3152,6 +3178,7 @@ function TicketDescription({ entityId, text }: { entityId: string; text: string 
 // ── Inline upload progress bar ────────────────────────────────────────────────
 
 function UploadBar({ pct, color, phase = 'uploading' }: { pct: number; color: string; phase?: 'verifying' | 'uploading' }) {
+  const { t } = useTranslation();
   // "verifying" = the AI is reading the bill (a single call with no real streaming),
   // so we show an indeterminate sliding bar and an explicit label instead of a stuck 0%.
   if (phase === 'verifying') {
@@ -3159,7 +3186,7 @@ function UploadBar({ pct, color, phase = 'uploading' }: { pct: number; color: st
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 11, height: 11, borderRadius: '50%', border: `2px solid ${color}55`, borderTopColor: color, display: 'inline-block', animation: 'sp-spin 0.7s linear infinite' }} />
-          Reading &amp; verifying the bill with AI… this can take up to a minute
+          {t('maint.readingVerifyingBill', 'Reading & verifying the bill with AI… this can take up to a minute')}
         </div>
         <div style={{ position: 'relative', height: 4, background: '#E2E8F0', borderRadius: 4, overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, bottom: 0, background: color, borderRadius: 4, animation: 'sp-indeterminate 1.3s ease-in-out infinite' }} />
@@ -3169,7 +3196,7 @@ function UploadBar({ pct, color, phase = 'uploading' }: { pct: number; color: st
   }
   return (
     <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4 }}>Uploading… {pct}%</div>
+      <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4 }}>{t('maint.uploadingPct', { defaultValue: 'Uploading… {{pct}}%', pct })}</div>
       <div style={{ height: 4, background: '#E2E8F0', borderRadius: 4 }}>
         <div style={{ height: 4, background: color, borderRadius: 4, width: `${pct}%`, transition: 'width 0.2s' }} />
       </div>

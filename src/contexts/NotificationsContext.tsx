@@ -52,6 +52,14 @@ interface NotificationsContextValue {
    * "done" style while preserving the full audit trail.
    */
   isNotificationCompleted: (n: AppNotification) => boolean;
+  /**
+   * True when the notification cannot be acted on from a work queue: its
+   * workflow is already closed, OR it is a dead maintenance link (points at the
+   * maintenance module with no `?ticket=` id, so it opens the default tab and
+   * can never be resolved). To-Do uses THIS; the bell keeps showing the row as
+   * history and only badges genuinely-completed ones.
+   */
+  isNotificationStale: (n: AppNotification) => boolean;
 }
 
 const NotificationsContext = createContext<NotificationsContextValue>({
@@ -63,6 +71,7 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   addNotification: async () => false,
   tableReady: false,
   isNotificationCompleted: () => false,
+  isNotificationStale: () => false,
 });
 
 /** A maintenance notification deep-links to its ticket via `?ticket=<id>`; pull
@@ -73,6 +82,29 @@ function ticketIdFromRoute(route: string | null | undefined): string | null {
   if (q === -1) return null;
   try { return new URLSearchParams(route.slice(q + 1)).get('ticket'); }
   catch { return null; }
+}
+
+/** The maintenance module's base path — notifications about a ticket point here. */
+const MAINT_ROUTE_PREFIX = '/dashboard/purchase/maint';
+
+/**
+ * True for a notification that points INTO the maintenance module but carries
+ * no `?ticket=<id>` — a DEAD LINK. `maintRoute()` degrades to the bare module
+ * path when the ticket id is unavailable at insert time, and such a row is
+ * unusable in a work queue: clicking it can only land on the module's default
+ * (Periodic) tab, and its workflow can never be matched against the closed-
+ * ticket lookup, so it would sit in To-Do forever.
+ *
+ * Deliberately NOT folded into `isNotificationCompleted` — we do not know the
+ * work is done, only that this row cannot be acted on. The bell still lists it
+ * as history (without a false "✓ completed" badge); only To-Do drops it.
+ * Notifications for other modules (blacklist, night duty…) legitimately have no
+ * ticket id and are unaffected.
+ */
+function isDeadMaintenanceLink(n: AppNotification): boolean {
+  const route = n.route || '';
+  if (!route.startsWith(MAINT_ROUTE_PREFIX)) return false;
+  return !ticketIdFromRoute(route);
 }
 
 export function useNotifications() {
@@ -115,6 +147,9 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   // Ticket ids (from notification routes) whose workflow has completed (ticket
   // closed). Derived from live DB state, never persisted onto the notifications.
   const [completedTicketIds, setCompletedTicketIds] = useState<Set<string>>(new Set());
+  // Bumped when a ticket row changes (realtime) so the closed-lookup re-runs even
+  // when no new notification arrives — e.g. another user closes a ticket.
+  const [ticketRecheck, setTicketRecheck] = useState(0);
 
   // Does this notification belong to the active person?
   //  • 'personal' (an @-mention / CC) → matched STRICTLY by personal id, so it
@@ -215,12 +250,30 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     // notifications.length is an extra trigger: a workflow closing always adds a
     // notification, so re-checking on count changes catches an in-session close
     // even when the ticket id was already present (ticketIdsKey unchanged).
-  }, [ticketIdsKey, notifications.length]);
+    // ticketRecheck covers closes that arrive with no new notification.
+  }, [ticketIdsKey, notifications.length, ticketRecheck]);
+
+  // Realtime: any maintenance ticket update may be a close/reopen — debounce and
+  // re-run the closed-lookup above so stale urgent alerts drop without a reload.
+  useEffect(() => {
+    if (!tableReady) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bump = () => { clearTimeout(timer); timer = setTimeout(() => setTicketRecheck((n) => n + 1), 400); };
+    const channel = supabase
+      .channel(`notif-ticket-status:${selfKey}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'maintenance_tickets' }, bump)
+      .subscribe();
+    return () => { clearTimeout(timer); supabase.removeChannel(channel); };
+  }, [tableReady, selfKey]);
 
   const isNotificationCompleted = useCallback((n: AppNotification): boolean => {
     const id = ticketIdFromRoute(n.route);
     return !!id && completedTicketIds.has(id);
   }, [completedTicketIds]);
+
+  const isNotificationStale = useCallback((n: AppNotification): boolean =>
+    isNotificationCompleted(n) || isDeadMaintenanceLink(n),
+  [isNotificationCompleted]);
 
   function markRead(id: string) {
     setNotifications(prev =>
@@ -279,7 +332,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }
 
   return (
-    <NotificationsContext.Provider value={{ notifications, unreadCount, markRead, markAllRead, clearAll, addNotification, tableReady, isNotificationCompleted }}>
+    <NotificationsContext.Provider value={{ notifications, unreadCount, markRead, markAllRead, clearAll, addNotification, tableReady, isNotificationCompleted, isNotificationStale }}>
       {children}
     </NotificationsContext.Provider>
   );

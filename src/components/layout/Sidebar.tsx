@@ -350,8 +350,8 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapse
 
   // Batch logger tab (?tab=) — used to highlight the operator's Batch/Logs sub-items.
   const currentTab = new URLSearchParams(location.search).get('tab') || 'reading';
-  const isBatchTab = (t: string) =>
-    location.pathname === '/dashboard/batch-entry' && currentTab === t;
+  const isBatchTab = (tab: string) =>
+    location.pathname === '/dashboard/batch-entry' && currentTab === tab;
 
   function navTo(path: string) {
     navigate(path);
@@ -593,7 +593,7 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapse
           >
             <IconWarehouse />
             <span>{t('nav.warehouseConsole')}</span>
-            <span className="pill-count" style={{ background: '#F0FDF4', color: '#16A34A' }}>entry</span>
+            <span className="pill-count" style={{ background: '#F0FDF4', color: '#16A34A' }}>{t('nav.pillEntry', 'entry')}</span>
           </a>
         )}
 
@@ -605,7 +605,7 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapse
           >
             <IconMoon />
             <span>{t('nav.nightCheckin')}</span>
-            <span className="pill-count" style={{ background: '#EEF2FF', color: '#4F46E5' }}>entry</span>
+            <span className="pill-count" style={{ background: '#EEF2FF', color: '#4F46E5' }}>{t('nav.pillEntry', 'entry')}</span>
           </a>
         )}
 
@@ -640,7 +640,7 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapse
             {showOilRatio && (
               <a className={`nav-link${isActive('/dashboard/oil-ratio') ? ' active' : ''}`} onClick={() => navTo('/dashboard/oil-ratio')}>
                 <span>{t('nav.oilRatioTable')}</span>
-                <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>brain</span>
+                <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>{t('nav.pillBrain', 'brain')}</span>
               </a>
             )}
             {showAudit && (
@@ -749,13 +749,13 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapse
             {showAdmin && (
               <a className={`nav-link${isActive('/dashboard/users') ? ' active' : ''}`} onClick={() => navTo('/dashboard/users')}>
                 <span>{t('nav.userManagement')}</span>
-                <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>admin</span>
+                <span className="pill-count" style={{ background: '#FEF3C7', color: '#B45309' }}>{t('nav.pillAdmin', 'admin')}</span>
               </a>
             )}
             {showBlacklist && (
               <a className={`nav-link${isActive('/dashboard/blacklist') ? ' active' : ''}`} onClick={() => navTo('/dashboard/blacklist')}>
                 <span>{t('nav.blacklist')}</span>
-                <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>restrict</span>
+                <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>{t('nav.pillRestrict', 'restrict')}</span>
               </a>
             )}
           </div>

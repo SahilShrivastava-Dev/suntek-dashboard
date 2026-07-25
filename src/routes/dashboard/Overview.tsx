@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { VoiceSearch } from '../../components/search/VoiceSearch';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   ClipboardCheck, Wrench, Timer, BellRing, AlertTriangle, AlertCircle, Mic,
   CheckSquare, ShoppingCart, Truck, FlaskConical, Boxes, ArrowRight, Package,
@@ -72,14 +73,14 @@ function KpiBlock({ label, value, delta, deltaTone = 'slate', info }: {
   );
 }
 
-const AGE = (ts: string | null) => {
+const AGE = (ts: string | null, t: TFunction) => {
   if (!ts) return '';
   const m = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
-  if (m < 1) return 'now';
-  if (m < 60) return `${m}m ago`;
+  if (m < 1) return t('time.justNow', 'just now');
+  if (m < 60) return t('time.minutesAgo', { count: m, defaultValue: '{{count}}m ago' });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  if (h < 24) return t('time.hoursAgo', { count: h, defaultValue: '{{count}}h ago' });
+  return t('time.daysAgo', { count: Math.floor(h / 24), defaultValue: '{{count}}d ago' });
 };
 
 const fmtDT = (d: string | null) => d
@@ -224,7 +225,7 @@ export function Overview() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
                 onClick={() => setAlertsExpanded(e => !e)}
               >
-                {alertsExpanded ? t('overview.showLess', 'Show less') : t('overview.viewAll', 'View all')}
+                {alertsExpanded ? t('overview.showLess', 'Show less') : t('common.viewAll', 'View all')}
               </button>
             )}
           >
@@ -247,7 +248,7 @@ export function Overview() {
                     <div className="text-[13px] font-medium text-slate-800 leading-snug">{a.text}</div>
                     <div className="text-[11px] text-slate-400 mt-0.5">{a.source}</div>
                   </div>
-                  <span className="text-[11px] text-slate-400 shrink-0">{a.when_label || AGE(a.created_at)}</span>
+                  <span className="text-[11px] text-slate-400 shrink-0">{a.when_label || AGE(a.created_at, t)}</span>
                 </div>
               );
             })}
@@ -311,7 +312,7 @@ export function Overview() {
             info={{ title: 'Purchase MTD', what: 'Total purchase amount paid to suppliers in the current month, all plants consolidated.', source: 'BUSY DB', tables: ['Tran1'], filter: 'VchType=14, Cancelled=0, current month' }}
           />
           <KpiBlock
-            label={t('overview.debtors', 'Debtors Outstanding')}
+            label={t('overview.debtorsOutstanding', 'Debtors Outstanding')}
             value={kpis ? fmtINR(kpis.debtorsOutstanding) : '…'}
             delta={analytics ? `DSO ${analytics.dso}d` : undefined}
             deltaTone={analytics && analytics.dso > 30 ? 'orange' : 'green'}
@@ -336,7 +337,7 @@ export function Overview() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
                 onClick={() => navigate('/dashboard/purchase/storereq')}
               >
-                {t('overview.viewAll', 'View all')}
+                {t('common.viewAll', 'View all')}
               </button>
             }
           >

@@ -13,6 +13,7 @@
  *   onCancel   — called when user discards
  */
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { insertRows, updateRows } from '../lib/db';
 import { useBlacklistGuard } from '../lib/blacklist/guard';
 import { useToast } from './ui/toast';
@@ -51,6 +52,7 @@ export function BatchSheetReview({
   onCancel,
   readOnly = false,
 }: BatchSheetReviewProps) {
+  const { t } = useTranslation();
   const toast = useToast();
   const screenBlacklist = useBlacklistGuard();
 
@@ -112,7 +114,7 @@ export function BatchSheetReview({
   // ── Save ─────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (!batchNo) { toast.error('Batch number is required.'); return; }
+    if (!batchNo) { toast.error(t('batch.batchNoRequired', 'Batch number is required.')); return; }
     setSaving(true);
     setSaveError(null);
 
@@ -148,7 +150,7 @@ export function BatchSheetReview({
         if (e) throw e;
         batchId = nb.id;
       }
-      if (!batchId) throw new Error('Could not resolve batch ID');
+      if (!batchId) throw new Error(t('batch.errResolveBatchId', 'Could not resolve batch ID'));
 
       // 2. Insert all readings
       const toInsert = readings
@@ -201,7 +203,10 @@ export function BatchSheetReview({
       );
       if (hits.length) {
         const h = hits[0];
-        toast.error(`⚠ "${h.candidate.value}" ≈ blacklisted ${h.entry.type} "${h.entry.name}" (${Math.round(h.score * 100)}%). Admin notified.`);
+        toast.error(t('batch.blacklistHit', {
+          defaultValue: '⚠ "{{value}}" ≈ blacklisted {{type}} "{{name}}" ({{pct}}%). Admin notified.',
+          value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100),
+        }));
       }
 
       onSaved(batchNo);
@@ -249,12 +254,14 @@ export function BatchSheetReview({
           </div>
           <div>
             <div className="text-sm font-bold font-heading text-slate-800">
-              {readOnly ? 'Purchase Sheet — Locked (Read-Only)' : 'OCR Extraction — Review & Confirm'}
+              {readOnly
+                ? t('ocr.purchaseLockedTitle', 'Purchase Sheet — Locked (Read-Only)')
+                : t('batch.ocrReviewTitle', 'OCR Extraction — Review & Confirm')}
             </div>
             <div className="text-xs" style={{ color: readOnly ? '#dc2626' : '#94a3b8' }}>
               {readOnly
-                ? 'Purchase data is strictly immutable after upload — no editing permitted'
-                : `${readings.length} readings detected · Edit any cell before saving`}
+                ? t('batch.purchaseImmutableLong', 'Purchase data is strictly immutable after upload — no editing permitted')
+                : t('batch.readingsDetected', { defaultValue: '{{n}} readings detected · Edit any cell before saving', n: readings.length })}
             </div>
           </div>
         </div>
@@ -262,7 +269,7 @@ export function BatchSheetReview({
           onClick={onCancel}
           className="text-xs font-bold text-slate-400 hover:text-slate-600 transition px-2 py-1 rounded-lg hover:bg-slate-100"
         >
-          ✕ Cancel
+          ✕ {t('common.cancel', 'Cancel')}
         </button>
       </div>
 
@@ -274,7 +281,7 @@ export function BatchSheetReview({
           className="shrink-0 overflow-auto border-r border-slate-100 bg-slate-50 flex flex-col items-center p-3 gap-2"
           style={{ width: 220 }}
         >
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wide self-start">Original Sheet</div>
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wide self-start">{t('batch.originalSheet', 'Original Sheet')}</div>
           <img
             src={imageUrl}
             alt="Batch sheet original"
@@ -288,25 +295,25 @@ export function BatchSheetReview({
 
           {/* ── Header fields ─────────────────────────────────────────────── */}
           <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Batch Header</div>
+            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('batch.batchHeader', 'Batch Header')}</div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <label className={labelCls}>Batch No. *</label>
+                <label className={labelCls}>{t('batch.batchNoLabel', 'Batch No. *')}</label>
                 <input type="text" value={batchNo} onChange={e => !readOnly && setBatchNo(e.target.value)}
                   readOnly={readOnly} className={inputCls + ' font-bold text-base'} placeholder="1228" />
               </div>
               <div>
-                <label className={labelCls}>Final Gravity</label>
+                <label className={labelCls}>{t('batch.finalGravity', 'Final Gravity')}</label>
                 <input type="number" value={finalGravity} onChange={e => !readOnly && setFinalGravity(e.target.value)}
                   readOnly={readOnly} className={inputCls} placeholder="1390" />
               </div>
               <div>
-                <label className={labelCls}>Type of Oil</label>
+                <label className={labelCls}>{t('batch.typeOfOil', 'Type of Oil')}</label>
                 <input type="text" value={typeOfOil} onChange={e => !readOnly && setTypeOfOil(e.target.value)}
                   readOnly={readOnly} className={inputCls} placeholder="N.P" />
               </div>
               <div>
-                <label className={labelCls}>Total Batch Time</label>
+                <label className={labelCls}>{t('batch.totalBatchTime', 'Total Batch Time')}</label>
                 <input type="text" value={totalBatchTime} onChange={e => !readOnly && setTotalBatchTime(e.target.value)}
                   readOnly={readOnly} className={inputCls} placeholder="52h45m" />
               </div>
@@ -315,19 +322,19 @@ export function BatchSheetReview({
 
           {/* ── Summary fields ─────────────────────────────────────────────── */}
           <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Batch Summary</div>
+            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">{t('batch.batchSummary', 'Batch Summary')}</div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: 'Paraffin Wt. (kg)', val: paraffinWeight, set: setParaffinWeight, ph: '2200', type: 'number' },
-                { label: 'HCL Qty (M.T)',      val: hclQty,         set: setHclQty,         ph: '12',   type: 'number' },
-                { label: 'Total Drums',         val: totalDrums,     set: setTotalDrums,     ph: '32',   type: 'number' },
-                { label: 'Opening Balance',     val: openingBal,     set: setOpeningBal,     ph: '900',  type: 'number' },
-                { label: 'Melter No.',          val: melterNo,       set: setMelterNo,       ph: '4',    type: 'text'   },
-                { label: 'Degasser No.',        val: degasserNo,     set: setDegasserNo,     ph: '1',    type: 'text'   },
-                { label: 'Operator',            val: operator,       set: setOperator,       ph: 'Name', type: 'text'   },
-                { label: 'Helper',              val: helper,         set: setHelper,         ph: 'Name', type: 'text'   },
-              ].map(({ label, val, set, ph, type }) => (
-                <div key={label}>
+                { k: 'paraffin', label: t('batch.paraffinWt', 'Paraffin Wt. (kg)'), val: paraffinWeight, set: setParaffinWeight, ph: '2200', type: 'number' },
+                { k: 'hcl',      label: t('batch.hclQty', 'HCL Qty (M.T)'),         val: hclQty,         set: setHclQty,         ph: '12',   type: 'number' },
+                { k: 'drums',    label: t('batch.totalDrums', 'Total Drums'),       val: totalDrums,     set: setTotalDrums,     ph: '32',   type: 'number' },
+                { k: 'opening',  label: t('batch.openingBalance', 'Opening Balance'), val: openingBal,   set: setOpeningBal,     ph: '900',  type: 'number' },
+                { k: 'melter',   label: t('batch.melterNo', 'Melter No.'),          val: melterNo,       set: setMelterNo,       ph: '4',    type: 'text'   },
+                { k: 'degasser', label: t('batch.degasserNo', 'Degasser No.'),      val: degasserNo,     set: setDegasserNo,     ph: '1',    type: 'text'   },
+                { k: 'operator', label: t('batch.colOperator', 'Operator'),         val: operator,       set: setOperator,       ph: t('batch.phName', 'Name'), type: 'text' },
+                { k: 'helper',   label: t('batch.helper', 'Helper'),                val: helper,         set: setHelper,         ph: t('batch.phName', 'Name'), type: 'text' },
+              ].map(({ k, label, val, set, ph, type }) => (
+                <div key={k}>
                   <label className={labelCls}>{label}</label>
                   <input type={type} value={val} onChange={e => !readOnly && set(e.target.value)}
                     readOnly={readOnly} className={inputCls} placeholder={ph} />
@@ -340,7 +347,7 @@ export function BatchSheetReview({
           {data.processInfo && Object.values(data.processInfo).some(v => v != null && v !== '') && (
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
               <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
-                Process Info <span className="font-normal normal-case text-slate-300">(stored in audit log)</span>
+                {t('batch.processInfo', 'Process Info')} <span className="font-normal normal-case text-slate-300">{t('batch.storedInAuditLog', '(stored in audit log)')}</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-xs">
                 {Object.entries(data.processInfo)
@@ -361,13 +368,13 @@ export function BatchSheetReview({
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                Hourly Readings
+                {t('batch.hourlyReadings', 'Hourly Readings')}
                 <span className="ml-2 px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full font-bold text-xs normal-case">
-                  {readings.length} rows
+                  {t('batch.rowsCount', { defaultValue: '{{n}} rows', n: readings.length })}
                 </span>
                 {readOnly && (
                   <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-600 rounded-full font-bold text-xs normal-case">
-                    locked
+                    {t('batch.lockedLower', 'locked')}
                   </span>
                 )}
               </div>
@@ -379,22 +386,32 @@ export function BatchSheetReview({
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
-                  Add Row
+                  {t('batch.addRow', 'Add Row')}
                 </button>
               )}
             </div>
 
             {readings.length === 0 ? (
               <div className="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-                No readings extracted. Add rows manually or try re-uploading a clearer photo.
+                {t('batch.noReadingsExtracted', 'No readings extracted. Add rows manually or try re-uploading a clearer photo.')}
               </div>
             ) : (
               <div className="rounded-xl border border-slate-200 overflow-auto">
                 <table className="w-full text-xs border-collapse" style={{ minWidth: 720 }}>
                   <thead className="bg-slate-50 sticky top-0">
                     <tr className="text-slate-500 font-bold uppercase tracking-wide border-b border-slate-200">
-                      {['Date', 'Time', 'Temp °C', 'CP Gravity', 'Cl₂ Press.', 'Pipe Press.', 'HCL Gravity', 'Operator', ...(readOnly ? [] : [''])].map(h => (
-                        <th key={h} className="px-2 py-2 text-left font-bold whitespace-nowrap">{h}</th>
+                      {([
+                        ['date', t('batch.colDate', 'Date')],
+                        ['time', t('batch.colTime', 'Time')],
+                        ['temp', t('batch.colTemp', 'Temp °C')],
+                        ['cpGravity', t('batch.colCpGravity', 'CP Gravity')],
+                        ['cl2Press', t('batch.colCl2Press', 'Cl₂ Press.')],
+                        ['pipePress', t('batch.colPipePress', 'Pipe Press.')],
+                        ['hclGravity', t('batch.colHclGravity', 'HCL Gravity')],
+                        ['operator', t('batch.colOperator', 'Operator')],
+                        ...(readOnly ? [] : [['actions', '']]),
+                      ] as [string, string][]).map(([hk, h]) => (
+                        <th key={hk} className="px-2 py-2 text-left font-bold whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -414,7 +431,7 @@ export function BatchSheetReview({
                             ['cl2Pressure',        r.cl2Pressure ?? '',      'text',   '1.1kg'],
                             ['cl2PipeLinePressure',r.cl2PipeLinePressure ?? '','text', '2kg'],
                             ['hclGravity',         r.hclGravity != null ? String(r.hclGravity) : '', 'number', '1140'],
-                            ['operator',           r.operator ?? '',         'text',   'Name'],
+                            ['operator',           r.operator ?? '',         'text',   t('batch.phName', 'Name')],
                           ] as [keyof BatchReadingExtracted, string, string, string][]
                         ).map(([field, val, type, ph]) => (
                           <td key={field} className="px-1 py-1">
@@ -436,7 +453,7 @@ export function BatchSheetReview({
                           <td className="px-1 py-1 text-center">
                             <button
                               onClick={() => deleteReading(r._key)}
-                              title="Remove row"
+                              title={t('batch.removeRow', 'Remove row')}
                               className="w-6 h-6 flex items-center justify-center rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
                             >
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -455,7 +472,7 @@ export function BatchSheetReview({
 
           {saveError && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-600 break-words">
-              <span className="font-bold">Save failed: </span>{saveError}
+              <span className="font-bold">{t('batch.saveFailed', 'Save failed:')} </span>{saveError}
             </div>
           )}
 
@@ -468,11 +485,14 @@ export function BatchSheetReview({
           onClick={onCancel}
           className="py-2.5 px-4 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-500 hover:bg-slate-100 transition whitespace-nowrap"
         >
-          ↩ Re-upload
+          ↩ {t('ocr.reupload', 'Re-upload')}
         </button>
 
         <div className="flex-1 text-xs text-slate-400 text-center">
-          {readings.length} readings · Batch #{batchNo || '—'} · Final Gravity {finalGravity || '—'}
+          {t('batch.footerSummary', {
+            defaultValue: '{{n}} readings · Batch #{{batchNo}} · Final Gravity {{gravity}}',
+            n: readings.length, batchNo: batchNo || '—', gravity: finalGravity || '—',
+          })}
         </div>
 
         {readOnly ? (
@@ -484,7 +504,7 @@ export function BatchSheetReview({
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
               <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
-            Locked — Cannot Edit
+            {t('batch.lockedCannotEdit', 'Locked — Cannot Edit')}
           </div>
         ) : (
           <button
@@ -502,14 +522,14 @@ export function BatchSheetReview({
                   <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="3" />
                   <path d="M12 2 A10 10 0 0 1 22 12" stroke="white" strokeWidth="3" strokeLinecap="round" />
                 </svg>
-                Saving…
+                {t('batch.saving', 'Saving…')}
               </>
             ) : (
               <>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
-                Save {readings.filter(r => r.date || r.cpGravity != null).length} Readings to DB
+                {t('batch.saveReadingsToDb', { defaultValue: 'Save {{n}} Readings to DB', n: readings.filter(r => r.date || r.cpGravity != null).length })}
               </>
             )}
           </button>

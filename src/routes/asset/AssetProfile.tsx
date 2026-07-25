@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
   ArrowLeft, Printer, Download, Pencil, Wrench, AlertTriangle, ShieldCheck, CalendarDays,
@@ -85,6 +86,7 @@ function Screen({ emoji, title, sub }: { emoji: string; title: string; sub: stri
 export function AssetProfile() {
   const { key = '' } = useParams();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { can, authResolved } = useRoleContext();
 
   const [loading, setLoading] = useState(true);
@@ -135,19 +137,19 @@ export function AssetProfile() {
         if (a.plant_id) q = q.eq('plant_id', a.plant_id);
         const { data } = await q.limit(1000).returns<TicketRow[]>();
         const one = [{ id: a.id, name: a.name, identification_mark: a.identification_mark }];
-        emergencyLegacy = (data || []).filter(t => {
-          const m = matchAsset(t.equipment || '', one);
+        emergencyLegacy = (data || []).filter(tk => {
+          const m = matchAsset(tk.equipment || '', one);
           return !!m && m.via === 'mark' && m.asset.id === a!.id;
         });
       }
       if (cancelled) return;
       const map = new Map<string, TicketRow>();
-      for (const t of [...(fk || []), ...periodicLegacy, ...emergencyLegacy]) map.set(t.id, t);
+      for (const tk of [...(fk || []), ...periodicLegacy, ...emergencyLegacy]) map.set(tk.id, tk);
       const merged = [...map.values()].sort((x, y) => (y.created_at || '').localeCompare(x.created_at || ''));
       setTickets(merged);
       setSchedules(scheds || []);
 
-      const ticketIds = merged.map(t => t.id);
+      const ticketIds = merged.map(tk => tk.id);
       if (ticketIds.length) {
         const { data: pr } = await supabase.from('maintenance_store_requests').select('*').in('ticket_id', ticketIds).returns<PartRow[]>();
         if (!cancelled) setParts(pr || []);
@@ -159,9 +161,9 @@ export function AssetProfile() {
 
   // ── Derived stats ──────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const emergency = tickets.filter(t => t.type === 'emergency').length;
-    const periodic = tickets.filter(t => t.type === 'periodic').length;
-    const dates = tickets.map(t => t.closed_at || t.created_at).filter(Boolean).map(d => new Date(d as string).getTime()).sort((a, b) => a - b);
+    const emergency = tickets.filter(tk => tk.type === 'emergency').length;
+    const periodic = tickets.filter(tk => tk.type === 'periodic').length;
+    const dates = tickets.map(tk => tk.closed_at || tk.created_at).filter(Boolean).map(d => new Date(d as string).getTime()).sort((a, b) => a - b);
     const last = dates.length ? new Date(dates[dates.length - 1]).toISOString() : null;
     let avgDays: number | null = null;
     if (dates.length >= 2) {
@@ -169,14 +171,14 @@ export function AssetProfile() {
       avgDays = Math.round(sum / (dates.length - 1) / 86400000);
     }
     const nextDue = (schedules.filter(s => s.is_active && s.next_due_at).map(s => s.next_due_at as string).sort())[0] || null;
-    const openCount = tickets.filter(t => t.status && t.status !== 'closed').length;
+    const openCount = tickets.filter(tk => tk.status && tk.status !== 'closed').length;
     return { total: tickets.length, emergency, periodic, last, avgDays, nextDue, openCount };
   }, [tickets, schedules]);
 
   const perMonth = useMemo(() => {
     const m = new Map<string, number>();
-    for (const t of tickets) {
-      const d = new Date(t.created_at);
+    for (const tk of tickets) {
+      const d = new Date(tk.created_at);
       if (isNaN(d.getTime())) continue;
       const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       m.set(k, (m.get(k) || 0) + 1);
@@ -188,15 +190,15 @@ export function AssetProfile() {
   }, [tickets]);
 
   const typeSplit = useMemo(() => [
-    { name: 'Emergency', value: stats.emergency, color: '#DC2626' },
-    { name: 'Preventive', value: stats.periodic, color: '#2563EB' },
-  ].filter(d => d.value > 0), [stats]);
+    { name: t('far.apEmergency', 'Emergency'), value: stats.emergency, color: '#DC2626' },
+    { name: t('far.apPreventive', 'Preventive'), value: stats.periodic, color: '#2563EB' },
+  ].filter(d => d.value > 0), [stats, t]);
 
   // ── Guards ─────────────────────────────────────────────────────────────
-  if (!authResolved) return <Screen emoji="⏳" title="Loading…" sub="Checking your access." />;
-  if (!allowed) return <Screen emoji="🔒" title="Access restricted" sub="You don't have permission to view asset profiles. Ask an administrator to grant you the 'View asset profile' permission." />;
-  if (loading) return <Screen emoji="⏳" title="Loading asset…" sub="Fetching the digital profile." />;
-  if (notFound || !asset) return <Screen emoji="🏷️" title="QR not recognised" sub="This QR code isn't valid or has been regenerated. Ask an administrator for a fresh code." />;
+  if (!authResolved) return <Screen emoji="⏳" title={t('far.apLoading', 'Loading…')} sub={t('far.apCheckingAccess', 'Checking your access.')} />;
+  if (!allowed) return <Screen emoji="🔒" title={t('far.apAccessRestricted', 'Access restricted')} sub={t('far.apAccessRestrictedSub', "You don't have permission to view asset profiles. Ask an administrator to grant you the 'View asset profile' permission.")} />;
+  if (loading) return <Screen emoji="⏳" title={t('far.qrLoadingAsset', 'Loading asset…')} sub={t('far.apFetchingProfile', 'Fetching the digital profile.')} />;
+  if (notFound || !asset) return <Screen emoji="🏷️" title={t('far.apQrNotRecognised', 'QR not recognised')} sub={t('far.apQrNotRecognisedSub', "This QR code isn't valid or has been regenerated. Ask an administrator for a fresh code.")} />;
 
   const rupees = asset.value != null ? `₹ ${Number(asset.value).toLocaleString('en-IN')}` : '—';
   const heroLabel = `${asset.name}${asset.identification_mark ? ` (${asset.identification_mark})` : ''}`;
@@ -211,7 +213,7 @@ export function AssetProfile() {
   }
   function printQr() {
     const png = qrPng();
-    if (png && asset) printQrLabel({ pngDataUrl: png, title: heroLabel, subtitle: asset.plants?.name || '', footer: `Asset #${asset.id.slice(0, 8)} · scan to open the digital profile` });
+    if (png && asset) printQrLabel({ pngDataUrl: png, title: heroLabel, subtitle: asset.plants?.name || '', footer: t('far.qrPrintFooter', { defaultValue: 'Asset #{{id}} · scan to open the digital profile', id: asset.id.slice(0, 8) }) });
   }
 
   return (
@@ -226,14 +228,14 @@ export function AssetProfile() {
 
         {/* ── Breadcrumb + back ─────────────────────────────────────────────── */}
         <div className="text-[12px] text-slate-400 flex items-center gap-1.5 flex-wrap mb-3">
-          <span>Factory</span><span className="text-slate-300">›</span>
-          <span>FAR</span><span className="text-slate-300">›</span>
-          <span>QR Code</span><span className="text-slate-300">›</span>
-          <span className="text-slate-600 font-medium">Asset Profile</span>
+          <span>{t('nav.factory', 'Factory')}</span><span className="text-slate-300">›</span>
+          <span>{t('nav.far', 'FAR')}</span><span className="text-slate-300">›</span>
+          <span>{t('nav.qrCode', 'QR Code')}</span><span className="text-slate-300">›</span>
+          <span className="text-slate-600 font-medium">{t('far.apAssetProfile', 'Asset Profile')}</span>
         </div>
         <div className="mb-4">
           <ButtonV2 variant="outline" icon={<ArrowLeft />} onClick={() => navigate('/dashboard/purchase/far')}>
-            Back to Assets
+            {t('far.apBackToAssets', 'Back to Assets')}
           </ButtonV2>
         </div>
 
@@ -245,7 +247,7 @@ export function AssetProfile() {
                 <button
                   type="button"
                   onClick={() => setPhotoView([{ url: asset.photo_url as string, label: heroLabel }])}
-                  title="View full photo"
+                  title={t('far.apViewFullPhoto', 'View full photo')}
                   className="shrink-0 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:ring-2 hover:ring-slate-300 transition"
                   style={{ padding: 0, lineHeight: 0, cursor: 'zoom-in' }}
                 >
@@ -261,33 +263,33 @@ export function AssetProfile() {
               </div>
               <div className="flex gap-2 mt-2.5 flex-wrap">
                 {stats.openCount
-                  ? <StatusPill tone="amber" dot label="Under maintenance" />
-                  : <StatusPill tone="green" dot label="Operational" />}
-                <StatusPill tone="slate" label={`Asset #${asset.id.slice(0, 8)}`} />
+                  ? <StatusPill tone="amber" dot label={t('far.apUnderMaintenance', 'Under maintenance')} />
+                  : <StatusPill tone="green" dot label={t('far.apOperational', 'Operational')} />}
+                <StatusPill tone="slate" label={t('far.apAssetNo', { defaultValue: 'Asset #{{id}}', id: asset.id.slice(0, 8) })} />
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {asset.qr_token && (
                 <>
-                  <ButtonV2 variant="outline" icon={<Printer />} onClick={printQr}>Print QR</ButtonV2>
-                  <ButtonV2 variant="outline" icon={<Download />} onClick={downloadQr}>Download QR</ButtonV2>
+                  <ButtonV2 variant="outline" icon={<Printer />} onClick={printQr}>{t('far.apPrintQr', 'Print QR')}</ButtonV2>
+                  <ButtonV2 variant="outline" icon={<Download />} onClick={downloadQr}>{t('far.apDownloadQr', 'Download QR')}</ButtonV2>
                 </>
               )}
-              <ButtonV2 variant="outline" icon={<Pencil />} onClick={() => navigate('/dashboard/purchase/far')}>Edit Asset</ButtonV2>
+              <ButtonV2 variant="outline" icon={<Pencil />} onClick={() => navigate('/dashboard/purchase/far')}>{t('far.apEditAsset', 'Edit Asset')}</ButtonV2>
             </div>
           </div>
         </div>
 
         {/* ── KPI strip ─────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4 sm:mb-5">
-          <Stat label="Total Maintenance" value={stats.total} icon={<Wrench />} />
-          <Stat label="Emergency" value={stats.emergency} color={stats.emergency ? '#DC2626' : undefined} icon={<AlertTriangle />} />
-          <Stat label="Preventive" value={stats.periodic} color={stats.periodic ? '#2563EB' : undefined} icon={<ShieldCheck />} />
-          <Stat label="Avg Gap (Days)" value={stats.avgDays ?? '—'} icon={<CalendarDays />} />
-          <Stat label="Last Maintenance" value={fmtDate(stats.last)} icon={<Clock />} small />
-          <Stat label="Next Scheduled" value={fmtDate(stats.nextDue)} icon={<CalendarDays />} small />
-          <Stat label="Parts Requested" value={parts.length} icon={<PackageSearch />} />
-          <Stat label="Open Tickets" value={stats.openCount} color={stats.openCount ? '#D97706' : undefined} icon={<Hourglass />} />
+          <Stat label={t('far.apTotalMaintenance', 'Total Maintenance')} value={stats.total} icon={<Wrench />} />
+          <Stat label={t('far.apEmergency', 'Emergency')} value={stats.emergency} color={stats.emergency ? '#DC2626' : undefined} icon={<AlertTriangle />} />
+          <Stat label={t('far.apPreventive', 'Preventive')} value={stats.periodic} color={stats.periodic ? '#2563EB' : undefined} icon={<ShieldCheck />} />
+          <Stat label={t('far.apAvgGapDays', 'Avg Gap (Days)')} value={stats.avgDays ?? '—'} icon={<CalendarDays />} />
+          <Stat label={t('far.qrLastMaintenance', 'Last Maintenance')} value={fmtDate(stats.last)} icon={<Clock />} small />
+          <Stat label={t('far.apNextScheduled', 'Next Scheduled')} value={fmtDate(stats.nextDue)} icon={<CalendarDays />} small />
+          <Stat label={t('far.apPartsRequested', 'Parts Requested')} value={parts.length} icon={<PackageSearch />} />
+          <Stat label={t('far.apOpenTickets', 'Open Tickets')} value={stats.openCount} color={stats.openCount ? '#D97706' : undefined} icon={<Hourglass />} />
         </div>
 
         {/* ── Details + Maintenance overview (2-col on desktop, stacks on mobile) ── */}
@@ -295,22 +297,22 @@ export function AssetProfile() {
 
           {/* Asset spec sheet */}
           <div className="card2 p-5 sm:p-6 lg:col-span-2">
-            <SectionTitle>Asset Details</SectionTitle>
+            <SectionTitle>{t('far.qrAssetDetails', 'Asset Details')}</SectionTitle>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6">
-              <Field label="Equipment type" value={asset.name} />
-              <Field label="Identification mark" value={asset.identification_mark} />
-              <Field label="Quantity" value={asset.quantity != null ? String(asset.quantity) : null} />
-              <Field label="Make / manufacturer" value={asset.make} />
-              <Field label="Model" value={asset.model} />
-              <Field label="Serial no" value={asset.serial_no} />
-              <Field label="Capacity / line size" value={asset.capacity} />
-              <Field label="Country of origin" value={asset.origin} />
-              <Field label="Year of manufacturing" value={asset.year} />
-              <Field label="Taxable value" value={rupees} />
-              <Field label="Invoice no" value={asset.invoice_no} />
-              <Field label="Date of purchase" value={fmtDate(asset.purchase_date)} />
-              <Field label="Account head" value={asset.account_head} />
-              <Field label="Plant" value={asset.plants?.name} />
+              <Field label={t('far.apFldEquipmentType', 'Equipment type')} value={asset.name} />
+              <Field label={t('far.thIdMark', 'Identification mark')} value={asset.identification_mark} />
+              <Field label={t('far.apFldQuantity', 'Quantity')} value={asset.quantity != null ? String(asset.quantity) : null} />
+              <Field label={t('far.apFldMakeManufacturer', 'Make / manufacturer')} value={asset.make} />
+              <Field label={t('far.thModel', 'Model')} value={asset.model} />
+              <Field label={t('far.apFldSerialNo', 'Serial no')} value={asset.serial_no} />
+              <Field label={t('far.apFldCapacityLineSize', 'Capacity / line size')} value={asset.capacity} />
+              <Field label={t('far.apFldCountryOfOrigin', 'Country of origin')} value={asset.origin} />
+              <Field label={t('far.apFldYearOfManufacturing', 'Year of manufacturing')} value={asset.year} />
+              <Field label={t('far.thTaxableValue', 'Taxable value')} value={rupees} />
+              <Field label={t('far.thInvoiceNo', 'Invoice no')} value={asset.invoice_no} />
+              <Field label={t('far.thDateOfPurchase', 'Date of purchase')} value={fmtDate(asset.purchase_date)} />
+              <Field label={t('far.thAccountHead', 'Account head')} value={asset.account_head} />
+              <Field label={t('common.plant', 'Plant')} value={asset.plants?.name} />
             </div>
           </div>
 
@@ -318,39 +320,39 @@ export function AssetProfile() {
           <div className="lg:col-span-1 flex flex-col gap-4">
             <div className="card2 p-5">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-[15px] font-bold font-heading text-slate-900 font-heading">Maintenance Overview</h2>
+                <h2 className="text-[15px] font-bold font-heading text-slate-900 font-heading">{t('far.apMaintenanceOverview', 'Maintenance Overview')}</h2>
                 <button
                   onClick={() => navigate(`/dashboard/purchase/maint`)}
                   className="text-[12px] font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
                 >
-                  View All →
+                  {t('common.viewAll', 'View all')} →
                 </button>
               </div>
-              <div className="text-[11.5px] text-slate-400 font-medium">Last Maintenance</div>
+              <div className="text-[11.5px] text-slate-400 font-medium">{t('far.qrLastMaintenance', 'Last Maintenance')}</div>
               <div className="text-[13px] font-semibold text-slate-800 mt-0.5 mb-3 flex items-center gap-1.5">
                 <CalendarDays size={13} className="text-slate-400" /> {fmtDate(stats.last)}
               </div>
-              <div className="text-[11.5px] text-slate-400 font-medium">Next Maintenance</div>
+              <div className="text-[11.5px] text-slate-400 font-medium">{t('far.qrNextMaintenance', 'Next Maintenance')}</div>
               <div className="text-[13px] font-semibold text-slate-800 mt-0.5 mb-4 flex items-center gap-1.5">
                 <CalendarDays size={13} className="text-slate-400" /> {fmtDate(stats.nextDue)}
               </div>
               <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                <span className="text-[12px] text-slate-500">Maintenance Status</span>
+                <span className="text-[12px] text-slate-500">{t('far.apMaintenanceStatus', 'Maintenance Status')}</span>
                 {stats.openCount
-                  ? <StatusPill tone="amber" label="Under maintenance" />
-                  : <StatusPill tone="slate" label="Operational" />}
+                  ? <StatusPill tone="amber" label={t('far.apUnderMaintenance', 'Under maintenance')} />
+                  : <StatusPill tone="slate" label={t('far.apOperational', 'Operational')} />}
               </div>
 
               <div className="mt-5">
-                <div className="text-[13px] font-bold text-slate-900 mb-1 font-heading">Quick Actions</div>
+                <div className="text-[13px] font-bold text-slate-900 mb-1 font-heading">{t('far.apQuickActions', 'Quick Actions')}</div>
                 {[
-                  { icon: <History size={14} />, label: 'View Maintenance History', to: `/dashboard/purchase/maint` },
-                  { icon: <FileText size={14} />, label: 'View Documents', to: `/dashboard/purchase/far` },
-                  { icon: <ScrollText size={14} />, label: 'View Activity Log', to: `/dashboard/purchase/activity` },
+                  { key: 'history', icon: <History size={14} />, label: t('far.apViewMaintenanceHistory', 'View Maintenance History'), to: `/dashboard/purchase/maint` },
+                  { key: 'docs', icon: <FileText size={14} />, label: t('far.apViewDocuments', 'View Documents'), to: `/dashboard/purchase/far` },
+                  { key: 'activity', icon: <ScrollText size={14} />, label: t('far.apViewActivityLog', 'View Activity Log'), to: `/dashboard/purchase/activity` },
                 ].map(a => (
                   <button
-                    key={a.label}
+                    key={a.key}
                     onClick={() => navigate(a.to)}
                     className="w-full flex items-center gap-2.5 py-2.5 text-left text-[13px] text-slate-700 hover:text-slate-900 border-b border-slate-100 last:border-0"
                     style={{ background: 'none', border: 'none', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', fontFamily: 'inherit' }}
@@ -370,7 +372,7 @@ export function AssetProfile() {
           {/* Type split donut (analytics) */}
           {showAnalytics && stats.total > 0 && typeSplit.length > 0 && (
             <div className="card2 p-5 sm:p-6 lg:col-span-1 mb-4 sm:mb-5">
-              <SectionTitle>Maintenance mix</SectionTitle>
+              <SectionTitle>{t('far.apMaintenanceMix', 'Maintenance mix')}</SectionTitle>
               <div className="flex items-center justify-center" style={{ position: 'relative', height: 176 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -383,7 +385,7 @@ export function AssetProfile() {
                 {/* Center total */}
                 <div style={{ position: 'absolute', textAlign: 'center', pointerEvents: 'none' }}>
                   <div style={{ fontSize: 26, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>{stats.total}</div>
-                  <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>repairs</div>
+                  <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{t('far.apRepairsWord', 'repairs')}</div>
                 </div>
               </div>
               <div className="mt-3 flex flex-col gap-1.5">
@@ -402,7 +404,7 @@ export function AssetProfile() {
         {/* ── Maintenance-per-month bar chart (analytics) ────────────────────── */}
         {showAnalytics && stats.total > 0 && (
           <div className="card2 p-5 sm:p-6 mb-4 sm:mb-5 lg:col-span-2">
-            <SectionTitle>Maintenance over time</SectionTitle>
+            <SectionTitle>{t('far.apMaintenanceOverTime', 'Maintenance over time')}</SectionTitle>
             <div style={{ width: '100%', height: 240 }}>
               <ResponsiveContainer>
                 <BarChart data={perMonth} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="28%">
@@ -419,7 +421,7 @@ export function AssetProfile() {
                     cursor={{ fill: 'rgba(244,118,81,0.06)' }}
                     contentStyle={{ fontSize: 12, borderRadius: 12, border: '1px solid #E2E8F0', boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}
                   />
-                  <Bar dataKey="count" name="Maintenance events" fill="url(#assetBar)" radius={[6, 6, 0, 0]} maxBarSize={44} />
+                  <Bar dataKey="count" name={t('far.apMaintenanceEvents', 'Maintenance events')} fill="url(#assetBar)" radius={[6, 6, 0, 0]} maxBarSize={44} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -430,41 +432,41 @@ export function AssetProfile() {
         {/* ── Maintenance history ────────────────────────────────────────────── */}
         <div className="card2 p-5 sm:p-6">
           <div className="flex items-center justify-between mb-4">
-            <SectionTitle>Maintenance history</SectionTitle>
+            <SectionTitle>{t('far.apMaintenanceHistory', 'Maintenance history')}</SectionTitle>
             <span className="pill-count" style={{ background: 'var(--bg-soft)', color: '#64748B' }}>{tickets.length}</span>
           </div>
           {tickets.length === 0 ? (
-            <div className="text-[13px] text-slate-400 py-2">No maintenance records for this asset yet.</div>
+            <div className="text-[13px] text-slate-400 py-2">{t('far.apNoMaintRecords', 'No maintenance records for this asset yet.')}</div>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {tickets.map((t) => {
-                const isEmergency = t.type === 'emergency';
+              {tickets.map((tk) => {
+                const isEmergency = tk.type === 'emergency';
                 return (
                   <div
-                    key={t.id}
+                    key={tk.id}
                     className="rounded-2xl hover:bg-slate-50 transition-colors"
                     style={{ border: '1px solid var(--border)', padding: '12px 14px', borderLeft: `3px solid ${isEmergency ? '#DC2626' : '#2563EB'}` }}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
                       <button
-                        onClick={() => navigate(`/dashboard/purchase/maint?ticket=${t.id}`)}
+                        onClick={() => navigate(`/dashboard/purchase/maint?ticket=${tk.id}`)}
                         className="text-[12.5px] font-bold hover:underline"
                         style={{ color: '#2563EB', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
                       >
-                        #{t.id.slice(0, 8)}
+                        #{tk.id.slice(0, 8)}
                       </button>
                       <span className="badge" style={{ background: isEmergency ? 'var(--red-soft)' : 'var(--blue-soft)', color: isEmergency ? '#DC2626' : '#2563EB', fontWeight: 700 }}>
-                        {isEmergency ? 'Emergency' : 'Preventive'}
+                        {isEmergency ? t('far.apEmergency', 'Emergency') : t('far.apPreventive', 'Preventive')}
                       </span>
-                      {statusBadge(t.status)}
-                      <span className="text-[11px] text-slate-400 ml-auto">{fmtDateTime(t.created_at)}</span>
+                      {statusBadge(tk.status)}
+                      <span className="text-[11px] text-slate-400 ml-auto">{fmtDateTime(tk.created_at)}</span>
                     </div>
-                    <div className="text-[13.5px] font-semibold text-slate-900 mt-2">{t.title || t.equipment}</div>
-                    {t.description && <div className="text-[12px] text-slate-500 mt-1 leading-relaxed">{t.description}</div>}
-                    {(t.assigned_to || t.raised_by || t.closed_at) && (
+                    <div className="text-[13.5px] font-semibold text-slate-900 mt-2">{tk.title || tk.equipment}</div>
+                    {tk.description && <div className="text-[12px] text-slate-500 mt-1 leading-relaxed">{tk.description}</div>}
+                    {(tk.assigned_to || tk.raised_by || tk.closed_at) && (
                       <div className="text-[11px] text-slate-400 mt-1.5">
-                        {t.assigned_to || t.raised_by ? `By ${t.assigned_to || t.raised_by}` : ''}
-                        {t.closed_at ? `${t.assigned_to || t.raised_by ? ' · ' : ''}Closed ${fmtDate(t.closed_at)}` : ''}
+                        {tk.assigned_to || tk.raised_by ? t('far.apByName', { defaultValue: 'By {{name}}', name: tk.assigned_to || tk.raised_by }) : ''}
+                        {tk.closed_at ? `${tk.assigned_to || tk.raised_by ? ' · ' : ''}${t('far.apClosedOn', { defaultValue: 'Closed {{date}}', date: fmtDate(tk.closed_at) })}` : ''}
                       </div>
                     )}
                   </div>
@@ -474,7 +476,7 @@ export function AssetProfile() {
           )}
         </div>
 
-        <div className="text-center text-[11px] text-slate-400 mt-6">All asset information is automatically updated from the system.</div>
+        <div className="text-center text-[11px] text-slate-400 mt-6">{t('far.apAutoUpdatedNote', 'All asset information is automatically updated from the system.')}</div>
       </div>
 
       <ImageLightbox images={photoView || []} open={!!photoView} onClose={() => setPhotoView(null)} />

@@ -269,12 +269,141 @@ export interface Database {
           issued_qty: number;
           manual_delta: number;
           ticket_procured_qty: number;    // external units bought for tickets (audit only)
+          repaired_qty: number;           // repaired & returned units (separate bucket; part of on_hand)
           on_hand: number;
           updated_at: string;
           created_at: string;
         };
-        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_items']['Row'], 'id' | 'created_at' | 'updated_at'>>;
+        // repaired_qty is RPC-maintained (apply/reverse_repair_return) — never client-inserted.
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_items']['Row'], 'id' | 'created_at' | 'updated_at' | 'repaired_qty'>> & { repaired_qty?: number };
         Update: Partial<Database['public']['Tables']['store_items']['Insert']>;
+      };
+
+      // ── Purchase receipts (migration 53) — written ONLY via apply_stock_purchase RPC ──
+      stock_purchase_receipts: {
+        Row: {
+          id: string;
+          plant_id: string;
+          vendor_name: string;
+          amount: number;
+          gst_no: string | null;
+          invoice_no: string | null;
+          purchase_date: string | null;   // date
+          bill_url: string | null;
+          notes: string | null;
+          source: 'manual' | 'bill';
+          actor: string | null;
+          actor_name: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['stock_purchase_receipts']['Row'], 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['stock_purchase_receipts']['Insert']>;
+      };
+
+      stock_purchase_lines: {
+        Row: {
+          id: string;
+          receipt_id: string;
+          plant_id: string;
+          item_name: string;
+          qty: number;
+          unit: string | null;
+          unit_price: number | null;
+          amount: number | null;
+          store_item_id: string | null;
+          created_new: boolean;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['stock_purchase_lines']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['stock_purchase_lines']['Insert']>;
+      };
+
+      // ── Stock anomaly review state (migration 54) — written ONLY via resolve_stock_anomaly RPC ──
+      store_stock_anomalies: {
+        Row: {
+          id: string;
+          plant_id: string;
+          period_month: string;           // date, first of month
+          item_name: string;
+          anomaly_type: 'carry_forward' | 'intra_month' | 'negative' | 'added' | 'removed';
+          severity: string | null;
+          detail: string | null;
+          prev_value: number | null;
+          curr_value: number | null;
+          delta: number | null;
+          suggestion: string | null;
+          detected: Record<string, unknown> | null;
+          status: 'open' | 'confirmed' | 'false_positive' | 'resolved' | 'reopened';
+          action: string | null;
+          corrected_value: number | null;
+          resolution_comment: string | null;
+          resolved_by: string | null;
+          resolved_by_name: string | null;
+          resolved_at: string | null;
+          version: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_stock_anomalies']['Row'], 'id' | 'created_at' | 'updated_at'>>;
+        Update: Partial<Database['public']['Tables']['store_stock_anomalies']['Insert']>;
+      };
+
+      store_stock_anomaly_events: {
+        Row: {
+          id: string;
+          anomaly_id: string;
+          plant_id: string;
+          action: string;
+          from_status: string | null;
+          to_status: string;
+          comment: string;
+          corrected_value: number | null;
+          actor: string | null;
+          actor_name: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_stock_anomaly_events']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['store_stock_anomaly_events']['Insert']>;
+      };
+
+      // ── Repair returns (migration 55) — written ONLY via apply_repair_return / reverse_repair_return RPCs ──
+      repair_return_receipts: {
+        Row: {
+          id: string;
+          plant_id: string;
+          vendor_name: string | null;
+          invoice_no: string | null;
+          invoice_url: string | null;
+          return_date: string | null;     // date
+          comment: string;
+          repair_cost: number | null;
+          condition_note: string | null;
+          actor: string | null;
+          actor_name: string | null;
+          status: 'active' | 'reversed';
+          reversed_by: string | null;
+          reversed_by_name: string | null;
+          reversed_at: string | null;
+          reversal_reason: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['repair_return_receipts']['Row'], 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['repair_return_receipts']['Insert']>;
+      };
+
+      repair_return_allocations: {
+        Row: {
+          id: string;
+          receipt_id: string;
+          plant_id: string;
+          ticket_id: string;
+          store_item_id: string | null;
+          item_name: string;
+          qty: number;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['repair_return_allocations']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['repair_return_allocations']['Insert']>;
       };
 
       pm_schedule_uploads: {
@@ -768,6 +897,8 @@ export interface Database {
           completion_photo_url: string | null;
           defective_part_photo_url: string | null;
           defective_part_decision: 'repair' | 'scrap' | null;
+          repair_qty: number;             // units sent for repair (55_repair_returns.sql; legacy default 1)
+          repair_returned_qty: number;    // units already returned to stock via receipts
           defective_raise_photo_url: string | null; // optional photo of the broken item at raise
           pm_items_count: number | null;            // Purchase Manager: declared # items
           pm_bill_total: number | null;             // Purchase Manager: declared bill total
@@ -792,8 +923,12 @@ export interface Database {
           closed_at: string | null;
           created_at: string;
         };
-        Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_tickets']['Row'], 'id' | 'created_at' | 'status'>> & {
+        // repair_qty / repair_returned_qty default at the DB and are maintained by
+        // the repair-return RPCs — optional on insert.
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_tickets']['Row'], 'id' | 'created_at' | 'status' | 'repair_qty' | 'repair_returned_qty'>> & {
           status?: Database['public']['Tables']['maintenance_tickets']['Row']['status'];
+          repair_qty?: number;
+          repair_returned_qty?: number;
         };
         Update: Partial<Database['public']['Tables']['maintenance_tickets']['Insert']>;
       };

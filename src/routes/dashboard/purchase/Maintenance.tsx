@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { fetchActivePlants } from '../../../lib/plants';
+import { freeQty } from '../../../lib/store/registers';
 import { insertRows, updateRows } from '../../../lib/db';
 import { resizeImageToDataUrl, extractSupplierBill, type SupplierBillLine } from '../../../lib/nvidiaOcr';
 import { useRoleContext } from '../../../contexts/RoleContext';
@@ -48,11 +49,7 @@ type StoreStockItem = {
    *  Absent before migration 59. */
   reserved_qty?: number | null;
 };
-/** Stock a technician can actually be promised — what others have already
- *  reserved on a SHARED register is not available to this ticket. */
-function freeQty(it: { on_hand: number; reserved_qty?: number | null }): number {
-  return Math.max(0, Number(it.on_hand) - Number(it.reserved_qty ?? 0));
-}
+
 
 // Measurement units a requested part can be recorded in (count / weight / volume).
 const STORE_UNITS = ['Units', 'mg', 'g', 'kg', 'mL', 'L'];

@@ -16,6 +16,7 @@ import { withEmbedFallback } from '../../../lib/scopedList';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { parseStockFile, reconcile, type StockParseResult, type MonthParse, type MonthItem, type Anomaly } from '../../../lib/store/parseStockFile';
 import { indexResolutions, joinAnomalies, type AnomalyResolutionRow, type ReviewedAnomaly } from '../../../lib/store/anomalyKeys';
+import { registerIdOf } from '../../../lib/store/registers';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { AnomalyReviewModal } from './AnomalyReviewModal';
 import { StoreReconciliation } from './StoreReconciliation';
@@ -166,7 +167,7 @@ export function StockRegister() {
     // Same register key as the chips and the table — a monthly snapshot belongs
     // to a STORE once migration 59 exists. Filtering these by plant_id while the
     // chips carry store ids would silently reconcile nothing.
-    const monthRegisterId = (m: StockMonthRow) => m.store_id ?? m.plant_id;
+    const monthRegisterId = (m: StockMonthRow) => registerIdOf(m);
     const scoped = plantFilter.length
       ? months.filter(m => { const id = monthRegisterId(m); return id && plantFilter.includes(id); })
       : months;
@@ -221,7 +222,8 @@ export function StockRegister() {
    * store_id once migration 59 exists (the three Rehla factories then share one
    * register and appear as a single chip); plant_id before it.
    */
-  const registerIdOf = (it: StockItem) => it.store_id ?? it.plant_id;
+  // Shared helper (lib/store/registers) — the chips, the table and the anomaly
+  // reconciler must all key a row the same way, or a chip selects nothing.
 
   // Registers that actually have stock rows → the filter chips.
   const plantsInData = useMemo(() => {

@@ -25,6 +25,7 @@ import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { SectionCard, ButtonV2, ThV2 as Th } from '../../../components/v2';
 import { exportToCsv, type CsvColumn } from '../../../lib/utils/exportCsv';
 import { useSortable } from '../../../components/ui/useSortable';
+import { sharedStoreIds } from '../../../lib/store/registers';
 
 interface EventLite {
   store_id: string | null;
@@ -130,11 +131,10 @@ export function StoreReconciliation() {
 
   // Factories that share a store with someone else — the only ones where
   // "bought by" and "used by" can legitimately diverge.
-  const sharedStoreIds = useMemo(() => {
-    const count = new Map<string, number>();
-    for (const p of plants) { const s = storeIdFor(p.id); if (s) count.set(s, (count.get(s) ?? 0) + 1); }
-    return new Set([...count.entries()].filter(([, n]) => n > 1).map(([s]) => s));
-  }, [plants, storeIdFor]);
+  const sharedIds = useMemo(
+    () => sharedStoreIds(plants.map(p => ({ plant_id: p.id, store_id: storeIdFor(p.id) ?? '' })).filter(l => l.store_id)),
+    [plants, storeIdFor],
+  );
 
   const sort = useSortable(rows, {
     factory: r => r.factory,
@@ -144,7 +144,7 @@ export function StoreReconciliation() {
     spend: r => r.partSpend,
   }, { key: 'factory', dir: 'asc' });
 
-  const anyShared = rows.some(r => sharedStoreIds.has(storeIdFor(r.plantId) ?? ''));
+  const anyShared = rows.some(r => sharedIds.has(storeIdFor(r.plantId) ?? ''));
 
   return (
     <SectionCard
@@ -191,7 +191,7 @@ export function StoreReconciliation() {
               <tbody>
                 {sort.sorted.map(r => {
                   const net = r.procuredUnits - r.consumedUnits;
-                  const shared = sharedStoreIds.has(storeIdFor(r.plantId) ?? '');
+                  const shared = sharedIds.has(storeIdFor(r.plantId) ?? '');
                   return (
                     <tr key={r.plantId}>
                       <td style={{ fontWeight: 600 }}>{r.factory}</td>

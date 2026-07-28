@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Camera, RotateCcw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { fetchActivePlants } from '../../lib/plants';
 import { insertRows, updateRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
 import { useRoleContext } from '../../contexts/RoleContext';
@@ -75,7 +76,7 @@ export function MyNightDuty({ showEmpty = false }: { showEmpty?: boolean }) {
       acctId
         ? supabase.from('night_duty').select('id, duty_date, status, plant_id, assigned_by, checked_in_at, shift_log_id').eq('technician_id', acctId).gte('duty_date', iso(yesterday)).order('duty_date').returns<Duty[]>()
         : Promise.resolve({ data: [] as Duty[] }),
-      supabase.from('plants').select('id, name, lat, lng, geofence_radius_m').returns<Plant[]>(),
+      fetchActivePlants<Plant>('id, name, lat, lng, geofence_radius_m'),
     ]);
     setDuties(dutyRows ?? []);
     setPlants(Object.fromEntries((plantRows ?? []).map(p => [p.id, p])));

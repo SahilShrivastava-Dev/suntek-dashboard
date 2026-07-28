@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows, updateRows } from '../../../lib/db';
 import { resizeImageToDataUrl, extractSupplierBill, type SupplierBillLine } from '../../../lib/nvidiaOcr';
 import { useRoleContext } from '../../../contexts/RoleContext';
@@ -650,7 +651,7 @@ export function Maintenance() {
           () => scopeQuery(supabase.from('maintenance_schedules').select('*')).order('next_due_at', { ascending: true }).returns<ScheduleRow[]>(),
           'Maintenance.schedules',
         ),
-        supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+        fetchActivePlants<{ id: string; name: string }>('id, name'),
       ]);
       if (tRes.error) throw tRes.error;
       if (sRes.error) throw sRes.error;

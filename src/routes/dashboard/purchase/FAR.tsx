@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows, updateRows } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
@@ -299,8 +300,7 @@ export function FAR() {
 
   async function load() {
     try {
-      const { data: plantsData } = await supabase.from('plants').select('id, name')
-        .returns<{ id: string; name: string }[]>();
+      const { data: plantsData } = await fetchActivePlants<{ id: string; name: string }>('id, name');
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
       const { data, error } = await withEmbedFallback(

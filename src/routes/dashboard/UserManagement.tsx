@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Users, UserCheck, Shield } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { fetchActivePlants } from '../../lib/plants';
 import { insertRows, updateRows } from '../../lib/db';
 import { createLogin, updateLogin } from '../../lib/adminUsers';
 import { useMentionNotifier } from '../../lib/mentions';
@@ -284,7 +285,7 @@ export function UserManagement() {
     setLoading(true);
     const [usersRes, { data: plantsData }, { data: unitsData }, { data: tiersData }] = await Promise.all([
       supabase.from('user_accounts').select('*, plants(name)').order('created_at', { ascending: false }).returns<DisplayUser[]>(),
-      supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+      fetchActivePlants<{ id: string; name: string }>('id, name'),
       supabase.from('units').select('id, plant_id, name').order('name').returns<{ id: string; plant_id: string; name: string }[]>(),
       supabase.from('tiers').select('id, label, rank').order('rank').returns<{ id: string; label: string; rank: number }[]>(),
     ]);

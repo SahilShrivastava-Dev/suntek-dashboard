@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { callRpc } from '../../../lib/db';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
@@ -92,7 +93,7 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
     if (!open) return;
     let alive = true;
     (async () => {
-      const { data: pl } = await supabase.from('plants').select('id, name').returns<Plant[]>();
+      const { data: pl } = await fetchActivePlants<Plant>('id, name');
       const base = allowedPlants.length ? (allowedPlants as Plant[]) : (pl || []);
       const { data: si } = await scopeQuery(supabase.from('store_items').select('id, item_name, on_hand, unit, plant_id')).returns<StockItem[]>();
       if (!alive) return;

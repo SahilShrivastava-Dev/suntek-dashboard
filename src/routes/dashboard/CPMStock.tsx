@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Boxes, Layers, Package, Fuel, Plus } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { fetchActivePlants } from '../../lib/plants';
 import { insertRows } from '../../lib/db';
 import { useToast } from '../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../components/ui/states';
@@ -43,7 +44,7 @@ export function CPMStock() {
   async function load() {
     try {
       const [plantsRes, stockRes, tanksRes, drumsRes] = await Promise.all([
-        supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+        fetchActivePlants<{ id: string; name: string }>('id, name'),
         withEmbedFallback(
           scopeQuery(supabase.from('stock_levels').select('*, plants(name)')).order('updated_at', { ascending: false }).returns<StockRow[]>(),
           () => scopeQuery(supabase.from('stock_levels').select('*')).order('updated_at', { ascending: false }).returns<StockRow[]>(),

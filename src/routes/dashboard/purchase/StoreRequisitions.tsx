@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ListChecks, Package, Recycle, Plus, FileText, Hourglass, PackageCheck, Zap } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
@@ -105,8 +106,7 @@ export function StoreRequisitions() {
 
   async function load() {
     try {
-      const { data: plantsData } = await supabase.from('plants').select('id, name')
-        .returns<{ id: string; name: string }[]>();
+      const { data: plantsData } = await fetchActivePlants<{ id: string; name: string }>('id, name');
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
       const { data, error } = await withEmbedFallback(

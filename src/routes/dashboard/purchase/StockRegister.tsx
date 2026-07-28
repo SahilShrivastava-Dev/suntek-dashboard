@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows } from '../../../components/ui/states';
@@ -126,7 +127,7 @@ export function StockRegister() {
 
   async function load() {
     try {
-      const { data: pl } = await supabase.from('plants').select('id, name').returns<Plant[]>();
+      const { data: pl } = await fetchActivePlants<Plant>('id, name');
       setPlants(pl || []);
       const { data: si } = await withEmbedFallback(
         scopeQuery(supabase.from('store_items').select('*, plants(name)')).order('item_name').returns<(StockItem & { plants?: { name: string | null } | null })[]>(),

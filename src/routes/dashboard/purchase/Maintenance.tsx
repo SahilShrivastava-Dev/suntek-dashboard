@@ -772,14 +772,20 @@ export function Maintenance() {
     return () => { alive = false; };
   }, [selectedTicket?.plant_id]);
 
-  // FAR assets → the equipment dropdown when creating a schedule (validation against the register).
+  // FAR assets → the equipment dropdown when creating a schedule (validation
+  // against the register). SCOPED: an unscoped fetch would pull every factory's
+  // register into memory, and at Rehla three separate FARs share one site — so
+  // "assets of one factory must never appear under another" has to hold here,
+  // not just in the picker below. RLS on fixed_assets is the real boundary;
+  // this keeps the client from ever holding what it may not show.
   useEffect(() => {
     let alive = true;
-    supabase.from('fixed_assets').select('id, name, identification_mark, plant_id').order('name')
+    scopeQuery(supabase.from('fixed_assets').select('id, name, identification_mark, plant_id'))
+      .order('name')
       .returns<{ id: string; name: string; identification_mark: string | null; plant_id: string | null }[]>()
       .then(({ data }) => { if (alive) setFarAssets(data || []); });
     return () => { alive = false; };
-  }, []);
+  }, [scopeQuery]);
 
   // Seed the completion checklist from the open ticket (preserves prior ticks) or the schedule.
   useEffect(() => {
@@ -789,34 +795,45 @@ export function Maintenance() {
     setCompletionChecklist(base.map(c => ({ component: c.component, activity: c.activity, done: !!(c as { done?: boolean }).done })));
   }, [completingSchedule]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Restrict the plant picker to the user's allowed plants (all if global) so a
-  // scoped user can't raise a ticket for another plant. Falls back to the full
-  // list until scope resolves.
-  const plantNames = allowedPlants.length > 0
-    ? allowedPlants.map(p => p.name)
-    : (dbPlants.length > 0 ? dbPlants.map(p => p.name) : ['SHD', 'Rehla', 'Ganjam', 'HQ']);
+  // Restrict the factory picker to the user's allowed factories (all if global)
+  // so a scoped user can't raise a ticket for another factory.
+  //
+  // Options carry the plant ID, and every form below stores that ID rather than
+  // the display name. Names are not stable — factories are renamed — and at
+  // Rehla three factories sit at one site, so matching on a label is both
+  // fragile and ambiguous. The ID is the only thing that is neither.
+  const plantOptions = useMemo(() => {
+    const src = allowedPlants.length > 0 ? allowedPlants : dbPlants;
+    return [...src].sort((a, b) => a.name.localeCompare(b.name));
+  }, [allowedPlants, dbPlants]);
 
-  // Emergency raise: plant defaults to the user's assigned plant (alphabetically first
-  // when several); the equipment picker + Jharkhand-unit selector both derive from it.
-  const sortedPlantNames = useMemo(() => [...plantNames].sort((a, b) => a.localeCompare(b)), [plantNames]);
-  const defaultRaisePlant = sortedPlantNames[0] || '';
+  const plantNameById = useMemo(
+    () => new Map(dbPlants.map(p => [p.id, p.name] as const)),
+    [dbPlants],
+  );
+
+  // Emergency raise: factory defaults to the user's own (alphabetically first
+  // when several); the equipment picker + Jharkhand-unit selector derive from it.
+  const defaultRaisePlantId = plantOptions[0]?.id ?? '';
   // Only plants that actually have chlorides/plasticiser units are "Jharkhand" plants —
   // the sole place the procurement-unit selector should appear.
   const jharkhandPlantIds = useMemo(
     () => new Set(scopeUnits.filter(u => /chlorid|plastic/i.test(u.code || '') || /chlorid|plastic/i.test(u.name)).map(u => u.plant_id)),
     [scopeUnits],
   );
-  const raisePlant = dbPlants.find(p => p.name === raiseForm.plant);
-  const raisePlantIsJharkhand = !!raisePlant && jharkhandPlantIds.has(raisePlant.id);
+  const raisePlantIsJharkhand = !!raiseForm.plant && jharkhandPlantIds.has(raiseForm.plant);
+  // No factory chosen ⇒ NO assets. Never fall back to the full register: at
+  // Rehla that would show SCPL's and SPPL's assets to an SPPL(K) technician,
+  // which is exactly the isolation the client asked for.
   const raiseFarAssets = useMemo(
-    () => (raisePlant ? farAssets.filter(a => a.plant_id === raisePlant.id) : farAssets),
-    [farAssets, raisePlant?.id], // eslint-disable-line react-hooks/exhaustive-deps
+    () => (raiseForm.plant ? farAssets.filter(a => a.plant_id === raiseForm.plant) : []),
+    [farAssets, raiseForm.plant],
   );
 
-  // Default the raise form's plant to the user's assigned plant when the panel opens.
+  // Default the raise form's factory to the user's own when the panel opens.
   useEffect(() => {
-    if (showRaisePanel) setRaiseForm(f => (f.plant ? f : { ...f, plant: defaultRaisePlant }));
-  }, [showRaisePanel, defaultRaisePlant]);
+    if (showRaisePanel) setRaiseForm(f => (f.plant ? f : { ...f, plant: defaultRaisePlantId }));
+  }, [showRaisePanel, defaultRaisePlantId]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
@@ -853,15 +870,15 @@ export function Maintenance() {
   };
   const fltPeriodic = schedules.filter(s =>
     matchQ(s.title, s.equipment, s.plants?.name)
-    && (fltPlant === 'all' || s.plants?.name === fltPlant)
+    && (fltPlant === 'all' || s.plant_id === fltPlant)
     && (fltStatus === 'all' || schedStatusOf(s) === fltStatus));
   const fltEmergency = emergencyTickets.filter(t =>
     matchQ(t.equipment, t.title, t.description, t.plants?.name, t.raised_by)
-    && (fltPlant === 'all' || t.plants?.name === fltPlant)
+    && (fltPlant === 'all' || t.plant_id === fltPlant)
     && (fltStatus === 'all' || t.status === fltStatus));
   const plantFilterOptions = [
     { value: 'all', label: t('common.allPlants') },
-    ...dbPlants.map(p => ({ value: p.name, label: p.name })),
+    ...dbPlants.map(p => ({ value: p.id, label: p.name })),
   ];
   const statusFilterOptions = tab === 'periodic'
     ? [
@@ -928,7 +945,7 @@ export function Maintenance() {
     if (!raiseForm.equipment.trim() || raising) return;
     setRaising(true);
     try {
-    const plant = dbPlants.find(p => p.name === raiseForm.plant);
+    const plant = dbPlants.find(p => p.id === raiseForm.plant);
     // Resolve the unit text ('chlorides'/'plasticiser') to its unit_id within
     // this plant — the scoping key used for routing + isolation.
     const unitRow = raiseForm.unit
@@ -1013,13 +1030,13 @@ export function Maintenance() {
 
   // ── Admin: edit / delete a ticket ───────────────────────────────────────────
   function startEdit(t: TicketRow) {
-    setEditForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plants?.name || '', status: t.status });
+    setEditForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plant_id || '', status: t.status });
     setEditingTicket(true);
   }
 
   async function saveEdit() {
     if (!selectedTicket) return;
-    const plant = dbPlants.find(p => p.name === editForm.plant);
+    const plant = dbPlants.find(p => p.id === editForm.plant);
     await updateRows('maintenance_tickets', {
       equipment: editForm.equipment,
       description: editForm.description || null,
@@ -1092,7 +1109,7 @@ export function Maintenance() {
   // Technician: open the revise form seeded from the current ticket.
   function startResubmit(t: TicketRow) {
     const assessment = /needs part/i.test(t.title || '') ? 'needs_part' : 'repairable';
-    setResubmitForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plants?.name || '', assessment });
+    setResubmitForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plant_id || '', assessment });
     setResubmitPhotoBlob(null);
     setResubmitting(true);
   }
@@ -1108,11 +1125,11 @@ export function Maintenance() {
       const priorPhoto = selectedTicket.defective_raise_photo_url;
       if (resubmitPhotoBlob) {
         setUploading(true);
-        const r = await uploadMaintenancePhoto(resubmitPhotoBlob, { ticketId: selectedTicket.id, plantName: resubmitForm.plant || selectedTicket.plants?.name || '', photoType: 'completion', creator: activeProfile.name });
+        const r = await uploadMaintenancePhoto(resubmitPhotoBlob, { ticketId: selectedTicket.id, plantName: plantNameById.get(resubmitForm.plant) || selectedTicket.plants?.name || '', photoType: 'completion', creator: activeProfile.name });
         newPhotoUrl = r.secure_url;
         setUploading(false);
       }
-      const plant = dbPlants.find((p) => p.name === resubmitForm.plant);
+      const plant = dbPlants.find((p) => p.id === resubmitForm.plant);
       const restoreStatus = (selectedTicket.revision_prev_status as TicketStatus) || 'open';
       const title = `${resubmitForm.equipment} — ${resubmitForm.assessment === 'repairable' ? 'Repairable' : 'Needs part'}`;
       const patch: TicketUpdate = {
@@ -1382,7 +1399,7 @@ export function Maintenance() {
     if (!items.length || !selectedTicket || actionBusyRef.current) return;
     actionBusyRef.current = true;
     try {
-    const plant = dbPlants.find(p => p.name === selectedTicket.plants?.name);
+    const plant = dbPlants.find(p => p.id === selectedTicket.plant_id);
     // One store-request row per item — a ticket can need several parts at once.
     const rows = items.map(it => ({
       ticket_id: selectedTicket.id, part_name: it.partName,
@@ -1874,7 +1891,7 @@ export function Maintenance() {
     setScheduleForm({
       title: s.title,
       equipment: s.equipment,
-      plant: s.plants?.name || '',
+      plant: s.plant_id || '',
       frequency: s.frequency,
       description: s.description || '',
       firstDue: s.next_due_at ? s.next_due_at.split('T')[0] : today,
@@ -1893,7 +1910,7 @@ export function Maintenance() {
     setScheduleForm({
       title: `${s.title} (copy)`,
       equipment: s.equipment,
-      plant: s.plants?.name || '',
+      plant: s.plant_id || '',
       frequency: s.frequency,
       description: s.description || '',
       firstDue: today,
@@ -1968,7 +1985,7 @@ export function Maintenance() {
     try {
     // A linked FAR asset dictates the plant — never let a mismatched selection through.
     const linkedAsset = farAssets.find(a => a.id === scheduleForm.farAssetId);
-    const plant = dbPlants.find(p => p.name === scheduleForm.plant);
+    const plant = dbPlants.find(p => p.id === scheduleForm.plant);
     const payload = {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
       plant_id: linkedAsset?.plant_id ?? plant?.id ?? null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
@@ -2856,7 +2873,7 @@ export function Maintenance() {
             value={raiseForm.equipment}
             assets={raiseFarAssets}
             onChange={v => setRaiseForm(f => ({ ...f, equipment: v, farAssetId: '', equipmentMark: '' }))}
-            onPick={a => setRaiseForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
+            onPick={a => setRaiseForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a?.plant_id ?? f.plant }))}
           />
           {raiseForm.equipment.trim().length > 1 && (raiseForm.farAssetId
             ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>{t('maint.linkedToFarAsset', '✓ Linked to FAR asset')}{raiseForm.equipmentMark ? ` · ${raiseForm.equipmentMark}` : ''}.</div>
@@ -2865,9 +2882,9 @@ export function Maintenance() {
         {raisePlantIsJharkhand ? (
           <PanelRow>
             <PanelField label={t('common.plant')}>
-              <PanelSelect value={raiseForm.plant} onChange={e => { const name = e.target.value; const pid = dbPlants.find(p => p.name === name)?.id; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: name, unit: jk ? f.unit : '' })); }}>
+              <PanelSelect value={raiseForm.plant} onChange={e => { const pid = e.target.value; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: pid, unit: jk ? f.unit : '' })); }}>
                 <option value="">{t('maint.selectPlant')}</option>
-                {plantNames.map(p => <option key={p}>{p}</option>)}
+                {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </PanelSelect>
             </PanelField>
             <PanelField label={t('maint.procurementUnit')}>
@@ -2880,9 +2897,9 @@ export function Maintenance() {
           </PanelRow>
         ) : (
           <PanelField label={t('common.plant')}>
-            <PanelSelect value={raiseForm.plant} onChange={e => { const name = e.target.value; const pid = dbPlants.find(p => p.name === name)?.id; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: name, unit: jk ? f.unit : '' })); }}>
+            <PanelSelect value={raiseForm.plant} onChange={e => { const pid = e.target.value; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: pid, unit: jk ? f.unit : '' })); }}>
               <option value="">{t('maint.selectPlant')}</option>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
+              {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </PanelSelect>
           </PanelField>
         )}
@@ -3033,7 +3050,7 @@ export function Maintenance() {
                   <PanelField label={t('common.plant')}>
                     <PanelSelect value={editForm.plant} onChange={e => setEditForm(f => ({ ...f, plant: e.target.value }))}>
                       <option value="">{t('maint.selectPlant')}</option>
-                      {plantNames.map(p => <option key={p}>{p}</option>)}
+                      {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </PanelSelect>
                   </PanelField>
                   <PanelField label={t('maint.colStatus')}>
@@ -3083,7 +3100,7 @@ export function Maintenance() {
                   <PanelField label={t('common.plant')}>
                     <PanelSelect value={resubmitForm.plant} onChange={e => setResubmitForm(f => ({ ...f, plant: e.target.value }))}>
                       <option value="">{t('maint.selectPlant')}</option>
-                      {plantNames.map(p => <option key={p}>{p}</option>)}
+                      {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </PanelSelect>
                   </PanelField>
                   <PanelField label={t('maint.assessmentLabel', 'Assessment')}>
@@ -3134,7 +3151,7 @@ export function Maintenance() {
             value={scheduleForm.equipment}
             assets={farAssets}
             onChange={v => setScheduleForm(f => ({ ...f, equipment: v }))}
-            onPick={a => setScheduleForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
+            onPick={a => setScheduleForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a?.plant_id ?? f.plant }))}
           />
           {scheduleForm.equipment.trim().length > 1 && (scheduleForm.farAssetId
             ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>{t('maint.linkedToFarAsset', '✓ Linked to FAR asset')}{scheduleForm.equipmentMark ? ` · ${scheduleForm.equipmentMark}` : ''}.</div>
@@ -3149,7 +3166,7 @@ export function Maintenance() {
           <PanelField label={scheduleForm.farAssetId ? t('maint.plantSetByFar', 'Plant (set by FAR asset)') : t('common.plant')}>
             <PanelSelect value={scheduleForm.plant} disabled={!!scheduleForm.farAssetId} onChange={e => setScheduleForm(f => ({ ...f, plant: e.target.value }))}>
               <option value="">{t('maint.allPlantsOption', '— All plants —')}</option>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
+              {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </PanelSelect>
             {scheduleForm.farAssetId && <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{t('maint.lockedToFarPlant', "🔒 Locked to the FAR asset's plant.")}</div>}
           </PanelField>

@@ -229,7 +229,6 @@ function AssetDetailTable({ assets, showPlant, onUploadPic, onViewPic }: {
   );
 }
 
-const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 const ACCOUNT_HEADS = ['Plant & Machinery', 'Electrical Equipment', 'Vehicles', 'Furniture & Fixtures', 'Computer & Peripherals', 'Office Equipment'];
 
 export function FAR() {
@@ -289,7 +288,7 @@ export function FAR() {
     mark: '', model: '', capacity: '', origin: 'India',
     year: new Date().getFullYear().toString(),
     value: '', invoice: '', purchaseDate: today,
-    account: 'Plant & Machinery', plant: 'SHD',
+    account: 'Plant & Machinery', plant: '',
   });
 
   async function load() {
@@ -355,7 +354,12 @@ export function FAR() {
 
   useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
+  // Factory options come from the DB — never a hard-coded list, which a rename
+  // would leave stale. The form stores the plant ID, not the display name.
+  const plantOptions = useMemo(
+    () => [...(allowedPlants.length > 0 ? allowedPlants : dbPlants)].sort((a, b) => a.name.localeCompare(b.name)),
+    [allowedPlants, dbPlants],
+  );
 
   // Plants present in the FAR → the combine/individual filter chips.
   const plantsInFar = useMemo(() => {
@@ -526,8 +530,7 @@ export function FAR() {
 
   async function handleSave() {
     if (!form.mark.trim() || !form.model.trim()) return;
-    const plant = dbPlants.find(p => p.name === form.plant);
-    const plantId = plant?.id || dbPlants[0]?.id || null;
+    const plantId = form.plant || plantOptions[0]?.id || null;
     const { data, error } = await insertRows('fixed_assets', {
       plant_id: plantId,
       name: form.mark,
@@ -548,7 +551,7 @@ export function FAR() {
     }
     if (data) setAssets(prev => [data as AssetRow, ...prev]);
     setSaved(true);
-    setTimeout(() => { setOpen(false); setSaved(false); setForm({ mark: '', model: '', capacity: '', origin: 'India', year: new Date().getFullYear().toString(), value: '', invoice: '', purchaseDate: today, account: 'Plant & Machinery', plant: 'SHD' }); }, 1600);
+    setTimeout(() => { setOpen(false); setSaved(false); setForm({ mark: '', model: '', capacity: '', origin: 'India', year: new Date().getFullYear().toString(), value: '', invoice: '', purchaseDate: today, account: 'Plant & Machinery', plant: plantOptions[0]?.id ?? '' }); }, 1600);
   }
 
   function handleClose() { setOpen(false); setSaved(false); }
@@ -865,7 +868,8 @@ export function FAR() {
           </PanelField>
           <PanelField label={t('far.fldPlant')}>
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
+              {!form.plant && <option value="">{t('far.selectFactory', 'Select factory…')}</option>}
+              {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </PanelSelect>
           </PanelField>
         </PanelRow>

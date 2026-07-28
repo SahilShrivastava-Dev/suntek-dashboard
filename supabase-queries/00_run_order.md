@@ -34,6 +34,30 @@ the life of the project. `00_full_setup.sql` is their consolidation.
 | 9 | `09_user_accounts.sql` | `user_accounts` |
 | 10 | `10_blacklist.sql` / `10_mentions.sql` | `blacklist` / `entity_notes`, `entity_watchers` |
 | 11–24 | various | RLS fixes, audit trails, column adds, scopes (see each file header) |
+| 25–56 | various | roles/tiers/capabilities, night duty, store stock ledger, FAR + PM, stock RPCs (see each file header) |
+| 57–61 | **location / factory / shared-store restructure** | see the run order below |
+
+## 🏭 57–61 — location, factory rename, shared store
+
+Run **in order**, and mind the two gates. Each has a paired `*_rollback_*.sql`.
+
+| # | File | Does | Risk |
+|---|------|------|------|
+| 57 | `57_locations.sql` | `locations` table + descriptive/lifecycle columns on `plants`. Purely additive — no rename, no behaviour change | 🟢 |
+| — | **deploy the frontend first** | Several screens hold hard-coded plant-name arrays or match plants by name (`PurchaseOrders.tsx`, `CheckIn.tsx`, `NightManagerBoard.tsx`, `Maintenance.tsx`). Ship those fixes **before** 58 or they will show stale names | 🚦 **gate** |
+| 58 | `58_rename_plants.sql` | 9 plant rows → 5 named factories; creates `SPPL(K) – Rehla`; folds `SCPL Delhi` into Sikandarabad; retires the rest (flag only, never `DELETE`) | 🟡 |
+| 59 | `59_stores.sql` | `stores`, `factory_store_access`, `user_stores`, `store_id` columns, `store_in_scope()`. Identity mapping (one store per factory) ⇒ **behaviour unchanged** | 🟢 |
+| 60 | `60_rehla_common_store.sql` | **The only migration that changes what people see.** Merges the duplicated Rehla register into one shared store; makes `store_id` authoritative | 🔴 **snapshot** |
+| 61 | `61_issue_store_item.sql` | Atomic issue/reserve/release RPC (fixes the lost-update race) + store-scoped RLS. **`fixed_assets` stays factory-scoped** | 🟡 |
+
+**Why renaming is safe:** access is keyed on `plants.id` (uuid) — `user_plants`, RLS
+`my_plant_ids()`, `profiles.plant_id`. The auth JWT carries only `{name, role_id}`.
+No assignment changes, nothing is granted or revoked, and nobody re-logs in.
+
+**The rule the store model turns on:** `store_id` = *where the stock is*;
+`plant_id` / `requesting_plant_id` = *who owns the asset and who pays*. One
+`factory_store_access` row per factory reproduces today's behaviour exactly,
+which is why Sikandrabad and Ganjam are untouched.
 
 ## ⚠️ Tables that are NOT in the numbered files
 

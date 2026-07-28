@@ -162,11 +162,17 @@ export function StockRegister() {
   // reconciled independently — same-named items in different plants are distinct — then
   // the per-plant anomalies are combined.
   const anomalies = useMemo(() => {
-    const scoped = plantFilter.length ? months.filter(m => m.plant_id && plantFilter.includes(m.plant_id)) : months;
+    // Same register key as the chips and the table — a monthly snapshot belongs
+    // to a STORE once migration 59 exists. Filtering these by plant_id while the
+    // chips carry store ids would silently reconcile nothing.
+    const monthRegisterId = (m: StockMonthRow) => m.store_id ?? m.plant_id;
+    const scoped = plantFilter.length
+      ? months.filter(m => { const id = monthRegisterId(m); return id && plantFilter.includes(id); })
+      : months;
     if (!scoped.length) return [];
     const byPlant = new Map<string, StockMonthRow[]>();
     for (const r of scoped) {
-      const k = r.plant_id || '—';
+      const k = monthRegisterId(r) || '—';
       const arr = byPlant.get(k);
       if (arr) arr.push(r); else byPlant.set(k, [r]);
     }
@@ -174,14 +180,15 @@ export function StockRegister() {
     for (const [pid, rows] of byPlant.entries()) {
       const ms = monthsFromRows(rows);
       if (!ms.length) continue;
-      const plant = pid === '—' ? undefined : plantName(pid);
+      // `pid` may now be a store id, so resolve the label from either master.
+      const plant = pid === '—' ? undefined : (stores.find(s => s.id === pid)?.name ?? plantName(pid));
       const periodMonth = ms[ms.length - 1].periodMonth;
       for (const a of reconcile(ms.length >= 2 ? ms[ms.length - 2] : null, ms[ms.length - 1])) {
         out.push({ anomaly: a, plant, plantId: pid === '—' ? null : pid, periodMonth });
       }
     }
     return out;
-  }, [months, plantFilter, plants]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [months, plantFilter, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Join computed anomalies to their persisted review state (natural-key match).
   const reviewed = useMemo(() => {
@@ -205,12 +212,29 @@ export function StockRegister() {
     return months.reduce((mx, m) => (m.period_month > mx ? m.period_month : mx), months[0].period_month);
   }, [months]);
 
-  // Plants that actually have stock rows → the filter chips.
+  /**
+   * The register a stock row belongs to. MUST be the same expression the filter
+   * below uses — the chips are keyed by whatever this returns, so if the two
+   * disagree every chip selects nothing.
+   *
+   * store_id once migration 59 exists (the three Rehla factories then share one
+   * register and appear as a single chip); plant_id before it.
+   */
+  const registerIdOf = (it: StockItem) => it.store_id ?? it.plant_id;
+
+  // Registers that actually have stock rows → the filter chips.
   const plantsInData = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const it of items) if (it.plant_id) seen.set(it.plant_id, it.plants?.name || plantName(it.plant_id));
+    for (const it of items) {
+      const id = registerIdOf(it);
+      if (!id) continue;
+      const label = it.store_id
+        ? (stores.find(s => s.id === it.store_id)?.name ?? t('storereq.store', 'Store'))
+        : (it.plants?.name || plantName(it.plant_id));
+      seen.set(id, label);
+    }
     return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [items, plants]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function togglePlant(id: string) { setPlantFilter(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]); }
 
@@ -231,7 +255,7 @@ export function StockRegister() {
     const q = search.trim().toLowerCase();
     const map = new Map<string, MergedRow>();
     for (const it of items) {
-      const regId = it.store_id ?? it.plant_id;
+      const regId = registerIdOf(it);
       if (plantFilter.length && !(regId && plantFilter.includes(regId))) continue;
       if (q && !(it.item_name.toLowerCase().includes(q) || (it.equipment || '').toLowerCase().includes(q) || (it.model || '').toLowerCase().includes(q))) continue;
       const key = it.item_name.toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim();

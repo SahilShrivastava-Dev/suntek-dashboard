@@ -443,6 +443,17 @@ export function NightDutyScheduler() {
 
   const stepBody = step === 1 ? calendar : step === 2 ? peoplePicker : step === 3 ? repeatHelper : review;
 
+  // What each step must have before you may advance. Step 3 (repeat) is
+  // optional by design, so it has no requirement.
+  const canLeaveStep =
+    step === 1 ? selectedDates.length > 0 :
+    step === 2 ? selectedTechIds.length > 0 :
+    true;
+  const stepBlockedReason =
+    step === 1 && !selectedDates.length ? t('nightBoard.selectOneDate', 'Select at least one date') :
+    step === 2 && !selectedTechIds.length ? t('nightBoard.selectOnePerson', 'Select at least one person') :
+    null;
+
   return (
     <div className={schedulerOpen ? 'grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-4 items-start mb-5' : 'mb-5'}>
     <div>
@@ -589,13 +600,25 @@ export function NightDutyScheduler() {
           {stepBody}
         </div>
 
+        {/* Why Next is unavailable — a disabled button with no explanation just
+            reads as broken. */}
+        {stepBlockedReason && (
+          <div style={{ fontSize: 11.5, color: '#B45309', marginTop: 10 }}>{stepBlockedReason}</div>
+        )}
+
         {/* Footer buttons */}
         <div className="flex items-center justify-between gap-2 mt-5">
           <ButtonV2 variant="outline" onClick={step === 1 ? closeWizard : () => setStep(s => s - 1)}>
             {step === 1 ? t('nightBoard.cancel', 'Cancel') : t('nightBoard.back', 'Back')}
           </ButtonV2>
           {step < 4 ? (
-            <ButtonV2 variant="primary" onClick={() => setStep(s => s + 1)}>{t('nightBoard.next', 'Next')}</ButtonV2>
+            // Each step gates its own requirement. Without this the wizard let
+            // you walk from "Select Employees" to Review with nobody selected —
+            // typing a name into the SEARCH box looks like picking someone, so
+            // you only discovered the mistake at the very end.
+            <ButtonV2 variant="primary" onClick={() => setStep(s => s + 1)} disabled={!canLeaveStep}>
+              {t('nightBoard.next', 'Next')}
+            </ButtonV2>
           ) : (
             <ButtonV2 variant="primary" onClick={schedule} disabled={saving || !selectedTechIds.length || !selectedDates.length}>
               {saving

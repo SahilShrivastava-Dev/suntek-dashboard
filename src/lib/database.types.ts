@@ -276,6 +276,9 @@ export interface Database {
         Row: {
           id: string;
           plant_id: string | null;
+          /** The register this workbook was uploaded against (migration 59).
+           *  One file per location per month once a store is shared. */
+          store_id: string | null;
           period_month: string;          // date (first of month)
           file_name: string | null;
           file_url: string | null;        // Cloudinary archive
@@ -295,6 +298,8 @@ export interface Database {
           id: string;
           upload_id: string | null;
           plant_id: string | null;
+          /** The register this monthly snapshot belongs to (migration 59). */
+          store_id: string | null;
           period_month: string;           // date
           item_name: string;
           unit: string | null;

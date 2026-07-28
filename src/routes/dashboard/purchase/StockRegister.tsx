@@ -93,7 +93,7 @@ const inputStyle: React.CSSProperties = {
 export function StockRegister() {
   const { t } = useTranslation();
   const toast = useToast();
-  const { scopeQuery, allowedPlants, stores } = usePlantScope();
+  const { scopeQuery, allowedPlants, stores, storeIdFor } = usePlantScope();
   const { activeProfile } = useRoleContext();
 
   const [items, setItems] = useState<(StockItem & { plants?: { name: string | null } | null })[]>([]);
@@ -328,8 +328,9 @@ export function StockRegister() {
 
       // 2) Replace this plant's month snapshots (the file is the source of truth).
       await supabase.from('store_stock_months').delete().eq('plant_id', plantId as string).in('period_month', monthDates);
+      const importStoreId = storeIdFor(plantId as string);
       const monthRows = res.months.flatMap(m => m.items.map(it => ({
-        upload_id: uploadId, plant_id: plantId, period_month: m.periodMonth, item_name: it.itemName, unit: it.unit,
+        upload_id: uploadId, plant_id: plantId, store_id: importStoreId, period_month: m.periodMonth, item_name: it.itemName, unit: it.unit,
         opening: it.opening, purchase_opening: it.purchaseOpening, purchased: it.purchased, used: it.used, computed_closing: it.closing,
       })));
       for (let i = 0; i < monthRows.length; i += CHUNK) {
@@ -340,12 +341,20 @@ export function StockRegister() {
       // 3) Seed the living register from the latest month's computed closing.
       const nowIso = new Date().toISOString();
       const itemRows = latest.items.map(it => ({
-        plant_id: plantId, item_name: it.itemName, unit: it.unit, equipment: it.equipment, model: it.model,
+        // store_id decides which register the row lands in. A DB trigger
+        // (migration 62) fills it from plant_id if omitted, but sending it
+        // explicitly is what lets the upsert below match on it.
+        plant_id: plantId, store_id: importStoreId, item_name: it.itemName, unit: it.unit, equipment: it.equipment, model: it.model,
         baseline_qty: it.closing, baseline_month: latest.periodMonth, procured_qty: 0, issued_qty: 0, manual_delta: 0,
         ticket_procured_qty: 0, on_hand: it.closing, updated_at: nowIso,
       }));
       for (let i = 0; i < itemRows.length; i += CHUNK) {
-        const { error } = await (supabase.from('store_items') as any).upsert(itemRows.slice(i, i + CHUNK), { onConflict: 'plant_id,item_name' });
+        // Conflict target follows the authoritative key. Migration 60 replaced
+        // unique(plant_id,item_name) with unique(store_id,item_name) — matching
+        // on the old pair would insert a SECOND row for an item the shared
+        // Rehla store already holds instead of updating it.
+        const { error } = await (supabase.from('store_items') as any)
+          .upsert(itemRows.slice(i, i + CHUNK), { onConflict: importStoreId ? 'store_id,item_name' : 'plant_id,item_name' });
         if (error) throw error;
       }
 

@@ -2959,30 +2959,18 @@ export function Maintenance() {
             ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>{t('maint.linkedToFarAsset', '✓ Linked to FAR asset')}{raiseForm.equipmentMark ? ` · ${raiseForm.equipmentMark}` : ''}.</div>
             : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>{t('maint.manualEntryNotInFar', '✎ Manual entry — not in the FAR (allowed; the notification flags it).')}</div>)}
         </PanelField>
-        {raisePlantIsJharkhand ? (
-          <PanelRow>
-            <PanelField label={t('common.plant')}>
-              <PanelSelect value={raiseForm.plant} onChange={e => { const pid = e.target.value; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: pid, unit: jk ? f.unit : '' })); }}>
-                <option value="">{t('maint.selectPlant')}</option>
-                {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </PanelSelect>
-            </PanelField>
-            <PanelField label={t('maint.procurementUnit')}>
-              <PanelSelect value={raiseForm.unit} onChange={e => setRaiseForm(f => ({ ...f, unit: e.target.value }))}>
-                <option value="">{t('maint.notJharkhand')}</option>
-                <option value="chlorides">Suntek Chlorides</option>
-                <option value="plasticiser">Suntek Plasticiser</option>
-              </PanelSelect>
-            </PanelField>
-          </PanelRow>
-        ) : (
-          <PanelField label={t('common.plant')}>
-            <PanelSelect value={raiseForm.plant} onChange={e => { const pid = e.target.value; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: pid, unit: jk ? f.unit : '' })); }}>
-              <option value="">{t('maint.selectPlant')}</option>
-              {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </PanelSelect>
-          </PanelField>
-        )}
+        {/* No procurement-unit selector.
+            Chlorides and Plasticiser were sub-units of a single 'Rehla' plant,
+            invented to route procurement inside it. They are now first-class
+            factories — SCPL – Rehla IS chlorides, SPPL – Rehla IS plasticiser —
+            so picking a factory already says which unit it is. Asking again was
+            asking the same question twice. */}
+        <PanelField label={t('common.plant')}>
+          <PanelSelect value={raiseForm.plant} onChange={e => setRaiseForm(f => ({ ...f, plant: e.target.value, unit: '' }))}>
+            <option value="">{t('maint.selectPlant')}</option>
+            {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </PanelSelect>
+        </PanelField>
         <PanelField label={t('maint.issueDescription')}>
           <PanelTextarea value={raiseForm.description} onChange={e => setRaiseForm(f => ({ ...f, description: e.target.value }))} placeholder={t('maint.issuePlaceholder')} />
         </PanelField>

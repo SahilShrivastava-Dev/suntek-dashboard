@@ -881,32 +881,13 @@ export function UserManagement() {
                 {plants.length === 0 && <div style={{ fontSize: 11, color: '#94A3B8' }}>{t('userMgmt.noPlants')}</div>}
               </div>
 
-              {form.plant_ids.some(pid => units.some(u => u.plant_id === pid)) && (
-                <>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '12px 0 4px' }}>{t('userMgmt.unitsLabel')}</div>
-                  <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>{t('userMgmt.unitsHelper')}</div>
-                  {form.plant_ids.map(pid => {
-                    const pUnits = units.filter(u => u.plant_id === pid);
-                    if (!pUnits.length) return null;
-                    return (
-                      <div key={pid} style={{ marginBottom: 8 }}>
-                        <div style={{ fontSize: 11, color: '#475569', fontWeight: 600, marginBottom: 4 }}>{plants.find(p => p.id === pid)?.name}</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {pUnits.map(u => {
-                            const on = form.unit_ids.includes(u.id);
-                            return (
-                              <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#334155', cursor: 'pointer', padding: '5px 8px', borderRadius: 8, background: on ? '#EFF6FF' : '#fff', border: '1px solid #E2E8F0' }}>
-                                <input type="checkbox" checked={on} onChange={() => setForm(f => ({ ...f, unit_ids: on ? f.unit_ids.filter(x => x !== u.id) : [...f.unit_ids, u.id] }))} />
-                                <span>{u.name}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
+              {/* No per-unit narrowing.
+                  Chlorides and Plasticiser existed as sub-units of a single
+                  'Rehla' plant. They are now separate factories (SCPL – Rehla
+                  is chlorides, SPPL – Rehla is plasticiser), so factory access
+                  already expresses what unit access used to. `units` and
+                  user_units stay in the schema so historical tickets keep
+                  resolving; they are simply no longer assignable. */}
             </>
           )}
         </div>

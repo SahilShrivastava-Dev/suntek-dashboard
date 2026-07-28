@@ -23,7 +23,9 @@ type RolesStatus = 'loading' | 'ready' | 'failed';
 const LOCKED_FALLBACK: MockProfile = {
   id: 'locked',
   name: 'Restricted',
-  role: 'L1',
+  // Bottom of the ladder. Since migration 64 the ladder runs L0 (admin) → L4
+  // (entry), so the least-privileged tier is L4, not L1.
+  role: 'L4',
   roleLabel: 'No access',
   roleDescription: 'No role assigned — contact admin',
   initials: '?',

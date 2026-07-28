@@ -1,36 +1,18 @@
-import type { UserRole } from '../database.types';
-
 /**
- * Role hierarchy — higher number = more access.
- * L1: Frontline Operators  (factory, warehouse, night manager)
- * L2: Unit Heads / Supervisors  (review & approval)
- * L3: Procurement Heads (Vijay Ji)  (purchase authority)
- * L4: Owner / Admin (Sagar)  (full access + Busy API data)
+ * Tile presentation metadata.
+ *
+ * This module used to also carry a hard-coded L1–L4 role hierarchy
+ * (ROLE_LEVEL / hasAccess / getHomeRoute). It was dead — nothing imported it —
+ * and it had drifted out of step with reality twice over: it never knew about
+ * the L5 tier added in migration 29, and its ordering is the reverse of the
+ * ladder the client uses (L0 top → L4 entry, migration 64).
+ *
+ * Seniority is DATA now: the `tiers` table owns the ladder and `roles.level`
+ * points into it. Compare `tiers.rank` (higher = more senior); each role's
+ * `home_route` and `allowed_routes` live on the role row. Keeping a second,
+ * hard-coded copy of the hierarchy here would just be another thing to forget
+ * to renumber.
  */
-export const ROLE_LEVEL: Record<UserRole, number> = {
-  L1: 1,
-  L2: 2,
-  L3: 3,
-  L4: 4,
-};
-
-/** Returns true if the user's role meets or exceeds the required level. */
-export function hasAccess(userRole: UserRole, requiredRole: UserRole): boolean {
-  return ROLE_LEVEL[userRole] >= ROLE_LEVEL[requiredRole];
-}
-
-/** Returns the home route for a given role. */
-export function getHomeRoute(role: UserRole): string {
-  switch (role) {
-    case 'L4':
-    case 'L3':
-    case 'L2':
-      return '/dashboard';
-    case 'L1':
-    default:
-      return '/operator/select'; // L1 picks their app (batch, warehouse, night-manager)
-  }
-}
 
 /** Tile colour by data source */
 export type TileVariant = 'red' | 'green' | 'yellow';

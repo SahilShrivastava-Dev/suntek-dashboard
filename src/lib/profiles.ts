@@ -90,7 +90,7 @@ export function profileHasCapability(profile: MockProfile, cap: string): boolean
 export interface RoleRow {
   id: string;            // text PK, slug ('admin', 'unit_head', …)
   label: string;
-  level: string;         // 'L1' | 'L2' | 'L3' | 'L4'
+  level: string;         // tier id — 'L0' (admin) … 'L4' (entry); see the tiers table
   description: string | null;
   home_route: string;
   allowed_routes: string[]; // exact route strings; ['*'] = all
@@ -172,7 +172,7 @@ export function roleToProfile(role: RoleRow, overrides?: Partial<MockProfile>): 
 export const ADMIN_FALLBACK: MockProfile = {
   id: 'admin',
   name: '',
-  role: 'L4',
+  role: 'L0',   // top of the ladder since migration 64 (was L4/L5)
   roleLabel: 'Owner · Admin',
   roleDescription: 'Full access to all modules and data',
   initials: '',

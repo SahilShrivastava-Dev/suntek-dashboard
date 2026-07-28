@@ -57,7 +57,10 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   pending:    { bg: '#F1F5F9', color: '#475569', label: 'PENDING'    },
 };
 
-const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
+// Non-factory destinations. Factories come from the `plants` table via
+// PlantScopeContext — never hard-coded, or a factory rename would leave this
+// dropdown offering names that no longer exist.
+const PORTS = ['Kandla', 'Mundra'];
 const UNITS  = ['nos', 'kg', 'MT', 'L', 'sets', 'boxes'];
 
 export function PurchaseOrders() {
@@ -76,8 +79,16 @@ export function PurchaseOrders() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const { activeProfile } = useRoleContext();
-  const { scopeQuery } = usePlantScope();
-  const [form, setForm] = useState({ material: '', type: 'PO', supplier: '', destination: 'SHD', qty: '', unit: 'nos', value: '', notes: '' });
+  const { scopeQuery, allowedPlants } = usePlantScope();
+  const [form, setForm] = useState({ material: '', type: 'PO', supplier: '', destination: '', qty: '', unit: 'nos', value: '', notes: '' });
+
+  // Default the destination to the user's first factory once scope resolves.
+  // Left blank until then rather than guessing a name.
+  useEffect(() => {
+    if (!form.destination && allowedPlants.length > 0) {
+      setForm(f => (f.destination ? f : { ...f, destination: allowedPlants[0].name }));
+    }
+  }, [allowedPlants, form.destination]);
 
   async function load() {
     try {
@@ -156,7 +167,7 @@ export function PurchaseOrders() {
       toast.error(t('po.toast_blacklist_hit', { value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
     }
     setSaved(true);
-    setTimeout(() => { setOpen(false); setSaved(false); setForm({ material: '', type: 'PO', supplier: '', destination: 'SHD', qty: '', unit: 'nos', value: '', notes: '' }); }, 1600);
+    setTimeout(() => { setOpen(false); setSaved(false); setForm({ material: '', type: 'PO', supplier: '', destination: allowedPlants[0]?.name ?? '', qty: '', unit: 'nos', value: '', notes: '' }); }, 1600);
   }
 
   function handleClose() { setOpen(false); setSaved(false); }
@@ -390,9 +401,9 @@ export function PurchaseOrders() {
           <PanelRow cols={3}>
             <PanelField label={t('po.field_destination')}>
               <PanelSelect value={form.destination} onChange={e => set('destination', e.target.value)}>
-                {PLANTS.map(p => <option key={p}>{p}</option>)}
-                <option value="Kandla">Kandla</option>
-                <option value="Mundra">Mundra</option>
+                {!form.destination && <option value="">{t('po.opt_select_destination', 'Select destination…')}</option>}
+                {allowedPlants.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                {PORTS.map(p => <option key={p} value={p}>{p}</option>)}
                 <option value="Port">{t('po.opt_port', 'Port')}</option>
               </PanelSelect>
             </PanelField>

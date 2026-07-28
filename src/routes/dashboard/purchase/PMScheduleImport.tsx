@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
@@ -56,7 +57,7 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
     if (!open) return;
     let alive = true;
     (async () => {
-      const { data: pl } = await supabase.from('plants').select('id, name').returns<Plant[]>();
+      const { data: pl } = await fetchActivePlants<Plant>('id, name');
       const base = allowedPlants.length ? (allowedPlants as Plant[]) : (pl || []);
       const { data: fa } = await supabase.from('fixed_assets').select('id, name, identification_mark, plant_id').returns<(AssetLite & { plant_id: string | null })[]>();
       const { data: sc } = await supabase.from('maintenance_schedules').select('equipment_mark, frequency, plant_id').returns<{ equipment_mark: string | null; frequency: string; plant_id: string | null }[]>();

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ListChecks, Package, Recycle, Plus, FileText, Hourglass, PackageCheck, Zap } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { useMentionNotifier } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
@@ -44,7 +45,6 @@ function PicBadge({ url, onOpen }: { url: string | null; onOpen: () => void }) {
   );
 }
 
-const FALLBACK_PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 const UNITS  = ['nos', 'kg', 'L', 'sets', 'MT', 'boxes'];
 
 const URGENCY_MAP: Record<string, 'low' | 'medium' | 'high' | 'plant_stopper'> = {
@@ -86,7 +86,7 @@ export function StoreRequisitions() {
   const [lightbox, setLightbox] = useState<LightboxImage[] | null>(null);
   // Row click → requisition detail panel (rows with a linked ticket jump straight to it).
   const [detailReq, setDetailReq] = useState<ReqRow | null>(null);
-  const [form, setForm] = useState({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
+  const [form, setForm] = useState({ item: '', plant: '', qty: '', unit: 'nos', priority: 'Normal', notes: '' });
 
   function openRow(r: ReqRow) {
     if (r.ticket_id) navigate(`/dashboard/purchase/maint?ticket=${r.ticket_id}`);
@@ -106,8 +106,7 @@ export function StoreRequisitions() {
 
   async function load() {
     try {
-      const { data: plantsData } = await supabase.from('plants').select('id, name')
-        .returns<{ id: string; name: string }[]>();
+      const { data: plantsData } = await fetchActivePlants<{ id: string; name: string }>('id, name');
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
       const { data, error } = await withEmbedFallback(
@@ -129,15 +128,19 @@ export function StoreRequisitions() {
   useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restrict the plant picker to the user's allowed plants (all if global).
-  const plantNames = allowedPlants.length > 0
-    ? allowedPlants.map(p => p.name)
-    : (dbPlants.length > 0 ? dbPlants.map(p => p.name) : FALLBACK_PLANTS);
+  // Factory options from the DB, restricted to the user's own. No hard-coded
+  // fallback: after a rename it would offer names that no longer exist. The
+  // form stores the plant ID, so a rename cannot orphan an in-flight request.
+  const plantOptions = useMemo(
+    () => [...(allowedPlants.length > 0 ? allowedPlants : dbPlants)].sort((a, b) => a.name.localeCompare(b.name)),
+    [allowedPlants, dbPlants],
+  );
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
   async function handleSave() {
     if (!form.item.trim() || !form.qty) return;
-    const plant = dbPlants.find(p => p.name === form.plant);
+    const plant = dbPlants.find(p => p.id === form.plant);
     const { data, error } = await insertRows('store_requisitions', {
       item: form.item,
       plant_id: plant?.id || null,
@@ -157,10 +160,10 @@ export function StoreRequisitions() {
       insertRows('notifications', {
         target_roles: ['admin', 'unit_head'],
         title: t('storereq.notif_title', { item: form.item }),
-        body: `${form.plant} · ${t('storereq.qty_label')}: ${form.qty} ${form.unit} · ${form.priority}`,
+        body: `${plant?.name ?? ''} · ${t('storereq.qty_label')}: ${form.qty} ${form.unit} · ${form.priority}`,
         type: form.priority === 'Urgent' ? 'urgent' : 'info',
         route: '/dashboard/purchase/storereq',
-        actor_name: form.plant,
+        actor_name: plant?.name ?? '',
         actor_role: 'warehouse_manager',
         read_by: [],
         plant_id: plant?.id || null, // deliver only to this plant's unit head + admin
@@ -179,7 +182,7 @@ export function StoreRequisitions() {
       toast.error(t('storereq.blacklist_alert', { value: h.candidate.value, type: h.entry.type, name: h.entry.name, pct: Math.round(h.score * 100) }));
     }
     setSaved(true);
-    setTimeout(() => { setOpen(false); setSaved(false); setForm({ item: '', plant: 'SHD', qty: '', unit: 'nos', priority: 'Normal', notes: '' }); }, 1600);
+    setTimeout(() => { setOpen(false); setSaved(false); setForm({ item: '', plant: '', qty: '', unit: 'nos', priority: 'Normal', notes: '' }); }, 1600);
   }
 
   function handleClose() { setOpen(false); setSaved(false); }
@@ -311,7 +314,8 @@ export function StoreRequisitions() {
         <PanelRow>
           <PanelField label={t('storereq.field_plant')}>
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
+              {!form.plant && <option value="">{t('storereq.selectPlant', 'Select factory…')}</option>}
+              {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </PanelSelect>
           </PanelField>
           <PanelField label={t('storereq.field_priority')}>

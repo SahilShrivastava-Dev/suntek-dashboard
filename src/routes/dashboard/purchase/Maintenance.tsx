@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
+import { freeQty } from '../../../lib/store/registers';
 import { insertRows, updateRows } from '../../../lib/db';
 import { resizeImageToDataUrl, extractSupplierBill, type SupplierBillLine } from '../../../lib/nvidiaOcr';
 import { useRoleContext } from '../../../contexts/RoleContext';
@@ -41,7 +43,13 @@ import { Calendar, CalendarDays, AlertTriangle, CheckCircle2, Hourglass, Shoppin
 type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
 
 // ── Store-inventory type-ahead ───────────────────────────────────────────────
-type StoreStockItem = { id: string; item_name: string; on_hand: number; unit: string | null };
+type StoreStockItem = {
+  id: string; item_name: string; on_hand: number; unit: string | null;
+  /** Claimed by approved-but-not-handed-over requests. Free = on_hand - reserved_qty.
+   *  Absent before migration 59. */
+  reserved_qty?: number | null;
+};
+
 
 // Measurement units a requested part can be recorded in (count / weight / volume).
 const STORE_UNITS = ['Units', 'mg', 'g', 'kg', 'mL', 'L'];
@@ -146,7 +154,10 @@ function PartNameField({ value, stock, onChange, onPick }: {
               onMouseDown={e => { e.preventDefault(); choose(s); }}
               style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: i === active ? '#F1F5F9' : '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
               <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.item_name}</span>
-              <span style={{ color: s.on_hand > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.on_hand > 0 ? t('maint.inStockCount', { defaultValue: '{{n}} in stock', n: s.on_hand }) : t('maint.outOfStock', 'out of stock')}</span>
+              {/* FREE stock, not raw on-hand: on a register shared by several
+                  factories, units already reserved by another approved ticket
+                  are not available to this one. */}
+              <span style={{ color: freeQty(s) > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{freeQty(s) > 0 ? t('maint.inStockCount', { defaultValue: '{{n}} in stock', n: freeQty(s) }) : t('maint.outOfStock', 'out of stock')}</span>
             </button>
           ))}
         </div>
@@ -455,7 +466,7 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
 
 export function Maintenance() {
   const { activeProfile, allProfiles, roles } = useRoleContext();
-  const { scopeQuery, units: scopeUnits, allowedPlants } = usePlantScope();
+  const { scopeQuery, units: scopeUnits, allowedPlants, storeIdFor } = usePlantScope();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const toast = useToast();
   const { t } = useTranslation();
@@ -637,7 +648,7 @@ export function Maintenance() {
           () => scopeQuery(supabase.from('maintenance_schedules').select('*')).order('next_due_at', { ascending: true }).returns<ScheduleRow[]>(),
           'Maintenance.schedules',
         ),
-        supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+        fetchActivePlants<{ id: string; name: string }>('id, name'),
       ]);
       if (tRes.error) throw tRes.error;
       if (sRes.error) throw sRes.error;
@@ -762,24 +773,41 @@ export function Maintenance() {
     setDefectiveLines(lines);
   }, [selectedTicket?.id, storeReqs]);
 
-  // Load the ticket-plant's stock register → powers the part-name type-ahead.
+  // Load the register of the STORE this ticket's factory draws from → powers
+  // the part-name type-ahead.
+  //
+  // Keyed on the store, not the factory. At Rehla, SCPL / SPPL / SPPL(K) all
+  // resolve to the same Rehla Common Store, so a technician at any of them sees
+  // the one shared register — stock held once, not three copies. Everywhere
+  // else a factory maps to its own store, so this is identical to the old
+  // `.eq('plant_id', pid)` behaviour.
   useEffect(() => {
     const pid = selectedTicket?.plant_id;
     if (!pid) { setStoreStock([]); return; }
     let alive = true;
-    supabase.from('store_items').select('id, item_name, on_hand, unit').eq('plant_id', pid).order('item_name')
+    const storeId = storeIdFor(pid);
+    const q = supabase.from('store_items').select('id, item_name, on_hand, reserved_qty, unit');
+    // Before migration 59 there are no stores; fall back to the factory's own rows.
+    (storeId ? q.eq('store_id', storeId) : q.eq('plant_id', pid))
+      .order('item_name')
       .returns<StoreStockItem[]>().then(({ data }) => { if (alive) setStoreStock(data || []); });
     return () => { alive = false; };
-  }, [selectedTicket?.plant_id]);
+  }, [selectedTicket?.plant_id, storeIdFor]);
 
-  // FAR assets → the equipment dropdown when creating a schedule (validation against the register).
+  // FAR assets → the equipment dropdown when creating a schedule (validation
+  // against the register). SCOPED: an unscoped fetch would pull every factory's
+  // register into memory, and at Rehla three separate FARs share one site — so
+  // "assets of one factory must never appear under another" has to hold here,
+  // not just in the picker below. RLS on fixed_assets is the real boundary;
+  // this keeps the client from ever holding what it may not show.
   useEffect(() => {
     let alive = true;
-    supabase.from('fixed_assets').select('id, name, identification_mark, plant_id').order('name')
+    scopeQuery(supabase.from('fixed_assets').select('id, name, identification_mark, plant_id'))
+      .order('name')
       .returns<{ id: string; name: string; identification_mark: string | null; plant_id: string | null }[]>()
       .then(({ data }) => { if (alive) setFarAssets(data || []); });
     return () => { alive = false; };
-  }, []);
+  }, [scopeQuery]);
 
   // Seed the completion checklist from the open ticket (preserves prior ticks) or the schedule.
   useEffect(() => {
@@ -789,34 +817,45 @@ export function Maintenance() {
     setCompletionChecklist(base.map(c => ({ component: c.component, activity: c.activity, done: !!(c as { done?: boolean }).done })));
   }, [completingSchedule]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Restrict the plant picker to the user's allowed plants (all if global) so a
-  // scoped user can't raise a ticket for another plant. Falls back to the full
-  // list until scope resolves.
-  const plantNames = allowedPlants.length > 0
-    ? allowedPlants.map(p => p.name)
-    : (dbPlants.length > 0 ? dbPlants.map(p => p.name) : ['SHD', 'Rehla', 'Ganjam', 'HQ']);
+  // Restrict the factory picker to the user's allowed factories (all if global)
+  // so a scoped user can't raise a ticket for another factory.
+  //
+  // Options carry the plant ID, and every form below stores that ID rather than
+  // the display name. Names are not stable — factories are renamed — and at
+  // Rehla three factories sit at one site, so matching on a label is both
+  // fragile and ambiguous. The ID is the only thing that is neither.
+  const plantOptions = useMemo(() => {
+    const src = allowedPlants.length > 0 ? allowedPlants : dbPlants;
+    return [...src].sort((a, b) => a.name.localeCompare(b.name));
+  }, [allowedPlants, dbPlants]);
 
-  // Emergency raise: plant defaults to the user's assigned plant (alphabetically first
-  // when several); the equipment picker + Jharkhand-unit selector both derive from it.
-  const sortedPlantNames = useMemo(() => [...plantNames].sort((a, b) => a.localeCompare(b)), [plantNames]);
-  const defaultRaisePlant = sortedPlantNames[0] || '';
+  const plantNameById = useMemo(
+    () => new Map(dbPlants.map(p => [p.id, p.name] as const)),
+    [dbPlants],
+  );
+
+  // Emergency raise: factory defaults to the user's own (alphabetically first
+  // when several); the equipment picker + Jharkhand-unit selector derive from it.
+  const defaultRaisePlantId = plantOptions[0]?.id ?? '';
   // Only plants that actually have chlorides/plasticiser units are "Jharkhand" plants —
   // the sole place the procurement-unit selector should appear.
   const jharkhandPlantIds = useMemo(
     () => new Set(scopeUnits.filter(u => /chlorid|plastic/i.test(u.code || '') || /chlorid|plastic/i.test(u.name)).map(u => u.plant_id)),
     [scopeUnits],
   );
-  const raisePlant = dbPlants.find(p => p.name === raiseForm.plant);
-  const raisePlantIsJharkhand = !!raisePlant && jharkhandPlantIds.has(raisePlant.id);
+  const raisePlantIsJharkhand = !!raiseForm.plant && jharkhandPlantIds.has(raiseForm.plant);
+  // No factory chosen ⇒ NO assets. Never fall back to the full register: at
+  // Rehla that would show SCPL's and SPPL's assets to an SPPL(K) technician,
+  // which is exactly the isolation the client asked for.
   const raiseFarAssets = useMemo(
-    () => (raisePlant ? farAssets.filter(a => a.plant_id === raisePlant.id) : farAssets),
-    [farAssets, raisePlant?.id], // eslint-disable-line react-hooks/exhaustive-deps
+    () => (raiseForm.plant ? farAssets.filter(a => a.plant_id === raiseForm.plant) : []),
+    [farAssets, raiseForm.plant],
   );
 
-  // Default the raise form's plant to the user's assigned plant when the panel opens.
+  // Default the raise form's factory to the user's own when the panel opens.
   useEffect(() => {
-    if (showRaisePanel) setRaiseForm(f => (f.plant ? f : { ...f, plant: defaultRaisePlant }));
-  }, [showRaisePanel, defaultRaisePlant]);
+    if (showRaisePanel) setRaiseForm(f => (f.plant ? f : { ...f, plant: defaultRaisePlantId }));
+  }, [showRaisePanel, defaultRaisePlantId]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
@@ -853,15 +892,15 @@ export function Maintenance() {
   };
   const fltPeriodic = schedules.filter(s =>
     matchQ(s.title, s.equipment, s.plants?.name)
-    && (fltPlant === 'all' || s.plants?.name === fltPlant)
+    && (fltPlant === 'all' || s.plant_id === fltPlant)
     && (fltStatus === 'all' || schedStatusOf(s) === fltStatus));
   const fltEmergency = emergencyTickets.filter(t =>
     matchQ(t.equipment, t.title, t.description, t.plants?.name, t.raised_by)
-    && (fltPlant === 'all' || t.plants?.name === fltPlant)
+    && (fltPlant === 'all' || t.plant_id === fltPlant)
     && (fltStatus === 'all' || t.status === fltStatus));
   const plantFilterOptions = [
     { value: 'all', label: t('common.allPlants') },
-    ...dbPlants.map(p => ({ value: p.name, label: p.name })),
+    ...dbPlants.map(p => ({ value: p.id, label: p.name })),
   ];
   const statusFilterOptions = tab === 'periodic'
     ? [
@@ -928,7 +967,7 @@ export function Maintenance() {
     if (!raiseForm.equipment.trim() || raising) return;
     setRaising(true);
     try {
-    const plant = dbPlants.find(p => p.name === raiseForm.plant);
+    const plant = dbPlants.find(p => p.id === raiseForm.plant);
     // Resolve the unit text ('chlorides'/'plasticiser') to its unit_id within
     // this plant — the scoping key used for routing + isolation.
     const unitRow = raiseForm.unit
@@ -1013,13 +1052,13 @@ export function Maintenance() {
 
   // ── Admin: edit / delete a ticket ───────────────────────────────────────────
   function startEdit(t: TicketRow) {
-    setEditForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plants?.name || '', status: t.status });
+    setEditForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plant_id || '', status: t.status });
     setEditingTicket(true);
   }
 
   async function saveEdit() {
     if (!selectedTicket) return;
-    const plant = dbPlants.find(p => p.name === editForm.plant);
+    const plant = dbPlants.find(p => p.id === editForm.plant);
     await updateRows('maintenance_tickets', {
       equipment: editForm.equipment,
       description: editForm.description || null,
@@ -1092,7 +1131,7 @@ export function Maintenance() {
   // Technician: open the revise form seeded from the current ticket.
   function startResubmit(t: TicketRow) {
     const assessment = /needs part/i.test(t.title || '') ? 'needs_part' : 'repairable';
-    setResubmitForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plants?.name || '', assessment });
+    setResubmitForm({ equipment: t.equipment || '', description: t.description || '', plant: t.plant_id || '', assessment });
     setResubmitPhotoBlob(null);
     setResubmitting(true);
   }
@@ -1108,11 +1147,11 @@ export function Maintenance() {
       const priorPhoto = selectedTicket.defective_raise_photo_url;
       if (resubmitPhotoBlob) {
         setUploading(true);
-        const r = await uploadMaintenancePhoto(resubmitPhotoBlob, { ticketId: selectedTicket.id, plantName: resubmitForm.plant || selectedTicket.plants?.name || '', photoType: 'completion', creator: activeProfile.name });
+        const r = await uploadMaintenancePhoto(resubmitPhotoBlob, { ticketId: selectedTicket.id, plantName: plantNameById.get(resubmitForm.plant) || selectedTicket.plants?.name || '', photoType: 'completion', creator: activeProfile.name });
         newPhotoUrl = r.secure_url;
         setUploading(false);
       }
-      const plant = dbPlants.find((p) => p.name === resubmitForm.plant);
+      const plant = dbPlants.find((p) => p.id === resubmitForm.plant);
       const restoreStatus = (selectedTicket.revision_prev_status as TicketStatus) || 'open';
       const title = `${resubmitForm.equipment} — ${resubmitForm.assessment === 'repairable' ? 'Repairable' : 'Needs part'}`;
       const patch: TicketUpdate = {
@@ -1382,14 +1421,20 @@ export function Maintenance() {
     if (!items.length || !selectedTicket || actionBusyRef.current) return;
     actionBusyRef.current = true;
     try {
-    const plant = dbPlants.find(p => p.name === selectedTicket.plants?.name);
+    const plant = dbPlants.find(p => p.id === selectedTicket.plant_id);
     // One store-request row per item — a ticket can need several parts at once.
     const rows = items.map(it => ({
       ticket_id: selectedTicket.id, part_name: it.partName,
       quantity: parseFloat(it.quantity) || null,
       unit: it.unit || 'Units',
       specification: it.specification || null,
+      // The two answers are deliberately separate columns:
+      //   plant_id        → the REQUESTING factory: who asked, and who pays
+      //   source_store_id → the store the part comes OUT of
+      // At Rehla these differ (three factories, one shared store); everywhere
+      // else they resolve to the same site, which is why nothing changes there.
       plant_id: plant?.id || selectedTicket.plant_id || null,
+      source_store_id: storeIdFor(selectedTicket.plant_id),
       store_item_id: it.storeItemId || null,
     }));
     await insertRows('maintenance_store_requests', rows);
@@ -1531,7 +1576,13 @@ export function Maintenance() {
       await insertRows('maintenance_store_requests', {
         ticket_id: selectedTicket.id, part_name: req.part_name, quantity: shortfall,
         specification: `${req.specification ? req.specification + ' · ' : ''}Shortfall — ${shortfall} of ${requestedQty} not in store`,
-        plant_id: selectedTicket.plant_id, store_item_id: req.store_item_id ?? null,
+        // The shortfall row is still a request from THIS factory against the
+        // SAME store — a partial fulfilment does not change where the part
+        // comes from. Set explicitly rather than leaning on the DB trigger
+        // (migration 65), so the intent is visible at the call site.
+        plant_id: selectedTicket.plant_id,
+        source_store_id: storeIdFor(selectedTicket.plant_id),
+        store_item_id: req.store_item_id ?? null,
         store_decision: 'unavailable', purchase_required: true, split_group: splitGroup,
       });
       notify({
@@ -1548,6 +1599,10 @@ export function Maintenance() {
       if (req.store_item_id) {
         await insertRows('store_stock_events', {
           item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'manual_edit',
+          // Where it moved / who it was for — a movement missing either is
+          // invisible to the per-factory reconciliation.
+          store_id: storeIdFor(selectedTicket.plant_id),
+          requesting_plant_id: selectedTicket.plant_id,
           qty_delta: (enteredQty as number) - (regQty as number), on_hand_after: null,
           ref: `store-check · ticket ${selectedTicket.id.slice(0, 8)}`,
           justification: `Register ${regQty} → counted ${enteredQty}. ${storeDecisionForm.qtyJustification.trim()}`,
@@ -1582,6 +1637,34 @@ export function Maintenance() {
     const reason = rejectReason.trim(); // optional note when rejecting this part
     await updateRows('maintenance_store_requests', { unit_head_approval: approved ? 'approved' : 'rejected' })
       .eq('id', req.id);
+
+    // Claim (or give back) the stock this decision commits.
+    //
+    // Stock only leaves the register at handover, so without a reservation
+    // three technicians drawing on the SAME shared Rehla row can each be told
+    // "1 in stock" for the same last unit and two of them find it gone. The
+    // reservation is per request, so approving here cannot consume another
+    // ticket's claim. Best-effort: a failure here must not block the approval
+    // the unit head has already made.
+    if (req.store_item_id && partAvailable) {
+      const qty = Number(req.quantity) || 0;
+      if (qty > 0) {
+        const { error: resErr } = await (supabase.rpc as any)('issue_store_item', {
+          payload: {
+            action: approved ? 'reserve' : 'release',
+            store_item_id: req.store_item_id,
+            store_request_id: req.id,
+            qty,
+            requesting_plant_id: selectedTicket.plant_id,
+            ref: `ticket ${selectedTicket.id.slice(0, 8)}`,
+            actor_name: activeProfile.name,
+          },
+        });
+        // eslint-disable-next-line no-console
+        if (resErr) console.error('[Maintenance] stock reservation failed:', resErr);
+      }
+    }
+
     if (approved && partAvailable) {
       notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else if (approved && !partAvailable) {
@@ -1735,19 +1818,36 @@ export function Maintenance() {
       if (req.store_item_id) {
         const qty = Number(req.quantity) || 0;
         if (fromOwnStore && qty > 0) {
-          // In-store track: issue from the register. Hard guard → on_hand can't go negative.
-          const { data: si } = await (supabase.from('store_items') as any).select('*').eq('id', req.store_item_id).single();
-          if (si) {
-            const issueQty = Math.min(qty, Math.max(0, Number(si.on_hand)));
-            const newOnHand = Number(si.on_hand) - issueQty;
-            await (supabase.from('store_items') as any)
-              .update({ issued_qty: Number(si.issued_qty) + issueQty, on_hand: newOnHand, updated_at: new Date().toISOString() }).eq('id', req.store_item_id);
-            await insertRows('store_stock_events', {
-              item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'issue',
-              qty_delta: -issueQty, on_hand_after: newOnHand, ref: `ticket ${selectedTicket.id.slice(0, 8)}`,
-              justification: `Handed over to technician · ${req.part_name}${issueQty < qty ? ` (only ${issueQty} of ${qty} were on hand)` : ''}`,
+          // In-store track: issue from the register through the atomic RPC.
+          //
+          // This used to be a client-side read-modify-write (select on_hand →
+          // compute → update). Two handovers of the same item both read 10,
+          // both wrote 5, and five units went missing from the books. With a
+          // private register per factory that race was rare; with three Rehla
+          // factories drawing on ONE row it is the normal case. issue_store_item
+          // does the read, the clamp, the reservation release and the audit
+          // event inside a single transaction under SELECT … FOR UPDATE.
+          const { data: res, error: issueErr } = await (supabase.rpc as any)('issue_store_item', {
+            payload: {
+              action: 'issue',
+              store_item_id: req.store_item_id,
+              store_request_id: req.id,
+              qty,
+              requesting_plant_id: selectedTicket.plant_id,
+              ref: `ticket ${selectedTicket.id.slice(0, 8)}`,
+              justification: `Handed over to technician · ${req.part_name}`,
               actor_name: activeProfile.name,
-            });
+            },
+          });
+          if (issueErr) throw issueErr;
+          // The RPC clamps to what was actually on hand — say so rather than
+          // letting the technician assume the full quantity was issued.
+          const short = Number(res?.short ?? 0);
+          if (short > 0) {
+            toast.error(t('maint.issuedShort', {
+              defaultValue: 'Only {{applied}} of {{requested}} {{part}} were in stock — {{short}} still outstanding.',
+              applied: Number(res?.applied ?? 0), requested: qty, part: req.part_name, short,
+            }));
           }
         } else if (!fromOwnStore) {
           // Procurement track: `qty` units were bought for the ticket (handed to the
@@ -1765,6 +1865,10 @@ export function Maintenance() {
             }).eq('id', req.store_item_id);
             await insertRows('store_stock_events', {
               item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'procure',
+              // Both facts, so the same row feeds a consolidated store report
+              // AND a per-factory consumption/cost report.
+              store_id: storeIdFor(selectedTicket.plant_id),
+              requesting_plant_id: selectedTicket.plant_id,
               qty_delta: bought, on_hand_after: newOnHand, ref: req.busy_transaction_ref || `ticket ${selectedTicket.id.slice(0, 8)}`,
               justification: `Procured ${bought} · ${qty} handed to technician${excess > 0 ? `, ${excess} added to stock` : ''} · ${req.part_name}`,
               actor_name: activeProfile.name,
@@ -1874,7 +1978,7 @@ export function Maintenance() {
     setScheduleForm({
       title: s.title,
       equipment: s.equipment,
-      plant: s.plants?.name || '',
+      plant: s.plant_id || '',
       frequency: s.frequency,
       description: s.description || '',
       firstDue: s.next_due_at ? s.next_due_at.split('T')[0] : today,
@@ -1893,7 +1997,7 @@ export function Maintenance() {
     setScheduleForm({
       title: `${s.title} (copy)`,
       equipment: s.equipment,
-      plant: s.plants?.name || '',
+      plant: s.plant_id || '',
       frequency: s.frequency,
       description: s.description || '',
       firstDue: today,
@@ -1968,7 +2072,7 @@ export function Maintenance() {
     try {
     // A linked FAR asset dictates the plant — never let a mismatched selection through.
     const linkedAsset = farAssets.find(a => a.id === scheduleForm.farAssetId);
-    const plant = dbPlants.find(p => p.name === scheduleForm.plant);
+    const plant = dbPlants.find(p => p.id === scheduleForm.plant);
     const payload = {
       title: scheduleForm.title, equipment: scheduleForm.equipment,
       plant_id: linkedAsset?.plant_id ?? plant?.id ?? null, frequency: scheduleForm.frequency as ScheduleRow['frequency'],
@@ -2856,36 +2960,24 @@ export function Maintenance() {
             value={raiseForm.equipment}
             assets={raiseFarAssets}
             onChange={v => setRaiseForm(f => ({ ...f, equipment: v, farAssetId: '', equipmentMark: '' }))}
-            onPick={a => setRaiseForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
+            onPick={a => setRaiseForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a?.plant_id ?? f.plant }))}
           />
           {raiseForm.equipment.trim().length > 1 && (raiseForm.farAssetId
             ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>{t('maint.linkedToFarAsset', '✓ Linked to FAR asset')}{raiseForm.equipmentMark ? ` · ${raiseForm.equipmentMark}` : ''}.</div>
             : <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>{t('maint.manualEntryNotInFar', '✎ Manual entry — not in the FAR (allowed; the notification flags it).')}</div>)}
         </PanelField>
-        {raisePlantIsJharkhand ? (
-          <PanelRow>
-            <PanelField label={t('common.plant')}>
-              <PanelSelect value={raiseForm.plant} onChange={e => { const name = e.target.value; const pid = dbPlants.find(p => p.name === name)?.id; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: name, unit: jk ? f.unit : '' })); }}>
-                <option value="">{t('maint.selectPlant')}</option>
-                {plantNames.map(p => <option key={p}>{p}</option>)}
-              </PanelSelect>
-            </PanelField>
-            <PanelField label={t('maint.procurementUnit')}>
-              <PanelSelect value={raiseForm.unit} onChange={e => setRaiseForm(f => ({ ...f, unit: e.target.value }))}>
-                <option value="">{t('maint.notJharkhand')}</option>
-                <option value="chlorides">Suntek Chlorides</option>
-                <option value="plasticiser">Suntek Plasticiser</option>
-              </PanelSelect>
-            </PanelField>
-          </PanelRow>
-        ) : (
-          <PanelField label={t('common.plant')}>
-            <PanelSelect value={raiseForm.plant} onChange={e => { const name = e.target.value; const pid = dbPlants.find(p => p.name === name)?.id; const jk = pid ? jharkhandPlantIds.has(pid) : false; setRaiseForm(f => ({ ...f, plant: name, unit: jk ? f.unit : '' })); }}>
-              <option value="">{t('maint.selectPlant')}</option>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
-            </PanelSelect>
-          </PanelField>
-        )}
+        {/* No procurement-unit selector.
+            Chlorides and Plasticiser were sub-units of a single 'Rehla' plant,
+            invented to route procurement inside it. They are now first-class
+            factories — SCPL – Rehla IS chlorides, SPPL – Rehla IS plasticiser —
+            so picking a factory already says which unit it is. Asking again was
+            asking the same question twice. */}
+        <PanelField label={t('common.plant')}>
+          <PanelSelect value={raiseForm.plant} onChange={e => setRaiseForm(f => ({ ...f, plant: e.target.value, unit: '' }))}>
+            <option value="">{t('maint.selectPlant')}</option>
+            {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </PanelSelect>
+        </PanelField>
         <PanelField label={t('maint.issueDescription')}>
           <PanelTextarea value={raiseForm.description} onChange={e => setRaiseForm(f => ({ ...f, description: e.target.value }))} placeholder={t('maint.issuePlaceholder')} />
         </PanelField>
@@ -3033,7 +3125,7 @@ export function Maintenance() {
                   <PanelField label={t('common.plant')}>
                     <PanelSelect value={editForm.plant} onChange={e => setEditForm(f => ({ ...f, plant: e.target.value }))}>
                       <option value="">{t('maint.selectPlant')}</option>
-                      {plantNames.map(p => <option key={p}>{p}</option>)}
+                      {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </PanelSelect>
                   </PanelField>
                   <PanelField label={t('maint.colStatus')}>
@@ -3083,7 +3175,7 @@ export function Maintenance() {
                   <PanelField label={t('common.plant')}>
                     <PanelSelect value={resubmitForm.plant} onChange={e => setResubmitForm(f => ({ ...f, plant: e.target.value }))}>
                       <option value="">{t('maint.selectPlant')}</option>
-                      {plantNames.map(p => <option key={p}>{p}</option>)}
+                      {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </PanelSelect>
                   </PanelField>
                   <PanelField label={t('maint.assessmentLabel', 'Assessment')}>
@@ -3134,7 +3226,7 @@ export function Maintenance() {
             value={scheduleForm.equipment}
             assets={farAssets}
             onChange={v => setScheduleForm(f => ({ ...f, equipment: v }))}
-            onPick={a => setScheduleForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a ? (dbPlants.find(p => p.id === a.plant_id)?.name ?? f.plant) : f.plant }))}
+            onPick={a => setScheduleForm(f => ({ ...f, farAssetId: a?.id ?? '', equipmentMark: a?.identification_mark ?? '', plant: a?.plant_id ?? f.plant }))}
           />
           {scheduleForm.equipment.trim().length > 1 && (scheduleForm.farAssetId
             ? <div style={{ fontSize: 11, color: '#16A34A', marginTop: 4 }}>{t('maint.linkedToFarAsset', '✓ Linked to FAR asset')}{scheduleForm.equipmentMark ? ` · ${scheduleForm.equipmentMark}` : ''}.</div>
@@ -3149,7 +3241,7 @@ export function Maintenance() {
           <PanelField label={scheduleForm.farAssetId ? t('maint.plantSetByFar', 'Plant (set by FAR asset)') : t('common.plant')}>
             <PanelSelect value={scheduleForm.plant} disabled={!!scheduleForm.farAssetId} onChange={e => setScheduleForm(f => ({ ...f, plant: e.target.value }))}>
               <option value="">{t('maint.allPlantsOption', '— All plants —')}</option>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
+              {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </PanelSelect>
             {scheduleForm.farAssetId && <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{t('maint.lockedToFarPlant', "🔒 Locked to the FAR asset's plant.")}</div>}
           </PanelField>

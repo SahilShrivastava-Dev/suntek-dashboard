@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Users, UserCheck, Shield } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { fetchActivePlants } from '../../lib/plants';
+import { usePlantScope } from '../../contexts/PlantScopeContext';
 import { insertRows, updateRows } from '../../lib/db';
 import { createLogin, updateLogin } from '../../lib/adminUsers';
 import { useMentionNotifier } from '../../lib/mentions';
@@ -88,19 +90,23 @@ const ALL_DASHBOARD_SECTIONS: { route: string; label: string; labelKey: string }
   { route: '/dashboard/purchase/labour',  label: 'Labour Costs',               labelKey: 'userMgmt.sec_labourCosts' },
 ];
 
-const LEVEL_OPTIONS = ['L1', 'L2', 'L3', 'L4'];
+// Fallback only. The real ladder comes from the `tiers` table (see levelOptions
+// below) — this list was already stale, missing the top tier entirely, which is
+// exactly what hard-coding a hierarchy gets you.
+const LEVEL_OPTIONS_FALLBACK = ['L0', 'L1', 'L2', 'L3', 'L4'];
 
 /** Auto-derive a slug id from a role label. */
 function slugify(s: string): string {
   return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+// Seniority runs L0 (top) → L4 (entry), so the warmest colour is L0.
 const LEVEL_COLOR: Record<string, { bg: string; color: string }> = {
-  L5: { bg: '#FEF2F2', color: '#DC2626' },
-  L4: { bg: '#FFF7ED', color: '#EA580C' },
-  L3: { bg: '#EFF6FF', color: '#2563EB' },
-  L2: { bg: '#F0FDF4', color: '#16A34A' },
-  L1: { bg: '#F5F3FF', color: '#7C3AED' },
+  L0: { bg: '#FEF2F2', color: '#DC2626' },
+  L1: { bg: '#FFF7ED', color: '#EA580C' },
+  L2: { bg: '#EFF6FF', color: '#2563EB' },
+  L3: { bg: '#F0FDF4', color: '#16A34A' },
+  L4: { bg: '#F5F3FF', color: '#7C3AED' },
 };
 
 // Colours only — the visible label is translated at the render site.
@@ -127,6 +133,7 @@ const BLANK_FORM = {
   is_global: false,
   plant_ids: [] as string[],
   unit_ids: [] as string[],
+  store_ids: [] as string[],
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -137,6 +144,8 @@ export function UserManagement() {
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
   const { activeProfile, roles, rolesStatus, refreshRoles, can } = useRoleContext();
+  // Store master + factory→store mapping for the store-access picker.
+  const { stores, storeIdFor } = usePlantScope();
   const { stepUp, modal: stepUpModal } = useStepUp();
   // Role dropdown options sourced from the live role catalog.
   const roleOptions: RoleOption[] = roles.map(r => ({ id: r.id, label: r.label, level: r.level }));
@@ -185,14 +194,14 @@ export function UserManagement() {
   const [roleForm, setRoleForm] = useState<{
     label: string; id: string; level: string; home_route: string;
     standalone_only: boolean; allowed_routes: string[]; capabilities: string[];
-  }>({ label: '', id: '', level: 'L1', home_route: '/dashboard', standalone_only: false, allowed_routes: [], capabilities: [] });
+  }>({ label: '', id: '', level: 'L4', home_route: '/dashboard', standalone_only: false, allowed_routes: [], capabilities: [] });
   // While creating, keep the slug auto-synced to the label until the user edits it.
   const [slugTouched, setSlugTouched] = useState(false);
 
   function openRoleAdd() {
     setEditingRole(null);
     setSlugTouched(false);
-    setRoleForm({ label: '', id: '', level: 'L1', home_route: '/dashboard', standalone_only: false, allowed_routes: [], capabilities: [] });
+    setRoleForm({ label: '', id: '', level: 'L4', home_route: '/dashboard', standalone_only: false, allowed_routes: [], capabilities: [] });
     setShowRoleForm(true);
   }
 
@@ -284,7 +293,7 @@ export function UserManagement() {
     setLoading(true);
     const [usersRes, { data: plantsData }, { data: unitsData }, { data: tiersData }] = await Promise.all([
       supabase.from('user_accounts').select('*, plants(name)').order('created_at', { ascending: false }).returns<DisplayUser[]>(),
-      supabase.from('plants').select('id, name').returns<{ id: string; name: string }[]>(),
+      fetchActivePlants<{ id: string; name: string }>('id, name'),
       supabase.from('units').select('id, plant_id, name').order('name').returns<{ id: string; plant_id: string; name: string }[]>(),
       supabase.from('tiers').select('id, label, rank').order('rank').returns<{ id: string; label: string; rank: number }[]>(),
     ]);
@@ -368,15 +377,19 @@ export function UserManagement() {
       is_global: !!u.is_global,
       plant_ids: [],
       unit_ids: [],
+      store_ids: [],
     });
     setSaved(false);
     setShowPanel(true);
     // Load this user's plant/unit memberships + roles for the pickers.
-    const [{ data: ups }, { data: uus }, { data: urs }] = await Promise.all([
+    const [{ data: ups }, { data: uus }, { data: urs }, ussRes] = await Promise.all([
       supabase.from('user_plants').select('plant_id').eq('user_account_id', u.id).returns<{ plant_id: string }[]>(),
       supabase.from('user_units').select('unit_id').eq('user_account_id', u.id).returns<{ unit_id: string }[]>(),
       supabase.from('user_roles').select('role_id').eq('user_account_id', u.id).returns<{ role_id: string }[]>(),
+      // Absent before migration 59 — resolves with an error rather than throwing.
+      supabase.from('user_stores').select('store_id').eq('user_account_id', u.id).returns<{ store_id: string }[]>(),
     ]);
+    const uss = ussRes.data;
     // Keep the primary role first so it stays the display/login role. Drop the
     // retired night_manager role so it never re-appears as a selectable/primary role.
     const roleIds = (urs || []).map(r => r.role_id).filter(id => id !== 'night_manager');
@@ -386,6 +399,7 @@ export function UserManagement() {
       ...f,
       plant_ids: (ups || []).map(r => r.plant_id),
       unit_ids: (uus || []).map(r => r.unit_id),
+      store_ids: (uss || []).map(r => r.store_id),
       role_ids: ordered.length ? ordered : f.role_ids,
       role_id: ordered[0] || '',
     }));
@@ -504,6 +518,10 @@ export function UserManagement() {
       await (supabase.from('user_plants') as any).delete().eq('user_account_id', accountId);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (supabase.from('user_units') as any).delete().eq('user_account_id', accountId);
+      // Store grants are rewritten the same way. Safe before migration 59 —
+      // the table simply does not exist and the call resolves with an error.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase.from('user_stores') as any).delete().eq('user_account_id', accountId);
       if (!form.is_global) {
         if (form.plant_ids.length) {
           await insertRows('user_plants', form.plant_ids.map(pid => ({ user_account_id: accountId, plant_id: pid })));
@@ -515,6 +533,12 @@ export function UserManagement() {
         });
         if (validUnitIds.length) {
           await insertRows('user_units', validUnitIds.map(uid => ({ user_account_id: accountId, unit_id: uid })));
+        }
+        // Store access is stored as its own grant — NOT derived from the
+        // factories above. That separation is the whole point: a shared-store
+        // keeper can issue for three factories without gaining their FARs.
+        if (form.store_ids.length) {
+          await insertRows('user_stores', form.store_ids.map(sid => ({ user_account_id: accountId, store_id: sid })));
         }
       }
     }
@@ -880,30 +904,47 @@ export function UserManagement() {
                 {plants.length === 0 && <div style={{ fontSize: 11, color: '#94A3B8' }}>{t('userMgmt.noPlants')}</div>}
               </div>
 
-              {form.plant_ids.some(pid => units.some(u => u.plant_id === pid)) && (
+              {/* No per-unit narrowing.
+                  Chlorides and Plasticiser existed as sub-units of a single
+                  'Rehla' plant. They are now separate factories (SCPL – Rehla
+                  is chlorides, SPPL – Rehla is plasticiser), so factory access
+                  already expresses what unit access used to. `units` and
+                  user_units stay in the schema so historical tickets keep
+                  resolving; they are simply no longer assignable. */}
+
+              {/* ── Store access — a SEPARATE grant ─────────────────────────
+                  Deliberately not derived from the factories above. A Rehla
+                  store keeper serves SCPL, SPPL and SPPL(K) from one shared
+                  register, but must NOT thereby gain their asset registers —
+                  so store access is ticked here on its own.
+                  Selecting no store still leaves the user reaching the store
+                  of any factory they belong to, which is how every
+                  one-factory-one-store site has always behaved. */}
+              {stores.length > 0 && (
                 <>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '12px 0 4px' }}>{t('userMgmt.unitsLabel')}</div>
-                  <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>{t('userMgmt.unitsHelper')}</div>
-                  {form.plant_ids.map(pid => {
-                    const pUnits = units.filter(u => u.plant_id === pid);
-                    if (!pUnits.length) return null;
-                    return (
-                      <div key={pid} style={{ marginBottom: 8 }}>
-                        <div style={{ fontSize: 11, color: '#475569', fontWeight: 600, marginBottom: 4 }}>{plants.find(p => p.id === pid)?.name}</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {pUnits.map(u => {
-                            const on = form.unit_ids.includes(u.id);
-                            return (
-                              <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#334155', cursor: 'pointer', padding: '5px 8px', borderRadius: 8, background: on ? '#EFF6FF' : '#fff', border: '1px solid #E2E8F0' }}>
-                                <input type="checkbox" checked={on} onChange={() => setForm(f => ({ ...f, unit_ids: on ? f.unit_ids.filter(x => x !== u.id) : [...f.unit_ids, u.id] }))} />
-                                <span>{u.name}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '12px 0 4px' }}>{t('userMgmt.storesLabel', 'Store access')}</div>
+                  <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>
+                    {t('userMgmt.storesHelper', 'Extra stores this user may issue from — e.g. a shared store serving several factories. Does NOT grant access to those factories\u2019 assets or maintenance.')}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {stores.map(st => {
+                      const on = form.store_ids.includes(st.id);
+                      // Reachable anyway through a selected factory — shown so
+                      // the admin can see it is already covered.
+                      const viaPlant = !on && form.plant_ids.some(pid => storeIdFor(pid) === st.id);
+                      return (
+                        <label key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#334155', cursor: 'pointer', padding: '6px 8px', borderRadius: 8, background: on ? '#EFF6FF' : '#fff', border: '1px solid #E2E8F0' }}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => setForm(f => ({ ...f, store_ids: on ? f.store_ids.filter(x => x !== st.id) : [...f.store_ids, st.id] }))}
+                          />
+                          <span>{st.name}</span>
+                          {viaPlant && <span style={{ fontSize: 10, color: '#94A3B8' }}>{t('userMgmt.storeViaFactory', '· via factory')}</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
                 </>
               )}
             </>
@@ -1135,7 +1176,13 @@ export function UserManagement() {
         <PanelRow>
           <PanelField label={t('userMgmt.roleLevelLabel', 'Level')}>
             <PanelSelect value={roleForm.level} onChange={e => setRoleForm(f => ({ ...f, level: e.target.value }))}>
-              {(tiers.length ? tiers.map(tr => ({ value: tr.id, label: tr.label })) : LEVEL_OPTIONS.map(l => ({ value: l, label: l })))
+              {/* Ordered most-senior first. `rank` is what defines seniority —
+                  it runs opposite to the id (L0 = rank 50), so sort on rank,
+                  never on the id string. Shown as "L0 · Admin" so the level and
+                  what it means are both visible. */}
+              {(tiers.length
+                ? [...tiers].sort((a, b) => b.rank - a.rank).map(tr => ({ value: tr.id, label: `${tr.id} · ${tr.label}` }))
+                : LEVEL_OPTIONS_FALLBACK.map(l => ({ value: l, label: l })))
                 .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </PanelSelect>
           </PanelField>

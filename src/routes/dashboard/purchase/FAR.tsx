@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows, updateRows } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
@@ -229,7 +230,6 @@ function AssetDetailTable({ assets, showPlant, onUploadPic, onViewPic }: {
   );
 }
 
-const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 const ACCOUNT_HEADS = ['Plant & Machinery', 'Electrical Equipment', 'Vehicles', 'Furniture & Fixtures', 'Computer & Peripherals', 'Office Equipment'];
 
 export function FAR() {
@@ -268,7 +268,13 @@ export function FAR() {
   const [equipPlantFilter, setEquipPlantFilter] = useState<string[]>([]); // empty = all plants (combined)
   const [equipOpenTable, setEquipOpenTable] = useState(false);            // the big list is hidden until asked
   const [dbPlants, setDbPlants] = useState<{ id: string; name: string }[]>([]);
-  const [importPlantIds, setImportPlantIds] = useState<string[]>([]); // factories this FAR belongs to (multi-select)
+  // The ONE factory this FAR belongs to. Formerly a multi-select that
+  // flat-mapped every parsed row across each chosen factory — "sharing" a FAR
+  // by physically copying it. That is how the live database ended up with the
+  // same 324 assets under two plants, double-counting asset value and making
+  // per-factory FAR reporting impossible. An asset sits in exactly one
+  // register; the client's requirement is "FAR different for all 3".
+  const [importPlantId, setImportPlantId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   // Maintenance/repair cost register (annual, for insurance)
@@ -289,13 +295,12 @@ export function FAR() {
     mark: '', model: '', capacity: '', origin: 'India',
     year: new Date().getFullYear().toString(),
     value: '', invoice: '', purchaseDate: today,
-    account: 'Plant & Machinery', plant: 'SHD',
+    account: 'Plant & Machinery', plant: '',
   });
 
   async function load() {
     try {
-      const { data: plantsData } = await supabase.from('plants').select('id, name')
-        .returns<{ id: string; name: string }[]>();
+      const { data: plantsData } = await fetchActivePlants<{ id: string; name: string }>('id, name');
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
       const { data, error } = await withEmbedFallback(
@@ -355,7 +360,12 @@ export function FAR() {
 
   useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
+  // Factory options come from the DB — never a hard-coded list, which a rename
+  // would leave stale. The form stores the plant ID, not the display name.
+  const plantOptions = useMemo(
+    () => [...(allowedPlants.length > 0 ? allowedPlants : dbPlants)].sort((a, b) => a.name.localeCompare(b.name)),
+    [allowedPlants, dbPlants],
+  );
 
   // Plants present in the FAR → the combine/individual filter chips.
   const plantsInFar = useMemo(() => {
@@ -437,7 +447,7 @@ export function FAR() {
   // ── Bulk import: file → cloud copy → AI parse → verify → register ─────────
   function resetImport() {
     setImportStage('idle'); setParsedRows([]); setImportError(null);
-    setImportedCount(0); setCloudUrl(null); setImportFileName(''); setImportPlantIds([]);
+    setImportedCount(0); setCloudUrl(null); setImportFileName(''); setImportPlantId('');
   }
   async function handleImportFile(file: File) {
     setImportError(null); setImportFileName(file.name); setParsedRows([]);
@@ -461,7 +471,7 @@ export function FAR() {
       setParsedRows(rows);
       // Pre-select the factory only when there's exactly one option; else force a choice.
       const opts = allowedPlants.length ? allowedPlants : dbPlants;
-      setImportPlantIds(opts.length === 1 ? [opts[0].id] : []);
+      setImportPlantId(opts.length === 1 ? opts[0].id : '');
       setImportStage('review');
     } catch (e) {
       setImportError(e instanceof Error ? e.message : String(e));
@@ -469,12 +479,12 @@ export function FAR() {
     }
   }
   async function confirmImport() {
-    if (!importPlantIds.length) { setImportError(t('far.selectFactoryError', 'Select at least one factory this FAR belongs to.')); setImportStage('error'); return; }
+    if (!importPlantId) { setImportError(t('far.selectFactoryError', 'Select the factory this FAR belongs to.')); setImportStage('error'); return; }
     setImportStage('importing');
     try {
-      // A shared FAR can cover several factories → register the assets for each.
-      const payload = importPlantIds.flatMap((plantId) => parsedRows.map((r) => ({
-        plant_id: plantId,
+      // One row per asset, owned by exactly one factory.
+      const payload = parsedRows.map((r) => ({
+        plant_id: importPlantId,
         name: r.name || r.mark || r.model || 'Unnamed asset',
         identification_mark: r.mark || null,
         make: r.make || null,
@@ -488,7 +498,7 @@ export function FAR() {
         invoice_no: r.invoice || null,
         purchase_date: normDate(r.purchaseDate),
         account_head: r.account || null,
-      })));
+      }));
       const { error } = await insertRows('fixed_assets', payload);
       if (error) throw error;
       setImportedCount(payload.length);
@@ -526,8 +536,7 @@ export function FAR() {
 
   async function handleSave() {
     if (!form.mark.trim() || !form.model.trim()) return;
-    const plant = dbPlants.find(p => p.name === form.plant);
-    const plantId = plant?.id || dbPlants[0]?.id || null;
+    const plantId = form.plant || plantOptions[0]?.id || null;
     const { data, error } = await insertRows('fixed_assets', {
       plant_id: plantId,
       name: form.mark,
@@ -548,7 +557,7 @@ export function FAR() {
     }
     if (data) setAssets(prev => [data as AssetRow, ...prev]);
     setSaved(true);
-    setTimeout(() => { setOpen(false); setSaved(false); setForm({ mark: '', model: '', capacity: '', origin: 'India', year: new Date().getFullYear().toString(), value: '', invoice: '', purchaseDate: today, account: 'Plant & Machinery', plant: 'SHD' }); }, 1600);
+    setTimeout(() => { setOpen(false); setSaved(false); setForm({ mark: '', model: '', capacity: '', origin: 'India', year: new Date().getFullYear().toString(), value: '', invoice: '', purchaseDate: today, account: 'Plant & Machinery', plant: plantOptions[0]?.id ?? '' }); }, 1600);
   }
 
   function handleClose() { setOpen(false); setSaved(false); }
@@ -696,20 +705,18 @@ export function FAR() {
                 </div>
                 {/* Which factory/factories does this FAR belong to? (multi-select — a shared FAR can cover several) */}
                 <div style={{ border: '1px solid #FDE68A', background: '#FFFDF5', borderRadius: 10, padding: 12, marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', textTransform: 'uppercase', marginBottom: 6 }}>{t('far.factoryBelongsTo', 'Factory / factories this FAR belongs to *')}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', textTransform: 'uppercase', marginBottom: 6 }}>{t('far.factoryBelongsTo', 'Factory this FAR belongs to *')}</div>
                   <div className="flex gap-2 flex-wrap">
                     {(allowedPlants.length ? allowedPlants : dbPlants).map(p => {
-                      const on = importPlantIds.includes(p.id);
+                      const on = importPlantId === p.id;
                       return (
-                        <button key={p.id} onClick={() => setImportPlantIds(ids => on ? ids.filter(x => x !== p.id) : [...ids, p.id])}
+                        <button key={p.id} onClick={() => setImportPlantId(p.id)}
                           className={`chip${on ? ' active' : ''}`}>{on ? '✓ ' : ''}{p.name}</button>
                       );
                     })}
                   </div>
                   <div style={{ fontSize: 11, color: '#A16207', marginTop: 6 }}>
-                    {importPlantIds.length > 1
-                      ? t('far.assetsPerFactoryHint', { defaultValue: 'These {{rows}} assets will be registered for each of the {{plants}} selected factories.', rows: parsedRows.length, plants: importPlantIds.length })
-                      : t('far.selectFactoryHint', 'Select one, or multiple if this single FAR is shared across factories.')}
+                    {t('far.selectFactoryHint', 'Each asset belongs to exactly one factory. Factories that share a store still keep separate registers — import each factory\u2019s FAR separately.')}
                   </div>
                 </div>
                 <div className="overflow-x-auto scroll-x" style={{ maxHeight: 280 }}>
@@ -726,8 +733,8 @@ export function FAR() {
                 </div>
                 <div className="flex gap-2 mt-3">
                   <button onClick={() => resetImport()} className="chip">{t('far.cancel')}</button>
-                  <button onClick={confirmImport} disabled={!importPlantIds.length} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" style={{ background: importPlantIds.length ? '#16A34A' : '#94A3B8', opacity: importPlantIds.length ? 1 : 0.6 }}>
-                    ✓ {t('far.registerNAssets', { count: parsedRows.length * Math.max(1, importPlantIds.length) })}
+                  <button onClick={confirmImport} disabled={!importPlantId} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm" style={{ background: importPlantId ? '#16A34A' : '#94A3B8', opacity: importPlantId ? 1 : 0.6 }}>
+                    ✓ {t('far.registerNAssets', { count: parsedRows.length })}
                   </button>
                 </div>
               </>
@@ -865,7 +872,8 @@ export function FAR() {
           </PanelField>
           <PanelField label={t('far.fldPlant')}>
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
+              {!form.plant && <option value="">{t('far.selectFactory', 'Select factory…')}</option>}
+              {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </PanelSelect>
           </PanelField>
         </PanelRow>

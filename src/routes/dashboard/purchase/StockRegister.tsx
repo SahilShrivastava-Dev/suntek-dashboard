@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows } from '../../../components/ui/states';
@@ -15,8 +16,10 @@ import { withEmbedFallback } from '../../../lib/scopedList';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { parseStockFile, reconcile, type StockParseResult, type MonthParse, type MonthItem, type Anomaly } from '../../../lib/store/parseStockFile';
 import { indexResolutions, joinAnomalies, type AnomalyResolutionRow, type ReviewedAnomaly } from '../../../lib/store/anomalyKeys';
+import { registerIdOf } from '../../../lib/store/registers';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { AnomalyReviewModal } from './AnomalyReviewModal';
+import { StoreReconciliation } from './StoreReconciliation';
 import type { Database } from '../../../lib/database.types';
 
 type StockItem = Database['public']['Tables']['store_items']['Row'];
@@ -92,7 +95,7 @@ const inputStyle: React.CSSProperties = {
 export function StockRegister() {
   const { t } = useTranslation();
   const toast = useToast();
-  const { scopeQuery, allowedPlants } = usePlantScope();
+  const { scopeQuery, allowedPlants, stores, storeIdFor } = usePlantScope();
   const { activeProfile } = useRoleContext();
 
   const [items, setItems] = useState<(StockItem & { plants?: { name: string | null } | null })[]>([]);
@@ -126,7 +129,7 @@ export function StockRegister() {
 
   async function load() {
     try {
-      const { data: pl } = await supabase.from('plants').select('id, name').returns<Plant[]>();
+      const { data: pl } = await fetchActivePlants<Plant>('id, name');
       setPlants(pl || []);
       const { data: si } = await withEmbedFallback(
         scopeQuery(supabase.from('store_items').select('*, plants(name)')).order('item_name').returns<(StockItem & { plants?: { name: string | null } | null })[]>(),
@@ -161,11 +164,17 @@ export function StockRegister() {
   // reconciled independently — same-named items in different plants are distinct — then
   // the per-plant anomalies are combined.
   const anomalies = useMemo(() => {
-    const scoped = plantFilter.length ? months.filter(m => m.plant_id && plantFilter.includes(m.plant_id)) : months;
+    // Same register key as the chips and the table — a monthly snapshot belongs
+    // to a STORE once migration 59 exists. Filtering these by plant_id while the
+    // chips carry store ids would silently reconcile nothing.
+    const monthRegisterId = (m: StockMonthRow) => registerIdOf(m);
+    const scoped = plantFilter.length
+      ? months.filter(m => { const id = monthRegisterId(m); return id && plantFilter.includes(id); })
+      : months;
     if (!scoped.length) return [];
     const byPlant = new Map<string, StockMonthRow[]>();
     for (const r of scoped) {
-      const k = r.plant_id || '—';
+      const k = monthRegisterId(r) || '—';
       const arr = byPlant.get(k);
       if (arr) arr.push(r); else byPlant.set(k, [r]);
     }
@@ -173,14 +182,15 @@ export function StockRegister() {
     for (const [pid, rows] of byPlant.entries()) {
       const ms = monthsFromRows(rows);
       if (!ms.length) continue;
-      const plant = pid === '—' ? undefined : plantName(pid);
+      // `pid` may now be a store id, so resolve the label from either master.
+      const plant = pid === '—' ? undefined : (stores.find(s => s.id === pid)?.name ?? plantName(pid));
       const periodMonth = ms[ms.length - 1].periodMonth;
       for (const a of reconcile(ms.length >= 2 ? ms[ms.length - 2] : null, ms[ms.length - 1])) {
         out.push({ anomaly: a, plant, plantId: pid === '—' ? null : pid, periodMonth });
       }
     }
     return out;
-  }, [months, plantFilter, plants]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [months, plantFilter, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Join computed anomalies to their persisted review state (natural-key match).
   const reviewed = useMemo(() => {
@@ -204,31 +214,61 @@ export function StockRegister() {
     return months.reduce((mx, m) => (m.period_month > mx ? m.period_month : mx), months[0].period_month);
   }, [months]);
 
-  // Plants that actually have stock rows → the filter chips.
+  /**
+   * The register a stock row belongs to. MUST be the same expression the filter
+   * below uses — the chips are keyed by whatever this returns, so if the two
+   * disagree every chip selects nothing.
+   *
+   * store_id once migration 59 exists (the three Rehla factories then share one
+   * register and appear as a single chip); plant_id before it.
+   */
+  // Shared helper (lib/store/registers) — the chips, the table and the anomaly
+  // reconciler must all key a row the same way, or a chip selects nothing.
+
+  // Registers that actually have stock rows → the filter chips.
   const plantsInData = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const it of items) if (it.plant_id) seen.set(it.plant_id, it.plants?.name || plantName(it.plant_id));
+    for (const it of items) {
+      const id = registerIdOf(it);
+      if (!id) continue;
+      const label = it.store_id
+        ? (stores.find(s => s.id === it.store_id)?.name ?? t('storereq.store', 'Store'))
+        : (it.plants?.name || plantName(it.plant_id));
+      seen.set(id, label);
+    }
     return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [items, plants]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function togglePlant(id: string) { setPlantFilter(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]); }
 
-  // Merge identical items across the selected plants (sum on-hand + issued),
-  // so combining SPPL + Rehla shows 58, not two 29 rows.
+  // Group identical items across the selected registers.
+  //
+  // This merge used to exist to HIDE a bug: the Rehla store had been imported
+  // twice (once as 'Rehla', once as 'SPPL'), so the same 434 items appeared as
+  // two sets of rows and summing them made the totals look right whenever both
+  // plants were selected — and wrong whenever only one was. Migration 60
+  // collapses those copies into one Rehla Common Store, so after it runs each
+  // item is a single row and this loop simply passes it through.
+  //
+  // It is kept because it is still correct and still needed for the genuine
+  // case: a user with access to several SEPARATE stores (say Ganjam and
+  // Sikandarabad) viewing them together. `stores` on each row records which
+  // register each contribution came from, so the breakdown stays visible.
   const merged = useMemo<MergedRow[]>(() => {
     const q = search.trim().toLowerCase();
     const map = new Map<string, MergedRow>();
     for (const it of items) {
-      if (plantFilter.length && !(it.plant_id && plantFilter.includes(it.plant_id))) continue;
+      const regId = registerIdOf(it);
+      if (plantFilter.length && !(regId && plantFilter.includes(regId))) continue;
       if (q && !(it.item_name.toLowerCase().includes(q) || (it.equipment || '').toLowerCase().includes(q) || (it.model || '').toLowerCase().includes(q))) continue;
       const key = it.item_name.toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim();
-      const store = { id: it.id, plantId: it.plant_id, plant: it.plants?.name || plantName(it.plant_id), onHand: Number(it.on_hand), issued: Number(it.issued_qty), procured: Number(it.ticket_procured_qty || 0), repaired: Number(it.repaired_qty || 0), raw: it };
+      const store = { id: it.id, plantId: it.plant_id, plant: (it.store_id ? stores.find(s => s.id === it.store_id)?.name : null) || it.plants?.name || plantName(it.plant_id), onHand: Number(it.on_hand), issued: Number(it.issued_qty), procured: Number(it.ticket_procured_qty || 0), repaired: Number(it.repaired_qty || 0), raw: it };
       const ex = map.get(key);
       if (ex) { ex.onHand += store.onHand; ex.issued += store.issued; ex.procured += store.procured; ex.repaired += store.repaired; ex.stores.push(store); }
       else map.set(key, { key, itemName: it.item_name, equipment: it.equipment || '', model: it.model, unit: it.unit || '', onHand: store.onHand, issued: store.issued, procured: store.procured, repaired: store.repaired, stores: [store] });
     }
     return [...map.values()].sort((a, b) => a.itemName.localeCompare(b.itemName));
-  }, [items, plantFilter, search, plants]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, plantFilter, search, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = useMemo(() => {
     let inStock = 0, low = 0, out = 0;
@@ -291,8 +331,9 @@ export function StockRegister() {
 
       // 2) Replace this plant's month snapshots (the file is the source of truth).
       await supabase.from('store_stock_months').delete().eq('plant_id', plantId as string).in('period_month', monthDates);
+      const importStoreId = storeIdFor(plantId as string);
       const monthRows = res.months.flatMap(m => m.items.map(it => ({
-        upload_id: uploadId, plant_id: plantId, period_month: m.periodMonth, item_name: it.itemName, unit: it.unit,
+        upload_id: uploadId, plant_id: plantId, store_id: importStoreId, period_month: m.periodMonth, item_name: it.itemName, unit: it.unit,
         opening: it.opening, purchase_opening: it.purchaseOpening, purchased: it.purchased, used: it.used, computed_closing: it.closing,
       })));
       for (let i = 0; i < monthRows.length; i += CHUNK) {
@@ -303,12 +344,20 @@ export function StockRegister() {
       // 3) Seed the living register from the latest month's computed closing.
       const nowIso = new Date().toISOString();
       const itemRows = latest.items.map(it => ({
-        plant_id: plantId, item_name: it.itemName, unit: it.unit, equipment: it.equipment, model: it.model,
+        // store_id decides which register the row lands in. A DB trigger
+        // (migration 62) fills it from plant_id if omitted, but sending it
+        // explicitly is what lets the upsert below match on it.
+        plant_id: plantId, store_id: importStoreId, item_name: it.itemName, unit: it.unit, equipment: it.equipment, model: it.model,
         baseline_qty: it.closing, baseline_month: latest.periodMonth, procured_qty: 0, issued_qty: 0, manual_delta: 0,
         ticket_procured_qty: 0, on_hand: it.closing, updated_at: nowIso,
       }));
       for (let i = 0; i < itemRows.length; i += CHUNK) {
-        const { error } = await (supabase.from('store_items') as any).upsert(itemRows.slice(i, i + CHUNK), { onConflict: 'plant_id,item_name' });
+        // Conflict target follows the authoritative key. Migration 60 replaced
+        // unique(plant_id,item_name) with unique(store_id,item_name) — matching
+        // on the old pair would insert a SECOND row for an item the shared
+        // Rehla store already holds instead of updating it.
+        const { error } = await (supabase.from('store_items') as any)
+          .upsert(itemRows.slice(i, i + CHUNK), { onConflict: importStoreId ? 'store_id,item_name' : 'plant_id,item_name' });
         if (error) throw error;
       }
 
@@ -345,6 +394,10 @@ export function StockRegister() {
       if (error) throw error;
       await insertRows('store_stock_events', {
         item_id: editItem.id, plant_id: editItem.plant_id, event_type: qtyChanged ? 'manual_edit' : 'rename',
+        // A manual correction is still a movement in a register, attributed to
+        // the factory whose row it is.
+        store_id: editItem.store_id ?? storeIdFor(editItem.plant_id),
+        requesting_plant_id: editItem.plant_id,
         qty_delta: delta, on_hand_after: qtyChanged ? newOnHand : oldOnHand, justification: reason,
         actor_name: activeProfile.name,
       });
@@ -553,6 +606,14 @@ export function StockRegister() {
           )}
         </>
       )}
+
+      {/* ── Who bought it vs who used it ──────────────────────────────────────
+          Only meaningful once a store is shared, which is exactly when it
+          becomes necessary: stock is held once, but the money came off two
+          different companies' invoices. Collapsed by default. */}
+      <div style={{ marginTop: 14 }}>
+        <StoreReconciliation />
+      </div>
 
       {/* ── Add purchase modal ────────────────────────────────────────────────── */}
       <AddPurchaseModal open={showPurchase} onClose={() => setShowPurchase(false)} onApplied={load} />

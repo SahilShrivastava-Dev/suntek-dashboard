@@ -24,13 +24,12 @@ const PIN_COLOR: Record<string, string> = {
   red:   '#DC2626',
 };
 
-const PLANT_COORDS: Record<string, [number, number]> = {
-  'Rehla': [24.1856, 84.0644],
-  'Ganjam': [19.3800, 85.0700],
-  'SHD': [28.6600, 77.2900],
-  'Bawana': [28.8000, 77.0400],
-  'Delhi': [28.7041, 77.1025],
-};
+/**
+ * Map centre used only when a check-in has no GPS fix AND its factory has no
+ * coordinates on file. Roughly central India, so a pin without a location is
+ * visibly wrong rather than convincingly placed at somebody else's factory.
+ */
+const UNKNOWN_CENTRE: [number, number] = [23.0, 82.0];
 
 interface CheckInLog {
   id?: string;
@@ -53,14 +52,28 @@ interface CheckInLog {
 const TILE_URL = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
-function getCoords(plantName: string, realLat: number | null, realLng: number | null, index: number): [number, number] {
+/**
+ * Where to draw a check-in pin.
+ *
+ * Prefers the actual GPS fix. Falling back, it uses the FACTORY'S OWN
+ * coordinates looked up by plant id — previously this matched the plant's
+ * display name by substring and defaulted to Rehla, so a factory whose name
+ * didn't happen to contain a known string had its staff drawn at Rehla. With
+ * three factories sharing the Rehla site and names now like "SCPL – Rehla",
+ * substring matching is both fragile and ambiguous.
+ */
+function getCoords(
+  fallback: [number, number] | null,
+  realLat: number | null,
+  realLng: number | null,
+  index: number,
+): [number, number] {
   if (realLat !== null && realLng !== null && !isNaN(realLat) && !isNaN(realLng)) {
     return [realLat, realLng];
   }
-  
-  const cleanName = Object.keys(PLANT_COORDS).find(k => plantName.includes(k)) || 'Rehla';
-  const base = PLANT_COORDS[cleanName] || [24.1856, 84.0644];
-  
+
+  const base = fallback ?? UNKNOWN_CENTRE;
+
   // Golden angle offset to beautifully spread out markers around the factory to prevent overlaps
   const angle = (index * 137.5) * (Math.PI / 180);
   const r = 0.005 + (index % 4) * 0.003;
@@ -161,7 +174,9 @@ export function NightManagerBoard() {
       // 2. Fetch shift logs
       const { data: logsData } = await supabase
         .from('shift_logs')
-        .select('*, profiles(name, role, phone), plants(name)')
+        // lat/lng come through the join so a pin can fall back to its OWN
+        // factory's centre — no name matching, no default-to-Rehla.
+        .select('*, profiles(name, role, phone), plants(name, lat, lng)')
         .order('submitted_at', { ascending: false })
         .returns<ShiftLogJoined[]>();
 
@@ -191,7 +206,9 @@ export function NightManagerBoard() {
         const ip = row.ip_address;
 
         let name = row.profiles?.name || t('nightBoard.liveCheckIn');
-        let role = row.profiles?.role || 'L1';
+        // Unknown check-in → entry tier, the least privileged. The ladder runs
+        // L0 (admin) → L4 (entry) since migration 64.
+        let role = row.profiles?.role || 'L4';
         let phone = row.profiles?.phone || null;
         let isMapped = false;
 
@@ -219,7 +236,10 @@ export function NightManagerBoard() {
         }
 
         const plant = row.plants?.name || t('nightBoard.unknownPlant');
-        const coords = getCoords(plant, row.lat, row.lng, index);
+        const pl = (row as { plants?: { lat?: number | null; lng?: number | null } | null }).plants;
+        const centre: [number, number] | null =
+          typeof pl?.lat === 'number' && typeof pl?.lng === 'number' ? [pl.lat, pl.lng] : null;
+        const coords = getCoords(centre, row.lat, row.lng, index);
         
         return {
           id: row.id,

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { supabase } from '../../../lib/supabase';
+import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRow, PanelDivider, OcrUpload, PanelFooter } from '../../../components/SlidePanel';
 import { KpiInfoButton } from '../../../components/KpiInfoButton';
@@ -79,7 +80,6 @@ function PicBadge({ photos, onOpen }: { photos: LightboxImage[]; onOpen: () => v
   );
 }
 
-const PLANTS = ['SHD', 'Rehla', 'Ganjam', 'HQ'];
 
 // Build the derived maintenance-lifecycle events. Each milestone (raised, part
 // procured, part handed over, repair completed, defective part decided) becomes
@@ -192,12 +192,11 @@ export function ActivityLog() {
   const [search, setSearch] = useState('');
   const [plantFilter, setPlantFilter] = useState('');
   const today = new Date().toISOString().split('T')[0];
-  const [form, setForm] = useState({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' });
+  const [form, setForm] = useState({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: '', notes: '' });
 
   async function load() {
     try {
-      const { data: plantsData } = await supabase.from('plants').select('id, name')
-        .returns<{ id: string; name: string }[]>();
+      const { data: plantsData } = await fetchActivePlants<{ id: string; name: string }>('id, name');
       if (plantsData && plantsData.length > 0) setDbPlants(plantsData);
 
       const [logsRes, ticketsRes] = await Promise.all([
@@ -259,7 +258,12 @@ export function ActivityLog() {
   const verified = rows.filter(r => r.verifiedBy).length;
   const withPhoto = rows.length ? Math.round((rows.filter(r => r.hasPhoto).length / rows.length) * 100) : 0;
 
-  const plantNames = dbPlants.length > 0 ? dbPlants.map(p => p.name) : PLANTS;
+  // Factory names come from the DB only — a hard-coded fallback would keep
+  // offering names that no longer exist after a rename. The filter compares
+  // display names on both sides (rows carry the same live join), so it stays
+  // consistent; the entry form below keys off the plant ID.
+  const plantNames = dbPlants.map(p => p.name);
+  const plantOptions = [...dbPlants].sort((a, b) => a.name.localeCompare(b.name));
 
   // Search + plant filter, then paginate — Activity Log grows unbounded over time.
   const filtered = useMemo(() => {
@@ -284,7 +288,7 @@ export function ActivityLog() {
 
   async function handleSave() {
     if (!form.equipment.trim() || !form.doneBy.trim()) return;
-    const plant = dbPlants.find(p => p.name === form.plant);
+    const plant = dbPlants.find(p => p.id === form.plant);
     const { data, error } = await insertRows('activity_logs', {
       equipment: form.equipment,
       type: form.type.toLowerCase(),
@@ -329,7 +333,7 @@ export function ActivityLog() {
     }
 
     setSaved(true);
-    setTimeout(() => { setOpen(false); setSaved(false); setForm({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: 'SHD', notes: '' }); }, 1600);
+    setTimeout(() => { setOpen(false); setSaved(false); setForm({ equipment: '', type: 'Regular', date: today, doneBy: '', verifiedBy: '', plant: '', notes: '' }); }, 1600);
   }
 
   function handleClose() { setOpen(false); setSaved(false); }
@@ -451,7 +455,8 @@ export function ActivityLog() {
           </PanelField>
           <PanelField label={t('activity.fieldPlant')}>
             <PanelSelect value={form.plant} onChange={e => set('plant', e.target.value)}>
-              {plantNames.map(p => <option key={p}>{p}</option>)}
+              {!form.plant && <option value="">{t('activity.selectPlant', 'Select factory…')}</option>}
+              {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </PanelSelect>
           </PanelField>
         </PanelRow>

@@ -18,8 +18,24 @@ import { useRoleContext } from './RoleContext';
  * with RLS so they can't be bypassed via the API.
  */
 
-export interface PlantRow { id: string; name: string }
+export interface PlantRow {
+  id: string;
+  name: string;
+  /** Geofence centre + radius (night-duty check-in). Null until seeded. */
+  lat?: number | null;
+  lng?: number | null;
+  geofence_radius_m?: number | null;
+  /** Hierarchy — populated by migration 57. Undefined before it is applied. */
+  location_id?: string | null;
+  company_name?: string | null;
+  entity_name?: string | null;
+  factory_code?: string | null;
+  is_factory?: boolean | null;
+  is_active?: boolean | null;
+}
 export interface UnitRow { id: string; plant_id: string; name: string; code: string | null }
+export interface LocationRow { id: string; state: string; name: string; code: string | null }
+export interface StoreRow { id: string; location_id: string | null; name: string; code: string | null }
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000'; // matches no row (fail-closed)
 const EMPTY_IDS: string[] = []; // stable ref so scope memoization doesn't churn each render
@@ -37,6 +53,24 @@ interface PlantScopeValue {
   plants: PlantRow[];
   /** All units (labels + pickers). */
   units: UnitRow[];
+  /** State → location tier (migration 57). Empty until that migration runs. */
+  locations: LocationRow[];
+  /** All stores (migration 59). Empty until that migration runs. */
+  stores: StoreRow[];
+  /**
+   * The store a factory draws from, via factory_store_access. At Rehla all
+   * three factories resolve to the SAME store — that is the whole point. For a
+   * one-factory-one-store site it is the factory's own store, so every caller
+   * behaves exactly as it did before stores existed.
+   */
+  storeIdFor: (plantId: string | null | undefined) => string | null;
+  /** Stores the user may act on: granted directly, or via a factory they belong to. */
+  allowedStores: StoreRow[];
+  /**
+   * Apply the store scope to a Supabase query, mirroring scopeQuery(). No-op
+   * for global users. Falls back to plant scoping when 59 has not been applied.
+   */
+  storeQuery: <T>(query: T, opts?: { storeCol?: string }) => T;
   /** Plants the user may pick when creating a record (all if global). */
   allowedPlants: PlantRow[];
   /** Units within one plant the user may pick (respects unit restriction). */
@@ -59,6 +93,10 @@ export function PlantScopeProvider({ children }: { children: React.ReactNode }) 
 
   const [plants, setPlants] = useState<PlantRow[]>([]);
   const [units, setUnits] = useState<UnitRow[]>([]);
+  const [locations, setLocations] = useState<LocationRow[]>([]);
+  const [stores, setStores] = useState<StoreRow[]>([]);
+  const [plantStore, setPlantStore] = useState<{ plant_id: string; store_id: string }[]>([]);
+  const [storeIds, setStoreIds] = useState<string[]>([]);
   const [refDataReady, setRefDataReady] = useState(false);
 
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -67,17 +105,40 @@ export function PlantScopeProvider({ children }: { children: React.ReactNode }) 
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
 
-  // Reference data: all plants + units (global reads; used for labels/pickers).
+  // Reference data: plants + units + (once migrated) locations and stores.
+  //
+  // The hierarchy columns and the store tables arrive in migrations 57 and 59.
+  // Every read below degrades gracefully if they are absent, so the app keeps
+  // working against a database where those migrations have not yet been run —
+  // plants fall back to the columns that have always existed, and locations /
+  // stores simply stay empty.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [{ data: p }, { data: u }] = await Promise.all([
-        supabase.from('plants').select('id, name').order('name').returns<PlantRow[]>(),
+      const richPlants = await supabase
+        .from('plants')
+        .select('id, name, lat, lng, geofence_radius_m, location_id, company_name, entity_name, factory_code, is_factory, is_active')
+        .order('name')
+        .returns<PlantRow[]>();
+      const p = richPlants.error
+        ? await supabase.from('plants').select('id, name, lat, lng, geofence_radius_m').order('name').returns<PlantRow[]>()
+        : richPlants;
+
+      const [u, loc, st, fsa] = await Promise.all([
         supabase.from('units').select('id, plant_id, name, code').order('name').returns<UnitRow[]>(),
+        supabase.from('locations').select('id, state, name, code').order('name').returns<LocationRow[]>(),
+        supabase.from('stores').select('id, location_id, name, code').order('name').returns<StoreRow[]>(),
+        supabase.from('factory_store_access').select('plant_id, store_id').returns<{ plant_id: string; store_id: string }[]>(),
       ]);
+
       if (cancelled) return;
-      setPlants(p ?? []);
-      setUnits(u ?? []);
+      // Retired factories stay in the table so history keeps resolving, but they
+      // must not appear in any picker.
+      setPlants((p.data ?? []).filter(r => r.is_active !== false));
+      setUnits(u.data ?? []);
+      setLocations(loc.data ?? []);
+      setStores(st.data ?? []);
+      setPlantStore(fsa.data ?? []);
       setRefDataReady(true);
     })();
     return () => { cancelled = true; };
@@ -116,9 +177,13 @@ export function PlantScopeProvider({ children }: { children: React.ReactNode }) 
       if (!row) { if (!cancelled) { setMembership({ isGlobal: false, plantIds: [], unitIds: [] }); setScopeReady(true); } return; }
       if (row.is_global) { if (!cancelled) { setMembership({ isGlobal: true, plantIds: [], unitIds: [] }); setScopeReady(true); } return; }
 
-      const [{ data: ups }, { data: uus }] = await Promise.all([
+      const [{ data: ups }, { data: uus }, uss] = await Promise.all([
         supabase.from('user_plants').select('plant_id').eq('user_account_id', row.id).returns<{ plant_id: string }[]>(),
         supabase.from('user_units').select('unit_id').eq('user_account_id', row.id).returns<{ unit_id: string }[]>(),
+        // Store access is its OWN grant, deliberately not derived from factory
+        // membership — a Rehla store keeper serves three factories without
+        // gaining any of their asset registers.
+        supabase.from('user_stores').select('store_id').eq('user_account_id', row.id).returns<{ store_id: string }[]>(),
       ]);
       if (cancelled) return;
       setMembership({
@@ -126,6 +191,7 @@ export function PlantScopeProvider({ children }: { children: React.ReactNode }) 
         plantIds: (ups ?? []).map((r) => r.plant_id),
         unitIds: (uus ?? []).map((r) => r.unit_id),
       });
+      setStoreIds((uss.data ?? []).map((r) => r.store_id));
       setScopeReady(true);
     })();
     return () => { cancelled = true; };
@@ -184,6 +250,46 @@ export function PlantScopeProvider({ children }: { children: React.ReactNode }) 
     [isGlobal, plantIds, unitIds, unitIdSet],
   );
 
+  // ── Stores ────────────────────────────────────────────────────────────────
+  // storeIdFor is the single place that answers "where does this factory's
+  // stock live". One row per factory ⇒ its own store (today's behaviour); three
+  // Rehla rows ⇒ the same shared store.
+  const storeByPlant = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of plantStore) if (!m.has(r.plant_id)) m.set(r.plant_id, r.store_id);
+    return m;
+  }, [plantStore]);
+
+  const storeIdFor = useCallback(
+    (plantId: string | null | undefined) => (plantId ? storeByPlant.get(plantId) ?? null : null),
+    [storeByPlant],
+  );
+
+  // Reachable either directly (user_stores) or through a factory the user is in.
+  const allowedStoreIds = useMemo(() => {
+    if (isGlobal) return new Set(stores.map((s) => s.id));
+    const s = new Set(storeIds);
+    for (const pid of plantIds) { const sid = storeByPlant.get(pid); if (sid) s.add(sid); }
+    return s;
+  }, [isGlobal, stores, storeIds, plantIds, storeByPlant]);
+
+  const allowedStores = useMemo(
+    () => (isGlobal ? stores : stores.filter((s) => allowedStoreIds.has(s.id))),
+    [isGlobal, stores, allowedStoreIds],
+  );
+
+  const storeQuery = useCallback(
+    <T,>(query: T, opts?: { storeCol?: string }): T => {
+      if (isGlobal) return query;
+      const col = opts?.storeCol ?? 'store_id';
+      const ids = [...allowedStoreIds];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const q: any = query;
+      return (ids.length ? q.in(col, ids) : q.eq(col, NIL_UUID)) as T;
+    },
+    [isGlobal, allowedStoreIds],
+  );
+
   const value: PlantScopeValue = {
     ready: refDataReady && scopeReady,
     isGlobal,
@@ -191,6 +297,11 @@ export function PlantScopeProvider({ children }: { children: React.ReactNode }) 
     unitIds,
     plants,
     units,
+    locations,
+    stores,
+    storeIdFor,
+    allowedStores,
+    storeQuery,
     allowedPlants,
     allowedUnits,
     inScope,

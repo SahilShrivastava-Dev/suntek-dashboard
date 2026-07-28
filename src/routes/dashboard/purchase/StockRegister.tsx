@@ -394,6 +394,10 @@ export function StockRegister() {
       if (error) throw error;
       await insertRows('store_stock_events', {
         item_id: editItem.id, plant_id: editItem.plant_id, event_type: qtyChanged ? 'manual_edit' : 'rename',
+        // A manual correction is still a movement in a register, attributed to
+        // the factory whose row it is.
+        store_id: editItem.store_id ?? storeIdFor(editItem.plant_id),
+        requesting_plant_id: editItem.plant_id,
         qty_delta: delta, on_hand_after: qtyChanged ? newOnHand : oldOnHand, justification: reason,
         actor_name: activeProfile.name,
       });

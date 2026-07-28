@@ -1576,7 +1576,13 @@ export function Maintenance() {
       await insertRows('maintenance_store_requests', {
         ticket_id: selectedTicket.id, part_name: req.part_name, quantity: shortfall,
         specification: `${req.specification ? req.specification + ' · ' : ''}Shortfall — ${shortfall} of ${requestedQty} not in store`,
-        plant_id: selectedTicket.plant_id, store_item_id: req.store_item_id ?? null,
+        // The shortfall row is still a request from THIS factory against the
+        // SAME store — a partial fulfilment does not change where the part
+        // comes from. Set explicitly rather than leaning on the DB trigger
+        // (migration 65), so the intent is visible at the call site.
+        plant_id: selectedTicket.plant_id,
+        source_store_id: storeIdFor(selectedTicket.plant_id),
+        store_item_id: req.store_item_id ?? null,
         store_decision: 'unavailable', purchase_required: true, split_group: splitGroup,
       });
       notify({
@@ -1593,6 +1599,10 @@ export function Maintenance() {
       if (req.store_item_id) {
         await insertRows('store_stock_events', {
           item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'manual_edit',
+          // Where it moved / who it was for — a movement missing either is
+          // invisible to the per-factory reconciliation.
+          store_id: storeIdFor(selectedTicket.plant_id),
+          requesting_plant_id: selectedTicket.plant_id,
           qty_delta: (enteredQty as number) - (regQty as number), on_hand_after: null,
           ref: `store-check · ticket ${selectedTicket.id.slice(0, 8)}`,
           justification: `Register ${regQty} → counted ${enteredQty}. ${storeDecisionForm.qtyJustification.trim()}`,

@@ -136,10 +136,11 @@ export function Login() {
         {/* Role guide */}
         <div className="mt-4 grid grid-cols-2 gap-2">
           {[
-            { role: 'L1', label: tf('login.roleFactoryOperator'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
+            // Ladder runs top-down: L0 (admin) → L4 (entry). See migration 64.
+            { role: 'L0', label: tf('login.roleAdmin'), color: 'bg-red-50 border-red-200 text-red-700' },
             { role: 'L2', label: tf('login.roleUnitHead'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
             { role: 'L3', label: tf('login.roleProcurementHead'), color: 'bg-green-50 border-green-200 text-green-700' },
-            { role: 'L4', label: tf('login.roleAdmin'), color: 'bg-red-50 border-red-200 text-red-700' },
+            { role: 'L4', label: tf('login.roleFactoryOperator'), color: 'bg-amber-50 border-amber-200 text-amber-700' },
           ].map(({ role, label, color }) => (
             <div key={role} className={`text-center p-2 rounded-lg border text-xs font-medium ${color}`}>
               <span className="font-bold">{role}</span> · {label}

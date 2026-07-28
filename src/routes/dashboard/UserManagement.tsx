@@ -90,19 +90,23 @@ const ALL_DASHBOARD_SECTIONS: { route: string; label: string; labelKey: string }
   { route: '/dashboard/purchase/labour',  label: 'Labour Costs',               labelKey: 'userMgmt.sec_labourCosts' },
 ];
 
-const LEVEL_OPTIONS = ['L1', 'L2', 'L3', 'L4'];
+// Fallback only. The real ladder comes from the `tiers` table (see levelOptions
+// below) — this list was already stale, missing the top tier entirely, which is
+// exactly what hard-coding a hierarchy gets you.
+const LEVEL_OPTIONS_FALLBACK = ['L0', 'L1', 'L2', 'L3', 'L4'];
 
 /** Auto-derive a slug id from a role label. */
 function slugify(s: string): string {
   return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+// Seniority runs L0 (top) → L4 (entry), so the warmest colour is L0.
 const LEVEL_COLOR: Record<string, { bg: string; color: string }> = {
-  L5: { bg: '#FEF2F2', color: '#DC2626' },
-  L4: { bg: '#FFF7ED', color: '#EA580C' },
-  L3: { bg: '#EFF6FF', color: '#2563EB' },
-  L2: { bg: '#F0FDF4', color: '#16A34A' },
-  L1: { bg: '#F5F3FF', color: '#7C3AED' },
+  L0: { bg: '#FEF2F2', color: '#DC2626' },
+  L1: { bg: '#FFF7ED', color: '#EA580C' },
+  L2: { bg: '#EFF6FF', color: '#2563EB' },
+  L3: { bg: '#F0FDF4', color: '#16A34A' },
+  L4: { bg: '#F5F3FF', color: '#7C3AED' },
 };
 
 // Colours only — the visible label is translated at the render site.
@@ -190,14 +194,14 @@ export function UserManagement() {
   const [roleForm, setRoleForm] = useState<{
     label: string; id: string; level: string; home_route: string;
     standalone_only: boolean; allowed_routes: string[]; capabilities: string[];
-  }>({ label: '', id: '', level: 'L1', home_route: '/dashboard', standalone_only: false, allowed_routes: [], capabilities: [] });
+  }>({ label: '', id: '', level: 'L4', home_route: '/dashboard', standalone_only: false, allowed_routes: [], capabilities: [] });
   // While creating, keep the slug auto-synced to the label until the user edits it.
   const [slugTouched, setSlugTouched] = useState(false);
 
   function openRoleAdd() {
     setEditingRole(null);
     setSlugTouched(false);
-    setRoleForm({ label: '', id: '', level: 'L1', home_route: '/dashboard', standalone_only: false, allowed_routes: [], capabilities: [] });
+    setRoleForm({ label: '', id: '', level: 'L4', home_route: '/dashboard', standalone_only: false, allowed_routes: [], capabilities: [] });
     setShowRoleForm(true);
   }
 
@@ -1172,7 +1176,13 @@ export function UserManagement() {
         <PanelRow>
           <PanelField label={t('userMgmt.roleLevelLabel', 'Level')}>
             <PanelSelect value={roleForm.level} onChange={e => setRoleForm(f => ({ ...f, level: e.target.value }))}>
-              {(tiers.length ? tiers.map(tr => ({ value: tr.id, label: tr.label })) : LEVEL_OPTIONS.map(l => ({ value: l, label: l })))
+              {/* Ordered most-senior first. `rank` is what defines seniority —
+                  it runs opposite to the id (L0 = rank 50), so sort on rank,
+                  never on the id string. Shown as "L0 · Admin" so the level and
+                  what it means are both visible. */}
+              {(tiers.length
+                ? [...tiers].sort((a, b) => b.rank - a.rank).map(tr => ({ value: tr.id, label: `${tr.id} · ${tr.label}` }))
+                : LEVEL_OPTIONS_FALLBACK.map(l => ({ value: l, label: l })))
                 .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </PanelSelect>
           </PanelField>

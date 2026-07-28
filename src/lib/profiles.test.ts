@@ -68,7 +68,7 @@ describe('roleToProfile', () => {
   const role: RoleRow = {
     id: 'unit_head',
     label: 'Unit Head',
-    level: 'L3',
+    level: 'L2',
     description: 'Ops oversight',
     home_route: '/dashboard',
     allowed_routes: ['/dashboard', '/dashboard/stock'],
@@ -84,7 +84,7 @@ describe('roleToProfile', () => {
   it('maps a role row to a MockProfile and derives initials from the overridden name', () => {
     const p = roleToProfile(role, { name: 'Vijay Ji', id: 'db_1', baseRoleId: 'unit_head' });
     expect(p.id).toBe('db_1');
-    expect(p.role).toBe('L3');
+    expect(p.role).toBe('L2');
     expect(p.roleLabel).toBe('Unit Head');
     expect(p.roleDescription).toBe('Ops oversight');
     expect(p.allowedDashboardRoutes).toEqual(['/dashboard', '/dashboard/stock']);

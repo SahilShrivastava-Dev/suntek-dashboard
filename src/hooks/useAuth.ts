@@ -45,7 +45,7 @@ export function useAuth() {
           id: authUser.id,
           email: authUser.email,
           name: authUser.email?.split('@')[0] ?? 'User',
-          role: 'L1',
+          role: 'L4',   // entry tier — least privilege (ladder is L0 top → L4 entry)
           plantId: null,
         },
         session,

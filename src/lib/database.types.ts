@@ -3,7 +3,9 @@
  * These correspond exactly to the PostgreSQL tables defined in the plan.
  */
 
-export type UserRole = 'L1' | 'L2' | 'L3' | 'L4';
+/** Tier ids, most senior first. The ladder is DATA (`tiers`) — this union is a
+ *  convenience for the few legacy call sites, not the source of truth. */
+export type UserRole = 'L0' | 'L1' | 'L2' | 'L3' | 'L4';
 
 /**
  * Mirrors Supabase's generated Insert semantics: columns that accept null
@@ -49,7 +51,7 @@ export interface Database {
         Row: {
           id: string;            // text PK, slug ('admin', 'unit_head', …)
           label: string;
-          level: string;         // tier id ('L1'…'L5'); see tiers table (29_tiers_and_capabilities.sql)
+          level: string;         // tier id ('L0' admin … 'L4' entry); see tiers table (29 + 64)
           description: string | null;
           home_route: string;
           allowed_routes: string[]; // exact route strings; ['*'] = all
@@ -69,7 +71,7 @@ export interface Database {
       // Admin-managed hierarchy levels. rank (gapped) defines seniority.
       tiers: {
         Row: {
-          id: string;            // 'L1'…'L5' (and future admin-made levels)
+          id: string;            // 'L0' (top) … 'L4' (entry), plus any admin-made level
           label: string;
           rank: number;          // higher = more senior
           description: string | null;

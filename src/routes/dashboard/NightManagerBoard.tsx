@@ -206,7 +206,9 @@ export function NightManagerBoard() {
         const ip = row.ip_address;
 
         let name = row.profiles?.name || t('nightBoard.liveCheckIn');
-        let role = row.profiles?.role || 'L1';
+        // Unknown check-in → entry tier, the least privileged. The ladder runs
+        // L0 (admin) → L4 (entry) since migration 64.
+        let role = row.profiles?.role || 'L4';
         let phone = row.profiles?.phone || null;
         let isMapped = false;
 

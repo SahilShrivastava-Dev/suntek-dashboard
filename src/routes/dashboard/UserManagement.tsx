@@ -101,6 +101,14 @@ function slugify(s: string): string {
 }
 
 // Seniority runs L0 (top) → L4 (entry), so the warmest colour is L0.
+//
+// Tiers are ADMIN-MANAGED DATA: they can be renamed, renumbered or added to, so
+// this map can never be exhaustive. Always read it through levelColor(), which
+// falls back to a neutral swatch — a missing colour must never take the page
+// down. It used to: one unguarded lookup here crashed User Management with
+// "undefined is not an object (evaluating 'r.bg')" for any tier the map did not
+// know, which is exactly what happened to a build that predated the L0 renumber.
+const LEVEL_NEUTRAL = { bg: '#F1F5F9', color: '#64748B' };
 const LEVEL_COLOR: Record<string, { bg: string; color: string }> = {
   L0: { bg: '#FEF2F2', color: '#DC2626' },
   L1: { bg: '#FFF7ED', color: '#EA580C' },
@@ -108,6 +116,11 @@ const LEVEL_COLOR: Record<string, { bg: string; color: string }> = {
   L3: { bg: '#F0FDF4', color: '#16A34A' },
   L4: { bg: '#F5F3FF', color: '#7C3AED' },
 };
+
+/** Swatch for a tier id. Never returns undefined. */
+function levelColor(level: string | null | undefined): { bg: string; color: string } {
+  return (level && LEVEL_COLOR[level]) || LEVEL_NEUTRAL;
+}
 
 // Colours only — the visible label is translated at the render site.
 const STATUS_CFG = {
@@ -714,7 +727,7 @@ export function UserManagement() {
               )}
               {usersPg.pageRows.map(u => {
                 const ro = roleOptions.find(r => r.id === u.role_id);
-                const lvl = ro ? LEVEL_COLOR[ro.level] : { bg: '#F1F5F9', color: '#64748B' };
+                const lvl = levelColor(ro?.level);
                 const sc = u.is_active ? STATUS_CFG.active : STATUS_CFG.inactive;
                 return (
                   <tr key={u.id}>
@@ -845,8 +858,8 @@ export function UserManagement() {
 
         {/* Role description card */}
         {selectedRole && (
-          <div style={{ marginBottom: 16, background: (LEVEL_COLOR[selectedRole.level] || {}).bg || '#F8FAFC', border: `1px solid ${(LEVEL_COLOR[selectedRole.level] || {}).color || '#E2E8F0'}30`, borderRadius: 12, padding: '10px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: (LEVEL_COLOR[selectedRole.level] || {}).color || '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <div style={{ marginBottom: 16, background: levelColor(selectedRole.level).bg, border: `1px solid ${levelColor(selectedRole.level).color}30`, borderRadius: 12, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: levelColor(selectedRole.level).color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {selectedRole.level} · {selectedRole.label}
             </div>
             <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>
@@ -1103,7 +1116,7 @@ export function UserManagement() {
           )}
           {roles.map(r => {
             const locked = r.is_admin || r.is_system;
-            const lvl = LEVEL_COLOR[r.level] || { bg: '#F1F5F9', color: '#64748B' };
+            const lvl = levelColor(r.level);
             const userCount = users.filter(u => u.role_id === r.id).length;
             const access = r.allowed_routes?.includes('*')
               ? t('userMgmt.allSections', 'All sections')

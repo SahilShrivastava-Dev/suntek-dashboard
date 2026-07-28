@@ -9,7 +9,7 @@
 -- guarantee for the single-store sites (Sikandrabad, Ganjam), and the rename
 -- safety properties that the whole project rests on.
 --
--- Every row is check / expected / actual / status. Scan the status column:
+-- Every row is assertion / expected / actual / status. Scan the status column:
 --   PASS  — asserted and correct
 --   FAIL  — broken, do not deploy
 --   EMPTY — nothing to assert yet (no data of that kind); NOT a pass
@@ -24,7 +24,7 @@ rehla as (select id from f where factory_code in ('SCPL_REHLA','SPPL_REHLA','SPP
 checks as (
 
 -- ═══ A. NAMING & RENAME SAFETY ═════════════════════════════════════════════
-select 'A1' as id, 'Exactly five active factories' as check,
+select 'A1' as id, 'Exactly five active factories' as assertion,
        '5' as expected, count(*)::text as actual,
        case when count(*) = 5 then 'PASS' else 'FAIL' end as status
   from f
@@ -261,7 +261,7 @@ select 'I2', 'Every store grant points at a real store',
   from user_stores us where not exists (select 1 from stores s where s.id = us.store_id)
 )
 
-select id, check, expected, actual, status from checks order by id;
+select id, assertion, expected, actual, status from checks order by id;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Shape of the world, for eyeballing after the assertions above

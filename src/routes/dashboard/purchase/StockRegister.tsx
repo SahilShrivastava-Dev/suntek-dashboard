@@ -92,7 +92,7 @@ const inputStyle: React.CSSProperties = {
 export function StockRegister() {
   const { t } = useTranslation();
   const toast = useToast();
-  const { scopeQuery, allowedPlants } = usePlantScope();
+  const { scopeQuery, allowedPlants, stores } = usePlantScope();
   const { activeProfile } = useRoleContext();
 
   const [items, setItems] = useState<(StockItem & { plants?: { name: string | null } | null })[]>([]);
@@ -213,22 +213,34 @@ export function StockRegister() {
 
   function togglePlant(id: string) { setPlantFilter(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]); }
 
-  // Merge identical items across the selected plants (sum on-hand + issued),
-  // so combining SPPL + Rehla shows 58, not two 29 rows.
+  // Group identical items across the selected registers.
+  //
+  // This merge used to exist to HIDE a bug: the Rehla store had been imported
+  // twice (once as 'Rehla', once as 'SPPL'), so the same 434 items appeared as
+  // two sets of rows and summing them made the totals look right whenever both
+  // plants were selected — and wrong whenever only one was. Migration 60
+  // collapses those copies into one Rehla Common Store, so after it runs each
+  // item is a single row and this loop simply passes it through.
+  //
+  // It is kept because it is still correct and still needed for the genuine
+  // case: a user with access to several SEPARATE stores (say Ganjam and
+  // Sikandarabad) viewing them together. `stores` on each row records which
+  // register each contribution came from, so the breakdown stays visible.
   const merged = useMemo<MergedRow[]>(() => {
     const q = search.trim().toLowerCase();
     const map = new Map<string, MergedRow>();
     for (const it of items) {
-      if (plantFilter.length && !(it.plant_id && plantFilter.includes(it.plant_id))) continue;
+      const regId = it.store_id ?? it.plant_id;
+      if (plantFilter.length && !(regId && plantFilter.includes(regId))) continue;
       if (q && !(it.item_name.toLowerCase().includes(q) || (it.equipment || '').toLowerCase().includes(q) || (it.model || '').toLowerCase().includes(q))) continue;
       const key = it.item_name.toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim();
-      const store = { id: it.id, plantId: it.plant_id, plant: it.plants?.name || plantName(it.plant_id), onHand: Number(it.on_hand), issued: Number(it.issued_qty), procured: Number(it.ticket_procured_qty || 0), repaired: Number(it.repaired_qty || 0), raw: it };
+      const store = { id: it.id, plantId: it.plant_id, plant: (it.store_id ? stores.find(s => s.id === it.store_id)?.name : null) || it.plants?.name || plantName(it.plant_id), onHand: Number(it.on_hand), issued: Number(it.issued_qty), procured: Number(it.ticket_procured_qty || 0), repaired: Number(it.repaired_qty || 0), raw: it };
       const ex = map.get(key);
       if (ex) { ex.onHand += store.onHand; ex.issued += store.issued; ex.procured += store.procured; ex.repaired += store.repaired; ex.stores.push(store); }
       else map.set(key, { key, itemName: it.item_name, equipment: it.equipment || '', model: it.model, unit: it.unit || '', onHand: store.onHand, issued: store.issued, procured: store.procured, repaired: store.repaired, stores: [store] });
     }
     return [...map.values()].sort((a, b) => a.itemName.localeCompare(b.itemName));
-  }, [items, plantFilter, search, plants]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, plantFilter, search, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = useMemo(() => {
     let inStock = 0, low = 0, out = 0;

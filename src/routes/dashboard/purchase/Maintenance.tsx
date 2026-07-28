@@ -156,7 +156,10 @@ function PartNameField({ value, stock, onChange, onPick }: {
               onMouseDown={e => { e.preventDefault(); choose(s); }}
               style={{ display: 'flex', justifyContent: 'space-between', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', borderBottom: '1px solid #F1F5F9', background: i === active ? '#F1F5F9' : '#fff', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}>
               <span style={{ color: '#334155', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.item_name}</span>
-              <span style={{ color: s.on_hand > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{s.on_hand > 0 ? t('maint.inStockCount', { defaultValue: '{{n}} in stock', n: s.on_hand }) : t('maint.outOfStock', 'out of stock')}</span>
+              {/* FREE stock, not raw on-hand: on a register shared by several
+                  factories, units already reserved by another approved ticket
+                  are not available to this one. */}
+              <span style={{ color: freeQty(s) > 0 ? '#16A34A' : '#DC2626', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{freeQty(s) > 0 ? t('maint.inStockCount', { defaultValue: '{{n}} in stock', n: freeQty(s) }) : t('maint.outOfStock', 'out of stock')}</span>
             </button>
           ))}
         </div>
@@ -1626,6 +1629,34 @@ export function Maintenance() {
     const reason = rejectReason.trim(); // optional note when rejecting this part
     await updateRows('maintenance_store_requests', { unit_head_approval: approved ? 'approved' : 'rejected' })
       .eq('id', req.id);
+
+    // Claim (or give back) the stock this decision commits.
+    //
+    // Stock only leaves the register at handover, so without a reservation
+    // three technicians drawing on the SAME shared Rehla row can each be told
+    // "1 in stock" for the same last unit and two of them find it gone. The
+    // reservation is per request, so approving here cannot consume another
+    // ticket's claim. Best-effort: a failure here must not block the approval
+    // the unit head has already made.
+    if (req.store_item_id && partAvailable) {
+      const qty = Number(req.quantity) || 0;
+      if (qty > 0) {
+        const { error: resErr } = await (supabase.rpc as any)('issue_store_item', {
+          payload: {
+            action: approved ? 'reserve' : 'release',
+            store_item_id: req.store_item_id,
+            store_request_id: req.id,
+            qty,
+            requesting_plant_id: selectedTicket.plant_id,
+            ref: `ticket ${selectedTicket.id.slice(0, 8)}`,
+            actor_name: activeProfile.name,
+          },
+        });
+        // eslint-disable-next-line no-console
+        if (resErr) console.error('[Maintenance] stock reservation failed:', resErr);
+      }
+    }
+
     if (approved && partAvailable) {
       notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else if (approved && !partAvailable) {

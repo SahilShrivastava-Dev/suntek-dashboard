@@ -41,7 +41,17 @@ import { Calendar, CalendarDays, AlertTriangle, CheckCircle2, Hourglass, Shoppin
 type EntityNoteRow = Database['public']['Tables']['entity_notes']['Row'];
 
 // ── Store-inventory type-ahead ───────────────────────────────────────────────
-type StoreStockItem = { id: string; item_name: string; on_hand: number; unit: string | null };
+type StoreStockItem = {
+  id: string; item_name: string; on_hand: number; unit: string | null;
+  /** Claimed by approved-but-not-handed-over requests. Free = on_hand - reserved_qty.
+   *  Absent before migration 59. */
+  reserved_qty?: number | null;
+};
+/** Stock a technician can actually be promised — what others have already
+ *  reserved on a SHARED register is not available to this ticket. */
+function freeQty(it: { on_hand: number; reserved_qty?: number | null }): number {
+  return Math.max(0, Number(it.on_hand) - Number(it.reserved_qty ?? 0));
+}
 
 // Measurement units a requested part can be recorded in (count / weight / volume).
 const STORE_UNITS = ['Units', 'mg', 'g', 'kg', 'mL', 'L'];
@@ -455,7 +465,7 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
 
 export function Maintenance() {
   const { activeProfile, allProfiles, roles } = useRoleContext();
-  const { scopeQuery, units: scopeUnits, allowedPlants } = usePlantScope();
+  const { scopeQuery, units: scopeUnits, allowedPlants, storeIdFor } = usePlantScope();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const toast = useToast();
   const { t } = useTranslation();
@@ -762,15 +772,26 @@ export function Maintenance() {
     setDefectiveLines(lines);
   }, [selectedTicket?.id, storeReqs]);
 
-  // Load the ticket-plant's stock register → powers the part-name type-ahead.
+  // Load the register of the STORE this ticket's factory draws from → powers
+  // the part-name type-ahead.
+  //
+  // Keyed on the store, not the factory. At Rehla, SCPL / SPPL / SPPL(K) all
+  // resolve to the same Rehla Common Store, so a technician at any of them sees
+  // the one shared register — stock held once, not three copies. Everywhere
+  // else a factory maps to its own store, so this is identical to the old
+  // `.eq('plant_id', pid)` behaviour.
   useEffect(() => {
     const pid = selectedTicket?.plant_id;
     if (!pid) { setStoreStock([]); return; }
     let alive = true;
-    supabase.from('store_items').select('id, item_name, on_hand, unit').eq('plant_id', pid).order('item_name')
+    const storeId = storeIdFor(pid);
+    const q = supabase.from('store_items').select('id, item_name, on_hand, reserved_qty, unit');
+    // Before migration 59 there are no stores; fall back to the factory's own rows.
+    (storeId ? q.eq('store_id', storeId) : q.eq('plant_id', pid))
+      .order('item_name')
       .returns<StoreStockItem[]>().then(({ data }) => { if (alive) setStoreStock(data || []); });
     return () => { alive = false; };
-  }, [selectedTicket?.plant_id]);
+  }, [selectedTicket?.plant_id, storeIdFor]);
 
   // FAR assets → the equipment dropdown when creating a schedule (validation
   // against the register). SCOPED: an unscoped fetch would pull every factory's
@@ -1406,7 +1427,13 @@ export function Maintenance() {
       quantity: parseFloat(it.quantity) || null,
       unit: it.unit || 'Units',
       specification: it.specification || null,
+      // The two answers are deliberately separate columns:
+      //   plant_id        → the REQUESTING factory: who asked, and who pays
+      //   source_store_id → the store the part comes OUT of
+      // At Rehla these differ (three factories, one shared store); everywhere
+      // else they resolve to the same site, which is why nothing changes there.
       plant_id: plant?.id || selectedTicket.plant_id || null,
+      source_store_id: storeIdFor(selectedTicket.plant_id),
       store_item_id: it.storeItemId || null,
     }));
     await insertRows('maintenance_store_requests', rows);
@@ -1752,19 +1779,36 @@ export function Maintenance() {
       if (req.store_item_id) {
         const qty = Number(req.quantity) || 0;
         if (fromOwnStore && qty > 0) {
-          // In-store track: issue from the register. Hard guard → on_hand can't go negative.
-          const { data: si } = await (supabase.from('store_items') as any).select('*').eq('id', req.store_item_id).single();
-          if (si) {
-            const issueQty = Math.min(qty, Math.max(0, Number(si.on_hand)));
-            const newOnHand = Number(si.on_hand) - issueQty;
-            await (supabase.from('store_items') as any)
-              .update({ issued_qty: Number(si.issued_qty) + issueQty, on_hand: newOnHand, updated_at: new Date().toISOString() }).eq('id', req.store_item_id);
-            await insertRows('store_stock_events', {
-              item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'issue',
-              qty_delta: -issueQty, on_hand_after: newOnHand, ref: `ticket ${selectedTicket.id.slice(0, 8)}`,
-              justification: `Handed over to technician · ${req.part_name}${issueQty < qty ? ` (only ${issueQty} of ${qty} were on hand)` : ''}`,
+          // In-store track: issue from the register through the atomic RPC.
+          //
+          // This used to be a client-side read-modify-write (select on_hand →
+          // compute → update). Two handovers of the same item both read 10,
+          // both wrote 5, and five units went missing from the books. With a
+          // private register per factory that race was rare; with three Rehla
+          // factories drawing on ONE row it is the normal case. issue_store_item
+          // does the read, the clamp, the reservation release and the audit
+          // event inside a single transaction under SELECT … FOR UPDATE.
+          const { data: res, error: issueErr } = await (supabase.rpc as any)('issue_store_item', {
+            payload: {
+              action: 'issue',
+              store_item_id: req.store_item_id,
+              store_request_id: req.id,
+              qty,
+              requesting_plant_id: selectedTicket.plant_id,
+              ref: `ticket ${selectedTicket.id.slice(0, 8)}`,
+              justification: `Handed over to technician · ${req.part_name}`,
               actor_name: activeProfile.name,
-            });
+            },
+          });
+          if (issueErr) throw issueErr;
+          // The RPC clamps to what was actually on hand — say so rather than
+          // letting the technician assume the full quantity was issued.
+          const short = Number(res?.short ?? 0);
+          if (short > 0) {
+            toast.error(t('maint.issuedShort', {
+              defaultValue: 'Only {{applied}} of {{requested}} {{part}} were in stock — {{short}} still outstanding.',
+              applied: Number(res?.applied ?? 0), requested: qty, part: req.part_name, short,
+            }));
           }
         } else if (!fromOwnStore) {
           // Procurement track: `qty` units were bought for the ticket (handed to the
@@ -1782,6 +1826,10 @@ export function Maintenance() {
             }).eq('id', req.store_item_id);
             await insertRows('store_stock_events', {
               item_id: req.store_item_id, plant_id: selectedTicket.plant_id, event_type: 'procure',
+              // Both facts, so the same row feeds a consolidated store report
+              // AND a per-factory consumption/cost report.
+              store_id: storeIdFor(selectedTicket.plant_id),
+              requesting_plant_id: selectedTicket.plant_id,
               qty_delta: bought, on_hand_after: newOnHand, ref: req.busy_transaction_ref || `ticket ${selectedTicket.id.slice(0, 8)}`,
               justification: `Procured ${bought} · ${qty} handed to technician${excess > 0 ? `, ${excess} added to stock` : ''} · ${req.part_name}`,
               actor_name: activeProfile.name,

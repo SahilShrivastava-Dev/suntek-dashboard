@@ -82,14 +82,68 @@ export interface Database {
       plants: {
         Row: {
           id: string;
+          /** DISPLAY ONLY — '<entity_name> – <location.name>'. Never a technical
+           *  key; use factory_code. Renaming is safe: access is keyed on id. */
           name: string;
           lat: number;
           lng: number;
           geofence_radius_m: number;
           created_at: string;
+          // ── migration 57: State → Location → Factory hierarchy ──
+          location_id: string | null;
+          company_name: string | null;   // owning legal entity, e.g. 'SPPL'
+          entity_name: string | null;    // operational entity, e.g. 'SPPL(K)'
+          factory_code: string | null;   // STABLE technical key, e.g. 'SPPLK_REHLA'
+          legacy_names: string[] | null; // previous display names, for alias search
+          is_factory: boolean | null;    // false = office / HQ
+          is_active: boolean | null;     // false = retired (never deleted)
         };
         Insert: Omit<Database['public']['Tables']['plants']['Row'], 'id' | 'created_at'>;
         Update: Partial<Database['public']['Tables']['plants']['Insert']>;
+      };
+
+      // ── Location master (migration 57) ──────────────────────────────────
+      locations: {
+        Row: {
+          id: string;
+          state: string;
+          name: string;
+          code: string | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['locations']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['locations']['Insert']>;
+      };
+
+      // ── Stores (migration 59) ───────────────────────────────────────────
+      // A store is a physical store room, NOT a factory. Several factories can
+      // draw on one (Rehla Common Store); stock is held once and consumption is
+      // attributed to the requesting factory.
+      stores: {
+        Row: {
+          id: string;
+          location_id: string | null;
+          name: string;
+          code: string | null;
+          is_active: boolean | null;
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['stores']['Row'], 'id' | 'created_at'>>;
+        Update: Partial<Database['public']['Tables']['stores']['Insert']>;
+      };
+
+      factory_store_access: {
+        Row: { plant_id: string; store_id: string; created_at: string };
+        Insert: Omit<Database['public']['Tables']['factory_store_access']['Row'], 'created_at'>;
+        Update: Partial<Database['public']['Tables']['factory_store_access']['Insert']>;
+      };
+
+      // Store access is its OWN grant — deliberately not derived from
+      // user_plants, so a shared-store keeper gains no factory's FAR.
+      user_stores: {
+        Row: { user_account_id: string; store_id: string; created_at: string };
+        Insert: Omit<Database['public']['Tables']['user_stores']['Row'], 'created_at'>;
+        Update: Partial<Database['public']['Tables']['user_stores']['Insert']>;
       };
 
       // Sub-divisions of a plant (e.g. Chlorides / Plasticiser). See 27_plant_unit_scoping.sql.
@@ -258,7 +312,13 @@ export interface Database {
       store_items: {
         Row: {
           id: string;
+          /** LEGACY ANCHOR once a store is shared — ambiguous (one row, several
+           *  owning factories). Filter by store_id, never this. */
           plant_id: string | null;
+          /** WHERE the stock physically is. Authoritative from migration 60. */
+          store_id: string | null;
+          /** Claimed by approved-but-not-handed-over requests. Free = on_hand - reserved_qty. */
+          reserved_qty: number;
           item_name: string;
           unit: string | null;
           equipment: string | null;
@@ -274,8 +334,9 @@ export interface Database {
           updated_at: string;
           created_at: string;
         };
-        // repaired_qty is RPC-maintained (apply/reverse_repair_return) — never client-inserted.
-        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_items']['Row'], 'id' | 'created_at' | 'updated_at' | 'repaired_qty'>> & { repaired_qty?: number };
+        // repaired_qty and reserved_qty are RPC-maintained (apply/reverse_repair_return,
+        // issue_store_item) and DB-defaulted — never required on a client insert.
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['store_items']['Row'], 'id' | 'created_at' | 'updated_at' | 'repaired_qty' | 'reserved_qty'>> & { repaired_qty?: number; reserved_qty?: number };
         Update: Partial<Database['public']['Tables']['store_items']['Insert']>;
       };
 
@@ -450,6 +511,12 @@ export interface Database {
           id: string;
           item_id: string | null;
           plant_id: string | null;
+          /** WHERE the stock moved in or out of. */
+          store_id: string | null;
+          /** WHO asked and WHO carries the cost. With a shared store this
+           *  differs from the store owner — it is what makes per-factory
+           *  consumption and cost reporting possible. */
+          requesting_plant_id: string | null;
           event_type: 'baseline' | 'issue' | 'procure' | 'manual_edit' | 'rename';
           qty_delta: number;
           on_hand_after: number | null;
@@ -967,7 +1034,12 @@ export interface Database {
           quantity: number | null;
           unit: string | null;            // Units | mg | g | kg | mL | L
           specification: string | null;
+          /** The REQUESTING factory — who asked and who pays. */
           plant_id: string | null;
+          /** The store the part is drawn from (may be shared with siblings). */
+          source_store_id: string | null;
+          /** This request's share of store_items.reserved_qty. */
+          reserved_qty: number;
           store_decision: 'available' | 'unavailable' | null;
           purchase_required: boolean | null;
           qty_in_store: number | null;
@@ -988,7 +1060,8 @@ export interface Database {
           purchased_qty: number | null;
           created_at: string;
         };
-        Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_store_requests']['Row'], 'id' | 'created_at'>>;
+        // reserved_qty is maintained by the issue_store_item RPC and DB-defaulted.
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_store_requests']['Row'], 'id' | 'created_at' | 'reserved_qty'>> & { reserved_qty?: number };
         Update: Partial<Database['public']['Tables']['maintenance_store_requests']['Insert']>;
       };
 

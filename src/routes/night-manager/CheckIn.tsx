@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MentionTextarea } from '../../components/mentions';
 import { validateGeofence } from '../../lib/algorithms/geofencing';
@@ -7,12 +7,14 @@ import { insertRows } from '../../lib/db';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { useRoleContext } from '../../contexts/RoleContext';
+import { usePlantScope } from '../../contexts/PlantScopeContext';
 
-// ── Plant config ── Replace with real coordinates before production ──────────
-const PLANT_LAT      = 24.1856;
-const PLANT_LNG      = 84.0644;
-const PLANT_RADIUS_M = 500;
-const PLANT_NAME     = 'Rehla (SCPL)';
+// ── Geofence fallback ────────────────────────────────────────────────────────
+// Used ONLY when the signed-in user's factories carry no coordinates yet.
+// The real centre, radius and name come from the `plants` row (migration 57
+// seeds them) — hard-coding a single site meant every check-in anywhere was
+// measured against Rehla.
+const FALLBACK_RADIUS_M = 500;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type CameraState  = 'idle' | 'requesting' | 'live' | 'captured' | 'cam_error';
@@ -55,6 +57,22 @@ export function CheckIn({ embedded = false }: CheckInProps) {
   const [gpsState, setGpsState] = useState<GpsState>('idle');
   const [gpsData,  setGpsData]  = useState<GpsData | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  // Which factory the check-in was matched against (set when GPS resolves).
+  const [matchedPlant, setMatchedPlant] = useState<{ name: string } | null>(null);
+
+  // The factories this user may check in at. Night duty can be rostered across
+  // several (migration 52), so the site is resolved from the GPS reading rather
+  // than assumed — the nearest one the reading falls inside, else simply the
+  // nearest. Only factories with coordinates can be matched.
+  const { allowedPlants } = usePlantScope();
+  const geofencePlants = useMemo(
+    () => allowedPlants.filter(p => typeof p.lat === 'number' && typeof p.lng === 'number'),
+    [allowedPlants],
+  );
+  const plantLabel = matchedPlant?.name
+    ?? geofencePlants[0]?.name
+    ?? allowedPlants[0]?.name
+    ?? t('checkin.unknownPlant', 'Your factory');
 
   // Form
   const [note,        setNote]        = useState('');
@@ -173,7 +191,23 @@ export function CheckIn({ embedded = false }: CheckInProps) {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
-        const result = validateGeofence(latitude, longitude, PLANT_LAT, PLANT_LNG, PLANT_RADIUS_M);
+        // Score every factory the user may check in at and keep the closest.
+        // Whichever is nearest is the one they are standing at; the on-site
+        // decision then uses that factory's own radius.
+        let best: { result: ReturnType<typeof validateGeofence>; name: string } | null = null;
+        for (const p of geofencePlants) {
+          const r = validateGeofence(
+            latitude, longitude, p.lat as number, p.lng as number,
+            p.geofence_radius_m ?? FALLBACK_RADIUS_M,
+          );
+          if (!best || r.distanceM < best.result.distanceM) best = { result: r, name: p.name };
+        }
+        // No factory has coordinates yet → report the reading without a verdict
+        // rather than measuring it against an unrelated site.
+        const result = best?.result
+          ?? { distanceM: 0, isOnSite: true, status: 'on_site' as const, radiusM: FALLBACK_RADIUS_M,
+               statusLabel: t('checkin.noGeofenceConfigured', 'Location recorded (no geofence configured)') };
+        setMatchedPlant(best ? { name: best.name } : null);
         setGpsData({
           lat:         latitude,
           lng:         longitude,
@@ -202,7 +236,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
     // Warn if out of zone, but allow override
     if (!gpsData.isOnSite) {
       const ok = window.confirm(
-        `${t('checkin.outOfZoneTitle')}\n\n${t('checkin.outOfZoneBody', { dist: gpsData.distanceM.toLocaleString(), plant: PLANT_NAME })}`
+        `${t('checkin.outOfZoneTitle')}\n\n${t('checkin.outOfZoneBody', { dist: gpsData.distanceM.toLocaleString(), plant: plantLabel })}`
       );
       if (!ok) return;
     }
@@ -215,7 +249,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
     let finalPhotoUrl = '';
     try {
       const result = await uploadCheckinPhoto(photoBlob, {
-        plantName:  PLANT_NAME,
+        plantName:  plantLabel,
         lat:        gpsData.lat,
         lng:        gpsData.lng,
         isOnSite:   gpsData.isOnSite,
@@ -251,21 +285,21 @@ export function CheckIn({ embedded = false }: CheckInProps) {
     const zoneLabel = gpsData.isOnSite ? 'On-site ✓' : 'Out-of-zone ⚠️';
     insertRows('notifications', {
       target_roles: ['admin', 'unit_head'],
-      title: `Night Manager check-in: ${PLANT_NAME}`,
+      title: `Night Manager check-in: ${plantLabel}`,
       body: `${zoneLabel} · ${gpsData.lat.toFixed(4)}, ${gpsData.lng.toFixed(4)}`,
       type: gpsData.isOnSite ? 'info' : 'urgent',
       route: '/dashboard/night-manager',
-      actor_name: PLANT_NAME,
+      actor_name: plantLabel,
       actor_role: 'night_manager',
     }).then(() => {}, () => {}); // non-blocking
 
     // Tag anyone @-mentioned in the shift note.
-    notifyMentions(note, { entityLabel: `Night check-in · ${PLANT_NAME}`, route: '/dashboard/night-manager' });
+    notifyMentions(note, { entityLabel: `Night check-in · ${plantLabel}`, route: '/dashboard/night-manager' });
 
     // If the person checking in is themselves on the blacklist, alert admin.
     await screenBlacklist(
       [{ value: activeProfile.name, label: 'Night Manager' }],
-      { workflow: 'Night Check-in', source: 'image', entityLabel: PLANT_NAME, imageUrl: finalPhotoUrl || null },
+      { workflow: 'Night Check-in', source: 'image', entityLabel: plantLabel, imageUrl: finalPhotoUrl || null },
     );
 
     setSubmitState('done');
@@ -300,7 +334,7 @@ export function CheckIn({ embedded = false }: CheckInProps) {
           </div>
           <h2 className="text-xl font-extrabold mb-1">{t('checkin.shiftLogged')}</h2>
           <p className="text-sm text-slate-500 mb-1">
-            {PLANT_NAME} · {gpsData?.timestamp.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+            {plantLabel} · {gpsData?.timestamp.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
           </p>
           <div style={{ margin: '10px 0 14px', padding: '10px 14px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 12, fontSize: 12, color: '#15803D', textAlign: 'left' }}>
             {t('checkin.recordSaved')}

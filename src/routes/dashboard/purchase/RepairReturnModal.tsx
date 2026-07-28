@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { callRpc } from '../../../lib/db';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { useRoleContext } from '../../../contexts/RoleContext';
@@ -57,6 +58,7 @@ export function RepairReturnModal({ open, focusPart, parts, tickets, onClose, on
   onSaved: () => void;
 }) {
   const { t } = useTranslation();
+  const { storeIdFor } = usePlantScope();
   const { activeProfile } = useRoleContext();
 
   const ticketById = useMemo(() => new Map(tickets.map(tk => [tk.id, tk])), [tickets]);
@@ -99,11 +101,14 @@ export function RepairReturnModal({ open, focusPart, parts, tickets, onClose, on
     setRepairCost(''); setConditionNote(''); setComment('');
     setBillFile(null); setErr(null); setDupInvoice(false);
     setReceiptId(crypto.randomUUID());
-    // Load this plant's register for fuzzy item matching.
+    // Load the register this factory draws from, for fuzzy item matching.
+    // Keyed on the STORE: a repaired part returns to the shared Rehla register,
+    // so matching it against only its own factory's slice would miss the row
+    // that actually holds the item and create a duplicate.
     (async () => {
-      const { data: si } = await supabase.from('store_items')
-        .select('id, item_name, on_hand, unit, plant_id')
-        .eq('plant_id', focusPart.plant_id as string)
+      const storeId = storeIdFor(focusPart.plant_id as string);
+      const q = supabase.from('store_items').select('id, item_name, on_hand, unit, plant_id, store_id');
+      const { data: si } = await (storeId ? q.eq('store_id', storeId) : q.eq('plant_id', focusPart.plant_id as string))
         .returns<(StockLite & { plant_id: string | null })[]>();
       const rows = si || [];
       setStock(rows);

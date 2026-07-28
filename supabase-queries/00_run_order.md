@@ -49,6 +49,8 @@ Run **in order**, and mind the two gates. Each has a paired `*_rollback_*.sql`.
 | 59 | `59_stores.sql` | `stores`, `factory_store_access`, `user_stores`, `store_id` columns, `store_in_scope()`. Identity mapping (one store per factory) ⇒ **behaviour unchanged** | 🟢 |
 | 60 | `60_rehla_common_store.sql` | **The only migration that changes what people see.** Merges the duplicated Rehla register into one shared store; makes `store_id` authoritative | 🔴 **snapshot** |
 | 61 | `61_issue_store_item.sql` | Atomic issue/reserve/release RPC (fixes the lost-update race) + store-scoped RLS. **`fixed_assets` stays factory-scoped** | 🟡 |
+| 62 | `62_store_items_store_binding.sql` | Trigger + RPC patch so every stock row is bound to a store. Without it, rows created after 60 land storeless and show up as a phantom per-factory register | 🟡 |
+| 63 | `63_rehla_far_split.sql` | ⚠️ **TEST FIXTURE** — deals Rehla's assets across the 3 factories so FAR isolation can be exercised. The ownership is ARBITRARY; replace with the client's marked-up register | 🔴 **fixture** |
 
 **Why renaming is safe:** access is keyed on `plants.id` (uuid) — `user_plants`, RLS
 `my_plant_ids()`, `profiles.plant_id`. The auth JWT carries only `{name, role_id}`.

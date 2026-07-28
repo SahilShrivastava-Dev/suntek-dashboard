@@ -18,6 +18,7 @@ import { parseStockFile, reconcile, type StockParseResult, type MonthParse, type
 import { indexResolutions, joinAnomalies, type AnomalyResolutionRow, type ReviewedAnomaly } from '../../../lib/store/anomalyKeys';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { AnomalyReviewModal } from './AnomalyReviewModal';
+import { StoreReconciliation } from './StoreReconciliation';
 import type { Database } from '../../../lib/database.types';
 
 type StockItem = Database['public']['Tables']['store_items']['Row'];
@@ -599,6 +600,14 @@ export function StockRegister() {
           )}
         </>
       )}
+
+      {/* ── Who bought it vs who used it ──────────────────────────────────────
+          Only meaningful once a store is shared, which is exactly when it
+          becomes necessary: stock is held once, but the money came off two
+          different companies' invoices. Collapsed by default. */}
+      <div style={{ marginTop: 14 }}>
+        <StoreReconciliation />
+      </div>
 
       {/* ── Add purchase modal ────────────────────────────────────────────────── */}
       <AddPurchaseModal open={showPurchase} onClose={() => setShowPurchase(false)} onApplied={load} />

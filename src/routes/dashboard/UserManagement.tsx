@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Users, UserCheck, Shield } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { fetchActivePlants } from '../../lib/plants';
+import { usePlantScope } from '../../contexts/PlantScopeContext';
 import { insertRows, updateRows } from '../../lib/db';
 import { createLogin, updateLogin } from '../../lib/adminUsers';
 import { useMentionNotifier } from '../../lib/mentions';
@@ -128,6 +129,7 @@ const BLANK_FORM = {
   is_global: false,
   plant_ids: [] as string[],
   unit_ids: [] as string[],
+  store_ids: [] as string[],
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -138,6 +140,8 @@ export function UserManagement() {
   const notifyMentions = useMentionNotifier();
   const screenBlacklist = useBlacklistGuard();
   const { activeProfile, roles, rolesStatus, refreshRoles, can } = useRoleContext();
+  // Store master + factory→store mapping for the store-access picker.
+  const { stores, storeIdFor } = usePlantScope();
   const { stepUp, modal: stepUpModal } = useStepUp();
   // Role dropdown options sourced from the live role catalog.
   const roleOptions: RoleOption[] = roles.map(r => ({ id: r.id, label: r.label, level: r.level }));
@@ -369,15 +373,19 @@ export function UserManagement() {
       is_global: !!u.is_global,
       plant_ids: [],
       unit_ids: [],
+      store_ids: [],
     });
     setSaved(false);
     setShowPanel(true);
     // Load this user's plant/unit memberships + roles for the pickers.
-    const [{ data: ups }, { data: uus }, { data: urs }] = await Promise.all([
+    const [{ data: ups }, { data: uus }, { data: urs }, ussRes] = await Promise.all([
       supabase.from('user_plants').select('plant_id').eq('user_account_id', u.id).returns<{ plant_id: string }[]>(),
       supabase.from('user_units').select('unit_id').eq('user_account_id', u.id).returns<{ unit_id: string }[]>(),
       supabase.from('user_roles').select('role_id').eq('user_account_id', u.id).returns<{ role_id: string }[]>(),
+      // Absent before migration 59 — resolves with an error rather than throwing.
+      supabase.from('user_stores').select('store_id').eq('user_account_id', u.id).returns<{ store_id: string }[]>(),
     ]);
+    const uss = ussRes.data;
     // Keep the primary role first so it stays the display/login role. Drop the
     // retired night_manager role so it never re-appears as a selectable/primary role.
     const roleIds = (urs || []).map(r => r.role_id).filter(id => id !== 'night_manager');
@@ -387,6 +395,7 @@ export function UserManagement() {
       ...f,
       plant_ids: (ups || []).map(r => r.plant_id),
       unit_ids: (uus || []).map(r => r.unit_id),
+      store_ids: (uss || []).map(r => r.store_id),
       role_ids: ordered.length ? ordered : f.role_ids,
       role_id: ordered[0] || '',
     }));
@@ -505,6 +514,10 @@ export function UserManagement() {
       await (supabase.from('user_plants') as any).delete().eq('user_account_id', accountId);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (supabase.from('user_units') as any).delete().eq('user_account_id', accountId);
+      // Store grants are rewritten the same way. Safe before migration 59 —
+      // the table simply does not exist and the call resolves with an error.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase.from('user_stores') as any).delete().eq('user_account_id', accountId);
       if (!form.is_global) {
         if (form.plant_ids.length) {
           await insertRows('user_plants', form.plant_ids.map(pid => ({ user_account_id: accountId, plant_id: pid })));
@@ -516,6 +529,12 @@ export function UserManagement() {
         });
         if (validUnitIds.length) {
           await insertRows('user_units', validUnitIds.map(uid => ({ user_account_id: accountId, unit_id: uid })));
+        }
+        // Store access is stored as its own grant — NOT derived from the
+        // factories above. That separation is the whole point: a shared-store
+        // keeper can issue for three factories without gaining their FARs.
+        if (form.store_ids.length) {
+          await insertRows('user_stores', form.store_ids.map(sid => ({ user_account_id: accountId, store_id: sid })));
         }
       }
     }
@@ -888,6 +907,42 @@ export function UserManagement() {
                   already expresses what unit access used to. `units` and
                   user_units stay in the schema so historical tickets keep
                   resolving; they are simply no longer assignable. */}
+
+              {/* ── Store access — a SEPARATE grant ─────────────────────────
+                  Deliberately not derived from the factories above. A Rehla
+                  store keeper serves SCPL, SPPL and SPPL(K) from one shared
+                  register, but must NOT thereby gain their asset registers —
+                  so store access is ticked here on its own.
+                  Selecting no store still leaves the user reaching the store
+                  of any factory they belong to, which is how every
+                  one-factory-one-store site has always behaved. */}
+              {stores.length > 0 && (
+                <>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '12px 0 4px' }}>{t('userMgmt.storesLabel', 'Store access')}</div>
+                  <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>
+                    {t('userMgmt.storesHelper', 'Extra stores this user may issue from — e.g. a shared store serving several factories. Does NOT grant access to those factories\u2019 assets or maintenance.')}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {stores.map(st => {
+                      const on = form.store_ids.includes(st.id);
+                      // Reachable anyway through a selected factory — shown so
+                      // the admin can see it is already covered.
+                      const viaPlant = !on && form.plant_ids.some(pid => storeIdFor(pid) === st.id);
+                      return (
+                        <label key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#334155', cursor: 'pointer', padding: '6px 8px', borderRadius: 8, background: on ? '#EFF6FF' : '#fff', border: '1px solid #E2E8F0' }}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => setForm(f => ({ ...f, store_ids: on ? f.store_ids.filter(x => x !== st.id) : [...f.store_ids, st.id] }))}
+                          />
+                          <span>{st.name}</span>
+                          {viaPlant && <span style={{ fontSize: 10, color: '#94A3B8' }}>{t('userMgmt.storeViaFactory', '· via factory')}</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>

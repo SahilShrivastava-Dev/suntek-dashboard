@@ -304,7 +304,7 @@ export function StockRegister() {
       setImportStore(defaultStore());
       setStage('review');
     } catch (e) {
-      setErr(errMsg(e)); setStage('error');
+      setErr(errMsg(e, { action: 'read this stock file', context: 'StockRegister.handleFile' })); setStage('error');
     }
   }
 
@@ -368,7 +368,7 @@ export function StockRegister() {
       setStage('done');
       await load();
     } catch (e) {
-      setErr(errMsg(e)); setStage('error');
+      setErr(errMsg(e, { action: 'import this stock file', context: 'StockRegister.confirmImport' })); setStage('error');
     }
   }
 
@@ -413,7 +413,7 @@ export function StockRegister() {
       toast.success(t('storereq.stockToastSaved', 'Stock updated and logged to the Activity Log.'));
       await load();
     } catch (e) {
-      toast.error(errMsg(e));
+      toast.error(errMsg(e, { action: 'save this stock change', context: 'StockRegister.saveEdit' }));
     }
   }
 

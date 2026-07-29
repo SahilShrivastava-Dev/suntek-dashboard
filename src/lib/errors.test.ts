@@ -81,6 +81,28 @@ describe('humanizeError — the user gets a sentence, not a code', () => {
       .toMatch(/database update that hasn't been applied/i);
   });
 
+  it('translates a missing ON CONFLICT constraint — the real stock-upload failure', () => {
+    // Verbatim from a failed "Upload Excel" before the fix.
+    const msg = humanizeError(
+      { code: '42P10', message: 'there is no unique or exclusion constraint matching the ON CONFLICT specification' },
+      { action: 'import this stock file' },
+    );
+    expect(msg).not.toMatch(/ON CONFLICT|constraint|exclusion/i);
+    expect(msg).toMatch(/Couldn't import this stock file/);
+    expect(msg).toMatch(/database update that hasn't been applied/i);
+    expect(msg).toMatch(/Nothing has been changed/i);
+  });
+
+  it('covers the other ways the schema can be out of step', () => {
+    for (const e of [
+      { code: '42P01', message: 'relation "stores" does not exist' },
+      { code: '42883', message: 'function public.issue_store_item(jsonb) does not exist' },
+      { code: 'PGRST202', message: 'Could not find the function in the schema cache' },
+    ]) {
+      expect(humanizeError(e, { action: 'save' })).toMatch(/database update that hasn't been applied/i);
+    }
+  });
+
   it('passes through messages the backend already wrote for humans', () => {
     const forbidden = 'Forbidden — you cannot assign that role (it is above your level).';
     expect(humanizeError(forbidden)).toBe(forbidden);

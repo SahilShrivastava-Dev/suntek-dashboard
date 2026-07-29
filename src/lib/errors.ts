@@ -127,9 +127,22 @@ export function humanizeError(e: unknown, opts: HumanizeOptions = {}): string {
     return `${doing} — the record no longer exists. Refresh the page and try again.`;
   }
 
-  // ── Schema drift (a migration hasn't been applied) ────────────────────────
-  if (state === '42703' || state === '42P01' || low.includes('does not exist')) {
-    return `${doing} — this feature needs a database update that hasn't been applied yet. Please tell your administrator.`;
+  // ── Schema drift — the code expects a database shape that isn't there ─────
+  // These all mean the same thing to a user: the app and the database are out
+  // of step. Postgres words it very differently each time, and none of those
+  // words help someone trying to upload a spreadsheet.
+  //   42703 undefined column · 42P01 undefined table · 42883 undefined function
+  //   42P10 bad ON CONFLICT target (a constraint the code expects is missing)
+  //   PGRST202/PGRST204 PostgREST cannot find the function/column
+  if (
+    state === '42703' || state === '42P01' || state === '42883' || state === '42P10' ||
+    state === 'PGRST202' || state === 'PGRST204' ||
+    low.includes('does not exist') ||
+    low.includes('on conflict specification') ||
+    low.includes('no unique or exclusion constraint') ||
+    low.includes('schema cache')
+  ) {
+    return `${doing} — the app is expecting a database update that hasn't been applied yet. Nothing has been changed. Please send this to your administrator: a pending database migration needs to be run.`;
   }
 
   // ── Recognisable but not mapped: show it, it is better than nothing ───────

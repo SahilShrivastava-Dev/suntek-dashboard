@@ -129,6 +129,14 @@ select 'D3', 'Every active factory reaches exactly one store',
        case when count(*) = 0 then 'PASS' else 'FAIL' end
   from f where not exists (select 1 from factory_store_access fsa where fsa.plant_id = f.id)
 
+union all
+select 'D4', 'Superseded per-factory stores are retired, not left selectable',
+       '0 orphaned active', count(*)::text,
+       case when count(*) = 0 then 'PASS' else 'FAIL' end
+  from stores s
+ where coalesce(s.is_active, true)
+   and not exists (select 1 from factory_store_access fsa where fsa.store_id = s.id)
+
 -- ═══ E. STOCK INTEGRITY ════════════════════════════════════════════════════
 union all
 select 'E1', 'No stock row without a store (phantom register guard)',

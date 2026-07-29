@@ -73,6 +73,12 @@ function monthsFromRows(rows: StockMonthRow[]): MonthParse[] {
       itemName: r.item_name, key: r.item_name.toLowerCase().replace(/\s+/g, ' ').trim(),
       unit: r.unit || '', equipment: '', model: null,
       opening: Number(r.opening), purchaseOpening: Number(r.purchase_opening),
+      // Falls back to the Purchase sheet's own arithmetic for snapshots taken
+      // before migration 67 added the column.
+      purchaseClosing: Number(
+        (r as { purchase_closing?: number | null }).purchase_closing
+        ?? (Number(r.purchase_opening) + Number(r.purchased)),
+      ),
       purchased: Number(r.purchased), used: Number(r.used), closing: Number(r.computed_closing),
     });
     byPeriod.set(r.period_month, list);
@@ -341,7 +347,8 @@ export function StockRegister() {
       await supabase.from('store_stock_months').delete().eq('store_id', storeId).in('period_month', monthDates);
       const monthRows = res.months.flatMap(m => m.items.map(it => ({
         upload_id: uploadId, plant_id: anchorPlantId, store_id: storeId, period_month: m.periodMonth, item_name: it.itemName, unit: it.unit,
-        opening: it.opening, purchase_opening: it.purchaseOpening, purchased: it.purchased, used: it.used, computed_closing: it.closing,
+        opening: it.opening, purchase_opening: it.purchaseOpening, purchase_closing: it.purchaseClosing,
+        purchased: it.purchased, used: it.used, computed_closing: it.closing,
       })));
       for (let i = 0; i < monthRows.length; i += CHUNK) {
         const { error } = await insertRows('store_stock_months', monthRows.slice(i, i + CHUNK));

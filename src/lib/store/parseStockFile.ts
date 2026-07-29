@@ -24,7 +24,8 @@ export interface MonthItem {
   equipment: string;        // derived from the name prefix
   model: string | null;     // derived from the (…) in the name
   opening: number;          // Sales "Op Stock"
-  purchaseOpening: number;  // Purchase "Opening" (for the intra-month check)
+  purchaseOpening: number;
+  purchaseClosing: number;  // Purchase "Closing" = opening + receipts = stock AVAILABLE  // Purchase "Opening" (for the intra-month check)
   purchased: number;        // Σ Purchase daily
   used: number;             // Σ Sales daily
   closing: number;          // opening + purchased − used
@@ -225,6 +226,12 @@ export async function parseStockFile(file: File): Promise<StockParseResult> {
         if (!name) continue;
         const opening = s ? s.opening : (pu ? pu.opening : 0);
         const purchaseOpening = pu ? pu.opening : 0;
+        // The Purchase sheet's own stated closing (= opening + receipts). This is
+        // the figure the store team carries across into the Sales "Op Stock",
+        // which is what makes the two comparable.
+        const purchaseClosing = pu
+          ? (typeof pu.closing === 'number' ? pu.closing : pu.opening + pu.movement)
+          : 0;
         const purchased = pu ? pu.movement : 0;
         const used = s ? s.movement : 0;
         const { equipment, model } = deriveEquipment(name);
@@ -232,7 +239,7 @@ export async function parseStockFile(file: File): Promise<StockParseResult> {
           itemName: name, key: k,
           unit: normalizeUnit(s?.unit || pu?.unit),
           equipment, model,
-          opening, purchaseOpening, purchased, used,
+          opening, purchaseOpening, purchaseClosing, purchased, used,
           // Never opening + purchased − used when the sheet states a closing:
           // that sums the same stock twice (see resolveClosing).
           closing: resolveClosing(s?.closing, opening, purchased, used),
@@ -255,10 +262,20 @@ export async function parseStockFile(file: File): Promise<StockParseResult> {
 
 /**
  * Compare two consecutive months and surface anomalies:
- *  - carry_forward: prev closing ≠ this opening (the "someone changed 32→12" case)
- *  - intra_month:   Sales opening ≠ Purchase opening (same item/month)
- *  - negative:      used > opening + purchased (impossible)
- *  - added/removed: item set changed (with fuzzy "possible rename" hint)
+ *  - intra_month: Sales "Op Stock" ≠ Purchase "Closing" for the SAME month.
+ *      The store team carries the Purchase closing across by hand into the
+ *      Sales opening, so the two must agree. Client-confirmed as THE stock
+ *      reconciliation check. Measured on their workbook: Apr 413/421,
+ *      May 415/418, Jun 367/427, Jul 515/515.
+ *  - negative:    a stated closing below zero (more issued than ever received)
+ *  - added/removed: the item list changed vs the previous month
+ *
+ *  NOTE: there is deliberately NO cross-month stock comparison. The previous
+ *  `carry_forward` rule compared last month's closing to this month's Sales
+ *  opening — but the Sales opening ALREADY includes this month's receipts, so
+ *  it fired on any item that was purchased. It produced 282 flags where the
+ *  correct reading gives 206, and has been removed rather than corrected: the
+ *  client's rule reconciles the two sheets within a month, full stop.
  */
 export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] {
   const out: Anomaly[] = [];
@@ -266,31 +283,22 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
   const currByKey = new Map(curr.items.map(i => [i.key, i]));
 
   for (const it of curr.items) {
-    // Carry-forward drift vs previous month's computed closing.
-    if (prev) {
-      const p = prevByKey.get(it.key);
-      if (p && p.closing !== it.opening) {
-        const delta = it.opening - p.closing;
-        out.push({
-          type: 'carry_forward', item: it.itemName, severity: Math.abs(delta) > 5 ? 'high' : 'medium',
-          prev: p.closing, curr: it.opening, delta,
-          detail: `Last month closed at ${p.closing}, this month opens at ${it.opening} (${delta > 0 ? '+' : ''}${delta}).`,
-        });
-      }
-    }
-    // Intra-month: the two sheets disagree on the opening.
-    if (it.purchaseOpening && it.opening !== it.purchaseOpening) {
+    // THE reconciliation check: the two sheets must agree on the stock that was
+    // available this month. Same month only — no offset.
+    if (it.opening !== it.purchaseClosing) {
+      const delta = it.opening - it.purchaseClosing;
       out.push({
-        type: 'intra_month', item: it.itemName, severity: 'medium',
-        prev: it.opening, curr: it.purchaseOpening,
-        detail: `Sales opening ${it.opening} ≠ Purchase opening ${it.purchaseOpening}.`,
+        type: 'intra_month', item: it.itemName,
+        severity: Math.abs(delta) > 5 ? 'high' : 'medium',
+        prev: it.purchaseClosing, curr: it.opening, delta,
+        detail: `Sales opening ${it.opening} ≠ Purchase closing ${it.purchaseClosing} (${delta > 0 ? '+' : ''}${delta}).`,
       });
     }
-    // Negative computed stock.
+    // A stated closing below zero — more issued than was ever received.
     if (it.closing < 0) {
       out.push({
         type: 'negative', item: it.itemName, severity: 'high', curr: it.closing,
-        detail: `Used ${it.used} > available ${it.opening + it.purchased} → closing ${it.closing}.`,
+        detail: `Closing ${it.closing}: ${it.used} issued from ${it.opening} available.`,
       });
     }
   }

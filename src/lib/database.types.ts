@@ -307,6 +307,10 @@ export interface Database {
           unit: string | null;
           opening: number;
           purchase_opening: number;
+          /** Purchase sheet "Closing" = opening + received = stock AVAILABLE.
+           *  Compared against `opening` (Sales "Op Stock") for the
+           *  reconciliation anomaly. Added by migration 67. */
+          purchase_closing: number;
           purchased: number;
           used: number;
           computed_closing: number;

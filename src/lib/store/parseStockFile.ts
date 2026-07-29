@@ -24,7 +24,8 @@ export interface MonthItem {
   equipment: string;        // derived from the name prefix
   model: string | null;     // derived from the (…) in the name
   opening: number;          // Sales "Op Stock"
-  purchaseOpening: number;  // Purchase "Opening" (for the intra-month check)
+  purchaseOpening: number;
+  purchaseClosing: number;  // Purchase "Closing" = opening + receipts = stock AVAILABLE  // Purchase "Opening" (for the intra-month check)
   purchased: number;        // Σ Purchase daily
   used: number;             // Σ Sales daily
   closing: number;          // opening + purchased − used
@@ -46,7 +47,7 @@ export interface StockParseResult {
   totalItems: number;       // item count in the latest month
 }
 
-export type AnomalyType = 'carry_forward' | 'intra_month' | 'negative' | 'added' | 'removed';
+export type AnomalyType = 'carry_forward' | 'intra_month' | 'sheet_self' | 'negative' | 'added' | 'removed';
 export interface Anomaly {
   type: AnomalyType;
   item: string;
@@ -118,7 +119,33 @@ function parseSheetName(name: string): { kind: 'sales' | 'purchase'; key: string
 const MONTH_LABELS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // ── Parse one sheet (array-of-arrays) into a name→{unit,opening,movement} map ─
-interface SheetItem { name: string; unit: string; opening: number; movement: number; }
+interface SheetItem { name: string; unit: string; opening: number; movement: number; closing: number | null; }
+
+/**
+ * The month's closing balance for an item.
+ *
+ * PREFER THE SHEET'S OWN "Closing" COLUMN. Recomputing it as
+ * opening + purchased − used double-counts whenever the two sheets describe the
+ * same physical stock from different angles — which is normal in this workbook.
+ *
+ * Real example, 3.5 SUT (7/16") 2" LENGTH, July 2026:
+ *   Sales sheet     Op Stock 50, no issues,        Closing 50
+ *   Purchase sheet  Opening   0, 50 bought day 7,  Closing 50
+ * Both agree the month ends at 50 — the same 50 units. The formula gave
+ * 50 + 50 − 0 = 100, and the register showed double the real stock.
+ *
+ * The Sales sheet is the stock book, so its Closing is authoritative. The
+ * computed value is only a fallback for the rare row with no Closing cell
+ * (2 of 521 in the client's July sheet).
+ */
+export function resolveClosing(
+  salesClosing: number | null | undefined,
+  opening: number, purchased: number, used: number,
+): number {
+  return typeof salesClosing === 'number' && Number.isFinite(salesClosing)
+    ? salesClosing
+    : opening + purchased - used;
+}
 function parseSheet(ws: XLSX.WorkSheet): Map<string, SheetItem> {
   const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, blankrows: false });
   // Header = the first row containing an "Items Name" cell.
@@ -149,11 +176,15 @@ function parseSheet(ws: XLSX.WorkSheet): Map<string, SheetItem> {
     const key = joinKey(name);
     if (!key) continue;
     const movement = dayIdxs.reduce((s, j) => s + num(r[j]), 0);
+    const rawClose = closeIdx >= 0 ? r[closeIdx] : null;
     const item: SheetItem = {
       name,
       unit: unitIdx >= 0 ? String(r[unitIdx] ?? '').trim() : '',
       opening: num(r[openIdx]),
       movement,
+      // The sheet's own stated closing — authoritative when present.
+      closing: typeof rawClose === 'number' ? rawClose
+             : (typeof rawClose === 'string' && rawClose.trim() !== '' ? num(rawClose) : null),
     };
     // First occurrence wins (guards against duplicate rows in the sheet).
     if (!out.has(key)) out.set(key, item);
@@ -195,6 +226,12 @@ export async function parseStockFile(file: File): Promise<StockParseResult> {
         if (!name) continue;
         const opening = s ? s.opening : (pu ? pu.opening : 0);
         const purchaseOpening = pu ? pu.opening : 0;
+        // The Purchase sheet's own stated closing (= opening + receipts). This is
+        // the figure the store team carries across into the Sales "Op Stock",
+        // which is what makes the two comparable.
+        const purchaseClosing = pu
+          ? (typeof pu.closing === 'number' ? pu.closing : pu.opening + pu.movement)
+          : 0;
         const purchased = pu ? pu.movement : 0;
         const used = s ? s.movement : 0;
         const { equipment, model } = deriveEquipment(name);
@@ -202,8 +239,10 @@ export async function parseStockFile(file: File): Promise<StockParseResult> {
           itemName: name, key: k,
           unit: normalizeUnit(s?.unit || pu?.unit),
           equipment, model,
-          opening, purchaseOpening, purchased, used,
-          closing: opening + purchased - used,
+          opening, purchaseOpening, purchaseClosing, purchased, used,
+          // Never opening + purchased − used when the sheet states a closing:
+          // that sums the same stock twice (see resolveClosing).
+          closing: resolveClosing(s?.closing, opening, purchased, used),
         });
       }
       items.sort((a, b) => a.itemName.localeCompare(b.itemName));
@@ -223,10 +262,32 @@ export async function parseStockFile(file: File): Promise<StockParseResult> {
 
 /**
  * Compare two consecutive months and surface anomalies:
- *  - carry_forward: prev closing ≠ this opening (the "someone changed 32→12" case)
- *  - intra_month:   Sales opening ≠ Purchase opening (same item/month)
- *  - negative:      used > opening + purchased (impossible)
- *  - added/removed: item set changed (with fuzzy "possible rename" hint)
+ * Three hand-offs, three checks. Together they close the loop:
+ *
+ *     Sales Closing (n-1) ──[carry_forward]──► Purchase Opening (n)
+ *                                                    + receipts
+ *                                              Purchase Closing (n)
+ *                                                    │
+ *                                              [intra_month]
+ *                                                    │
+ *                                              Sales Op Stock (n)
+ *                                                    − issues
+ *                                              Sales Closing (n)  → the register
+ *
+ *  - intra_month:   Sales "Op Stock" ≠ Purchase "Closing", same month. The
+ *      store team copies one into the other by hand, so they must agree.
+ *      Client-confirmed. Measured: Apr 413/421, May 415/418, Jun 367/427,
+ *      Jul 515/515.
+ *  - carry_forward: Sales "Closing" (n-1) ≠ Purchase "Opening" (n). Stock that
+ *      appeared or vanished between months. Measured: 412/418, 400/408,
+ *      211/403 — the last is a real July stock-take, not noise.
+ *  - sheet_self:    a sheet disagrees with its OWN arithmetic. This is the only
+ *      check that catches a hand-typed closing: if someone overwrites the cell,
+ *      BOTH books agree on the wrong number and the two checks above stay
+ *      silent. Found exactly that on "Acid Pump (NZRP50200TBGV1J) Impeller O
+ *      Ring" — 15 + 0 received, but the sheet states 20, in two months running.
+ *  - negative:      a stated closing below zero.
+ *  - added/removed: the item list changed vs the previous month.
  */
 export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] {
   const out: Anomaly[] = [];
@@ -234,31 +295,64 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
   const currByKey = new Map(curr.items.map(i => [i.key, i]));
 
   for (const it of curr.items) {
-    // Carry-forward drift vs previous month's computed closing.
+    // Hand-off across the month boundary: last month's true closing must be
+    // what the new Purchase book opens with. Compared against the PURCHASE
+    // opening, not the Sales opening — the Sales opening already includes this
+    // month's receipts, which is why the old version of this check fired on
+    // every item that had been bought.
+    // `prev` is null when the workbook contains only ONE month — there is no
+    // previous closing to hand over from, so this check is simply skipped
+    // rather than compared against zero. Same when an item is new: it has no
+    // row in the previous month.
     if (prev) {
       const p = prevByKey.get(it.key);
-      if (p && p.closing !== it.opening) {
-        const delta = it.opening - p.closing;
+      if (p && p.closing !== it.purchaseOpening) {
+        const delta = it.purchaseOpening - p.closing;
         out.push({
-          type: 'carry_forward', item: it.itemName, severity: Math.abs(delta) > 5 ? 'high' : 'medium',
-          prev: p.closing, curr: it.opening, delta,
-          detail: `Last month closed at ${p.closing}, this month opens at ${it.opening} (${delta > 0 ? '+' : ''}${delta}).`,
+          type: 'carry_forward', item: it.itemName,
+          severity: Math.abs(delta) > 5 ? 'high' : 'medium',
+          prev: p.closing, curr: it.purchaseOpening, delta,
+          detail: `Last month closed at ${p.closing}, this month's purchase book opens at ${it.purchaseOpening} (${delta > 0 ? '+' : ''}${delta}).`,
         });
       }
     }
-    // Intra-month: the two sheets disagree on the opening.
-    if (it.purchaseOpening && it.opening !== it.purchaseOpening) {
+
+    // Hand-off within the month: the two sheets must agree on the stock that
+    // was available. Client-confirmed.
+    if (it.opening !== it.purchaseClosing) {
+      const delta = it.opening - it.purchaseClosing;
       out.push({
-        type: 'intra_month', item: it.itemName, severity: 'medium',
-        prev: it.opening, curr: it.purchaseOpening,
-        detail: `Sales opening ${it.opening} ≠ Purchase opening ${it.purchaseOpening}.`,
+        type: 'intra_month', item: it.itemName,
+        severity: Math.abs(delta) > 5 ? 'high' : 'medium',
+        prev: it.purchaseClosing, curr: it.opening, delta,
+        detail: `Sales opening ${it.opening} ≠ Purchase closing ${it.purchaseClosing} (${delta > 0 ? '+' : ''}${delta}).`,
       });
     }
-    // Negative computed stock.
+    // Each sheet must agree with its own arithmetic. Catches an overwritten
+    // closing cell — the one error the two cross-checks cannot see, because a
+    // bad number copied forward makes both books agree.
+    const salesExpected = it.opening - it.used;
+    if (it.closing !== salesExpected) {
+      out.push({
+        type: 'sheet_self', item: it.itemName, severity: 'high',
+        prev: salesExpected, curr: it.closing, delta: it.closing - salesExpected,
+        detail: `Sales sheet: ${it.opening} available − ${it.used} issued = ${salesExpected}, but the sheet states ${it.closing}.`,
+      });
+    }
+    const purchExpected = it.purchaseOpening + it.purchased;
+    if (it.purchaseClosing !== purchExpected) {
+      out.push({
+        type: 'sheet_self', item: it.itemName, severity: 'high',
+        prev: purchExpected, curr: it.purchaseClosing, delta: it.purchaseClosing - purchExpected,
+        detail: `Purchase sheet: ${it.purchaseOpening} opening + ${it.purchased} received = ${purchExpected}, but the sheet states ${it.purchaseClosing}.`,
+      });
+    }
+
+    // A stated closing below zero — more issued than was ever received.
     if (it.closing < 0) {
       out.push({
         type: 'negative', item: it.itemName, severity: 'high', curr: it.closing,
-        detail: `Used ${it.used} > available ${it.opening + it.purchased} → closing ${it.closing}.`,
+        detail: `Closing ${it.closing}: ${it.used} issued from ${it.opening} available.`,
       });
     }
   }

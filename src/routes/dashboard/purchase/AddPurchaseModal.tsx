@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+// Shared humanizer — a user should never be shown a raw error object.
+import { humanizeError as errMsg } from '../../../lib/errors';
 import { fetchActivePlants } from '../../../lib/plants';
 import { callRpc } from '../../../lib/db';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
@@ -24,13 +26,6 @@ interface Line {
   choice: string;              // store_item id, or 'new'
 }
 
-function errMsg(e: unknown): string {
-  if (!e) return 'Unknown error';
-  if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message;
-  const o = e as { message?: string; details?: string; hint?: string };
-  return o.message || o.details || o.hint || JSON.stringify(e);
-}
 let seq = 0;
 const nextKey = () => `l${++seq}`;
 

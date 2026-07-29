@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+// Shared humanizer — a user should never be shown a raw error object.
+import { humanizeError as errMsg } from '../../../lib/errors';
 import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
@@ -12,13 +14,6 @@ import { matchAsset, type AssetLite } from '../../../lib/far/assets';
 import { FREQ_LABEL, calculateNextDue } from './maintenance/shared';
 
 type Plant = { id: string; name: string };
-
-function errMsg(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === 'string') return e;
-  const o = e as { message?: string; details?: string };
-  return o?.message || o?.details || JSON.stringify(e);
-}
 
 const overlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 };
 const modal: React.CSSProperties = { background: '#fff', borderRadius: 16, padding: 22, width: 'min(720px, 100%)', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' };

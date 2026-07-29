@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+// Shared humanizer — a user should never be shown a raw error object.
+import { humanizeError as errMsg } from '../../../lib/errors';
 import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { useToast } from '../../../components/ui/toast';
@@ -34,15 +36,6 @@ interface MergedRow {
 
 const CHUNK = 500;
 
-/** Supabase/Postgrest errors are plain objects, not Error instances. */
-function errMsg(e: unknown): string {
-  if (!e) return 'Unknown error';
-  if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message;
-  const o = e as { message?: string; details?: string; hint?: string; code?: string };
-  return o.message || o.details || o.hint || (o.code ? `Error ${o.code}` : JSON.stringify(e));
-}
-
 function stockStatus(onHand: number): { key: 'out' | 'low' | 'in'; label: string; bg: string; color: string } {
   if (onHand <= 0) return { key: 'out', label: 'Out', bg: '#FEE2E2', color: '#DC2626' };
   if (onHand <= 2) return { key: 'low', label: 'Low', bg: '#FEF3C7', color: '#D97706' };
@@ -58,6 +51,7 @@ const STATUS_LABEL_KEYS: Record<'out' | 'low' | 'in', string> = {
 const ANOM_META: Record<Anomaly['type'], { label: string; labelKey: string; icon: string }> = {
   carry_forward: { label: 'Carry-forward drift', labelKey: 'storereq.stockAnomCarryForward', icon: '⚠' },
   intra_month:   { label: 'Sheet mismatch',      labelKey: 'storereq.stockAnomSheetMismatch', icon: '⚠' },
+  sheet_self:    { label: 'Sheet contradicts itself', labelKey: 'storereq.stockAnomSheetSelf', icon: '✎' },
   negative:      { label: 'Negative stock',      labelKey: 'storereq.stockAnomNegative',      icon: '🔴' },
   added:         { label: 'New item',            labelKey: 'storereq.stockAnomNewItem',       icon: '＋' },
   removed:       { label: 'Removed item',        labelKey: 'storereq.stockAnomRemovedItem',   icon: '－' },
@@ -80,6 +74,12 @@ function monthsFromRows(rows: StockMonthRow[]): MonthParse[] {
       itemName: r.item_name, key: r.item_name.toLowerCase().replace(/\s+/g, ' ').trim(),
       unit: r.unit || '', equipment: '', model: null,
       opening: Number(r.opening), purchaseOpening: Number(r.purchase_opening),
+      // Falls back to the Purchase sheet's own arithmetic for snapshots taken
+      // before migration 67 added the column.
+      purchaseClosing: Number(
+        (r as { purchase_closing?: number | null }).purchase_closing
+        ?? (Number(r.purchase_opening) + Number(r.purchased)),
+      ),
       purchased: Number(r.purchased), used: Number(r.used), closing: Number(r.computed_closing),
     });
     byPeriod.set(r.period_month, list);
@@ -95,7 +95,7 @@ const inputStyle: React.CSSProperties = {
 export function StockRegister() {
   const { t } = useTranslation();
   const toast = useToast();
-  const { scopeQuery, allowedPlants, stores, storeIdFor } = usePlantScope();
+  const { scopeQuery, allowedPlants, stores, allowedStores, storeIdFor } = usePlantScope();
   const { activeProfile } = useRoleContext();
 
   const [items, setItems] = useState<(StockItem & { plants?: { name: string | null } | null })[]>([]);
@@ -118,9 +118,13 @@ export function StockRegister() {
   const [parseResult, setParseResult] = useState<StockParseResult | null>(null);
   const [fileName, setFileName] = useState('');
   const [cloudUrl, setCloudUrl] = useState<string | null>(null);
-  const [importPlant, setImportPlant] = useState('');
+  const [importStore, setImportStore] = useState('');   // a workbook belongs to a STORE
   const [importAnoms, setImportAnoms] = useState<Anomaly[]>([]);
   const [importedCount, setImportedCount] = useState(0);
+  // Items whose computed closing was negative in the source workbook. The
+  // register cannot hold negative stock, so they land at 0 — but the person who
+  // uploaded needs to know WHICH, or the sheet never gets corrected.
+  const [clampedItems, setClampedItems] = useState<{ name: string; closing: number }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Manual edit modal
@@ -289,7 +293,10 @@ export function StockRegister() {
   const { pageRows, controls } = usePagination(mergedSort.sorted, { resetKey: `${search}|${plantFilter.join(',')}|${mergedSort.sort.key}|${mergedSort.sort.dir}` });
 
   // ── Import ──────────────────────────────────────────────────────────────────
-  function defaultPlant(): string { return plantOptions[0]?.id || ''; }
+  // Stores this user may upload against. At Rehla that is the one shared
+  // register, which is what the client's single Jharkhand workbook maps to.
+  const storeOptions = allowedStores.length ? allowedStores : stores;
+  function defaultStore(): string { return storeOptions[0]?.id || ''; }
 
   async function handleFile(file: File) {
     setErr(null); setFileName(file.name); setStage('uploading'); setCloudUrl(null); setParseResult(null);
@@ -305,10 +312,10 @@ export function StockRegister() {
       setParseResult(res);
       const n = res.months.length;
       setImportAnoms(reconcile(n >= 2 ? res.months[n - 2] : null, res.months[n - 1]));
-      setImportPlant(defaultPlant());
+      setImportStore(defaultStore());
       setStage('review');
     } catch (e) {
-      setErr(errMsg(e)); setStage('error');
+      setErr(errMsg(e, { action: 'read this stock file', context: 'StockRegister.handleFile' })); setStage('error');
     }
   }
 
@@ -318,23 +325,31 @@ export function StockRegister() {
     try {
       const res = parseResult;
       const latest = res.latest!;
-      const plantId = importPlant || null;
+      const storeId = importStore || null;
+      if (!storeId) throw new Error('Choose the store this file belongs to.');
+      // plant_id is kept as a legacy anchor only — store_id is authoritative.
+      const anchorPlantId = plants.find(p => storeIdFor(p.id) === storeId)?.id ?? null;
       const monthDates = res.months.map(m => m.periodMonth);
 
       // 1) Upload manifest (latest month; re-upload replaces).
+      //    Keyed on (store_id, period_month) — migration 60 replaced the old
+      //    (plant_id, period_month) constraint, and upserting against a
+      //    constraint that no longer exists is what produced "there is no unique
+      //    or exclusion constraint matching the ON CONFLICT specification".
       const { data: up, error: upErr } = await (supabase.from('store_stock_uploads') as any).upsert({
-        plant_id: plantId, period_month: latest.periodMonth, file_name: fileName, file_url: cloudUrl,
+        store_id: storeId, plant_id: anchorPlantId, period_month: latest.periodMonth,
+        file_name: fileName, file_url: cloudUrl,
         uploaded_by_name: activeProfile.name, row_count: res.totalItems, sheet_count: res.sheetCount,
-      }, { onConflict: 'plant_id,period_month' }).select('id').single();
+      }, { onConflict: 'store_id,period_month' }).select('id').single();
       if (upErr) throw upErr;
       const uploadId = up?.id ?? null;
 
-      // 2) Replace this plant's month snapshots (the file is the source of truth).
-      await supabase.from('store_stock_months').delete().eq('plant_id', plantId as string).in('period_month', monthDates);
-      const importStoreId = storeIdFor(plantId as string);
+      // 2) Replace this STORE's month snapshots (the file is the source of truth).
+      await supabase.from('store_stock_months').delete().eq('store_id', storeId).in('period_month', monthDates);
       const monthRows = res.months.flatMap(m => m.items.map(it => ({
-        upload_id: uploadId, plant_id: plantId, store_id: importStoreId, period_month: m.periodMonth, item_name: it.itemName, unit: it.unit,
-        opening: it.opening, purchase_opening: it.purchaseOpening, purchased: it.purchased, used: it.used, computed_closing: it.closing,
+        upload_id: uploadId, plant_id: anchorPlantId, store_id: storeId, period_month: m.periodMonth, item_name: it.itemName, unit: it.unit,
+        opening: it.opening, purchase_opening: it.purchaseOpening, purchase_closing: it.purchaseClosing,
+        purchased: it.purchased, used: it.used, computed_closing: it.closing,
       })));
       for (let i = 0; i < monthRows.length; i += CHUNK) {
         const { error } = await insertRows('store_stock_months', monthRows.slice(i, i + CHUNK));
@@ -343,13 +358,24 @@ export function StockRegister() {
 
       // 3) Seed the living register from the latest month's computed closing.
       const nowIso = new Date().toISOString();
+      // A negative closing means the sheet recorded more issued than was ever
+      // available — a real bookkeeping error, and exactly what the parser's
+      // `negative` anomaly type is for. The living register has a hard
+      // on_hand >= 0 constraint, so those rows are clamped to zero rather than
+      // failing the whole import: one impossible row must not block the other
+      // 515 legitimate ones. The month snapshot below keeps the TRUE negative
+      // value, so the audit trail stays honest and the anomaly still surfaces.
+      const negatives = latest.items.filter(it => it.closing < 0);
+      setClampedItems(negatives.map(it => ({ name: it.itemName, closing: it.closing })));
+
       const itemRows = latest.items.map(it => ({
         // store_id decides which register the row lands in. A DB trigger
         // (migration 62) fills it from plant_id if omitted, but sending it
         // explicitly is what lets the upsert below match on it.
-        plant_id: plantId, store_id: importStoreId, item_name: it.itemName, unit: it.unit, equipment: it.equipment, model: it.model,
-        baseline_qty: it.closing, baseline_month: latest.periodMonth, procured_qty: 0, issued_qty: 0, manual_delta: 0,
-        ticket_procured_qty: 0, on_hand: it.closing, updated_at: nowIso,
+        plant_id: anchorPlantId, store_id: storeId, item_name: it.itemName, unit: it.unit, equipment: it.equipment, model: it.model,
+        baseline_qty: Math.max(0, it.closing), baseline_month: latest.periodMonth,
+        procured_qty: 0, issued_qty: 0, manual_delta: 0,
+        ticket_procured_qty: 0, on_hand: Math.max(0, it.closing), updated_at: nowIso,
       }));
       for (let i = 0; i < itemRows.length; i += CHUNK) {
         // Conflict target follows the authoritative key. Migration 60 replaced
@@ -357,7 +383,7 @@ export function StockRegister() {
         // on the old pair would insert a SECOND row for an item the shared
         // Rehla store already holds instead of updating it.
         const { error } = await (supabase.from('store_items') as any)
-          .upsert(itemRows.slice(i, i + CHUNK), { onConflict: importStoreId ? 'store_id,item_name' : 'plant_id,item_name' });
+          .upsert(itemRows.slice(i, i + CHUNK), { onConflict: 'store_id,item_name' });
         if (error) throw error;
       }
 
@@ -365,7 +391,7 @@ export function StockRegister() {
       setStage('done');
       await load();
     } catch (e) {
-      setErr(errMsg(e)); setStage('error');
+      setErr(errMsg(e, { action: 'import this stock file', context: 'StockRegister.confirmImport' })); setStage('error');
     }
   }
 
@@ -410,7 +436,7 @@ export function StockRegister() {
       toast.success(t('storereq.stockToastSaved', 'Stock updated and logged to the Activity Log.'));
       await load();
     } catch (e) {
-      toast.error(errMsg(e));
+      toast.error(errMsg(e, { action: 'save this stock change', context: 'StockRegister.saveEdit' }));
     }
   }
 
@@ -643,10 +669,15 @@ export function StockRegister() {
                   {t('storereq.stockSeedNotePre', 'Register on-hand will be seeded from')} <strong>{parseResult.latest!.label}</strong>{t('storereq.stockSeedNotePost', "'s computed closing (opening + purchased − used). Existing snapshots for these months will be replaced.")}
                 </div>
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 4 }}>{t('storereq.stockPlantBelongs', 'Plant this file belongs to')}</div>
-                  <select value={importPlant} onChange={e => setImportPlant(e.target.value)} style={{ ...inputStyle, width: '100%' }}>
-                    {plantOptions.length === 0 && <option value="">{t('storereq.stockNoPlantOpt', '(no plant)')}</option>}
-                    {plantOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {/* A monthly workbook is a STORE's register, not a factory's.
+                      The client keeps ONE "Store Keeping … Jharkhand" file for all
+                      three Rehla factories, so asking which factory it belongs to
+                      had no correct answer — and picking any one of them filed the
+                      same stock under a single factory instead of the shared store. */}
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748B', textTransform: 'uppercase', marginBottom: 4 }}>{t('storereq.stockStoreBelongs', 'Store this file belongs to')}</div>
+                  <select value={importStore} onChange={e => setImportStore(e.target.value)} style={{ ...inputStyle, width: '100%' }}>
+                    {storeOptions.length === 0 && <option value="">{t('storereq.stockNoStoreOpt', '(no store)')}</option>}
+                    {storeOptions.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
                   </select>
                 </div>
                 {importAnoms.length > 0 && (
@@ -667,7 +698,28 @@ export function StockRegister() {
 
             {stage === 'done' && (
               <div>
-                <div style={{ fontSize: 13, color: '#16A34A', marginBottom: 14 }}>{t('storereq.stockImportedDone', { defaultValue: '✓ Imported {{n}} items into the register.', n: importedCount })}</div>
+                <div style={{ fontSize: 13, color: '#16A34A', marginBottom: clampedItems.length ? 10 : 14 }}>{t('storereq.stockImportedDone', { defaultValue: '✓ Imported {{n}} items into the register.', n: importedCount })}</div>
+                {clampedItems.length > 0 && (
+                  <div style={{ fontSize: 12, color: '#92400E', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, padding: 10, marginBottom: 14 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                      {t('storereq.stockClampedTitle', {
+                        defaultValue: '{{n}} item(s) showed less than zero in the sheet and were set to 0',
+                        n: clampedItems.length,
+                      })}
+                    </div>
+                    <div style={{ marginBottom: 6 }}>
+                      {t('storereq.stockClampedBody', 'The sheet records more issued than was ever received, so the closing balance is impossible. Everything else imported normally. Please correct these rows in the workbook and upload again:')}
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {clampedItems.slice(0, 8).map(c => (
+                        <li key={c.name}><strong>{c.name}</strong> — sheet says {c.closing}</li>
+                      ))}
+                    </ul>
+                    {clampedItems.length > 8 && (
+                      <div style={{ marginTop: 4 }}>{t('storereq.stockClampedMore', { defaultValue: '…and {{n}} more.', n: clampedItems.length - 8 })}</div>
+                    )}
+                  </div>
+                )}
                 <button onClick={resetImport} style={{ ...btnPrimary, width: '100%' }}>{t('storereq.stockDone', 'Done')}</button>
               </div>
             )}

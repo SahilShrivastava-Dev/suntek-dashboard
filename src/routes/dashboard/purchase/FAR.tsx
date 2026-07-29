@@ -759,6 +759,10 @@ export function FAR() {
             <div className="flex items-center justify-between flex-wrap gap-2 bg-slate-50 border border-slate-200 rounded-[10px] px-3.5 py-2.5">
               <div className="text-[13px] text-slate-600">
                 <strong>{assets.length}</strong> {assets.length === 1 ? t('far.assetWord', 'asset') : t('far.assetsWord', 'assets')} · <strong>{equipGroups.length}</strong> {equipGroups.length === 1 ? t('far.equipTypeWord', 'equipment type') : t('far.equipTypesWord', 'equipment types')}
+                {/* Always say WHICH factory this register belongs to. Hiding it
+                    when only one exists means someone returning months after an
+                    import cannot tell whose assets they are looking at. */}
+                {plantsInFar.length === 1 && <span> · <strong>{plantsInFar[0].name}</strong></span>}
                 {plantsInFar.length > 1 && <span> · {t('far.nPlants', { defaultValue: '{{count}} plants', count: plantsInFar.length })}</span>}
               </div>
               <button onClick={() => setEquipOpenTable(o => !o)} className="text-sm font-semibold text-slate-700 hover:text-slate-900" style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -768,6 +772,11 @@ export function FAR() {
 
             {equipOpenTable && (
               <div style={{ marginTop: 14 }}>
+                {plantsInFar.length === 1 && (
+                  <div className="flex gap-2 mb-3 flex-wrap">
+                    <span className="chip active" style={{ cursor: 'default' }}>{plantsInFar[0].name}</span>
+                  </div>
+                )}
                 {plantsInFar.length > 1 && (
                   <div className="flex gap-2 mb-3 flex-wrap">
                     <button onClick={() => setEquipPlantFilter([])} className={`chip${equipPlantFilter.length === 0 ? ' active' : ''}`}>{t('common.allPlants')}</button>
@@ -812,7 +821,7 @@ export function FAR() {
                             {open && (
                               <tr>
                                 <td colSpan={8} style={{ background: '#F8FAFC', padding: 0 }}>
-                                  <AssetDetailTable assets={g.assets} showPlant={plantsInFar.length > 1} onUploadPic={handleAssetPicUpload} onViewPic={handleAssetPicView} />
+                                  <AssetDetailTable assets={g.assets} showPlant={plantsInFar.length >= 1} onUploadPic={handleAssetPicUpload} onViewPic={handleAssetPicView} />
                                 </td>
                               </tr>
                             )}

@@ -118,7 +118,33 @@ function parseSheetName(name: string): { kind: 'sales' | 'purchase'; key: string
 const MONTH_LABELS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // ── Parse one sheet (array-of-arrays) into a name→{unit,opening,movement} map ─
-interface SheetItem { name: string; unit: string; opening: number; movement: number; }
+interface SheetItem { name: string; unit: string; opening: number; movement: number; closing: number | null; }
+
+/**
+ * The month's closing balance for an item.
+ *
+ * PREFER THE SHEET'S OWN "Closing" COLUMN. Recomputing it as
+ * opening + purchased − used double-counts whenever the two sheets describe the
+ * same physical stock from different angles — which is normal in this workbook.
+ *
+ * Real example, 3.5 SUT (7/16") 2" LENGTH, July 2026:
+ *   Sales sheet     Op Stock 50, no issues,        Closing 50
+ *   Purchase sheet  Opening   0, 50 bought day 7,  Closing 50
+ * Both agree the month ends at 50 — the same 50 units. The formula gave
+ * 50 + 50 − 0 = 100, and the register showed double the real stock.
+ *
+ * The Sales sheet is the stock book, so its Closing is authoritative. The
+ * computed value is only a fallback for the rare row with no Closing cell
+ * (2 of 521 in the client's July sheet).
+ */
+export function resolveClosing(
+  salesClosing: number | null | undefined,
+  opening: number, purchased: number, used: number,
+): number {
+  return typeof salesClosing === 'number' && Number.isFinite(salesClosing)
+    ? salesClosing
+    : opening + purchased - used;
+}
 function parseSheet(ws: XLSX.WorkSheet): Map<string, SheetItem> {
   const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, blankrows: false });
   // Header = the first row containing an "Items Name" cell.
@@ -149,11 +175,15 @@ function parseSheet(ws: XLSX.WorkSheet): Map<string, SheetItem> {
     const key = joinKey(name);
     if (!key) continue;
     const movement = dayIdxs.reduce((s, j) => s + num(r[j]), 0);
+    const rawClose = closeIdx >= 0 ? r[closeIdx] : null;
     const item: SheetItem = {
       name,
       unit: unitIdx >= 0 ? String(r[unitIdx] ?? '').trim() : '',
       opening: num(r[openIdx]),
       movement,
+      // The sheet's own stated closing — authoritative when present.
+      closing: typeof rawClose === 'number' ? rawClose
+             : (typeof rawClose === 'string' && rawClose.trim() !== '' ? num(rawClose) : null),
     };
     // First occurrence wins (guards against duplicate rows in the sheet).
     if (!out.has(key)) out.set(key, item);
@@ -203,7 +233,9 @@ export async function parseStockFile(file: File): Promise<StockParseResult> {
           unit: normalizeUnit(s?.unit || pu?.unit),
           equipment, model,
           opening, purchaseOpening, purchased, used,
-          closing: opening + purchased - used,
+          // Never opening + purchased − used when the sheet states a closing:
+          // that sums the same stock twice (see resolveClosing).
+          closing: resolveClosing(s?.closing, opening, purchased, used),
         });
       }
       items.sort((a, b) => a.itemName.localeCompare(b.itemName));

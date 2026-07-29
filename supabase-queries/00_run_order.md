@@ -53,7 +53,8 @@ Run **in order**, and mind the two gates. Each has a paired `*_rollback_*.sql`.
 | 63 | `63_rehla_far_split.sql` | ⚠️ **TEST FIXTURE** — deals Rehla's assets across the 3 factories so FAR isolation can be exercised. The ownership is ARBITRARY; replace with the client's marked-up register | 🔴 **fixture** |
 | 64 | `64_tier_renumber_l0_top.sql` | Hierarchy renumbered so the top is **L0**: L0 Admin, L1 Management, L2 Unit Head, L3 Managers, L4 Entry. `rank` keeps its meaning (higher = more senior), so L0 carries rank 50. **Deploy the frontend with it** | 🟡 |
 | 65 | `65_tag_events_and_requests.sql` | Guard triggers so stock movements and part requests always carry their store + requesting factory. Without it the purchase / repair-return RPCs and the split-fulfilment path keep writing untagged rows, invisible to the reconciliation report | 🟡 |
-| ✅ | `99_verify_factory_store_model.sql` | **Read-only acceptance sweep** — 33 assertions across naming, access, Rehla sharing, single-store regression, stock integrity, FAR isolation, maintenance ownership and the L0 ladder. Run after any of the above | 🟢 |
+| 66 | `66_retire_unit_store_manager_roles.sql` | Drops `store_manager_chlorides` / `_plasticiser`. The factories now carry that meaning and share one register, so there is one store-manager role. **Refuses to run if anyone still holds them** | 🟢 |
+| ✅ | `99_verify_factory_store_model.sql` | **Read-only acceptance sweep** — 36 assertions across naming, access, Rehla sharing, single-store regression, stock integrity, FAR isolation, maintenance ownership and the L0 ladder. Run after any of the above | 🟢 |
 
 **Why renaming is safe:** access is keyed on `plants.id` (uuid) — `user_plants`, RLS
 `my_plant_ids()`, `profiles.plant_id`. The auth JWT carries only `{name, role_id}`.

@@ -316,18 +316,16 @@ const CHANGE_TAG_KEYS: Record<string, string> = {
   'Incorrect assessment': 'maint.tagIncorrectAssessment',
 };
 
-// ── Jharkhand procurement units — store requests route to the matching store manager.
-type Unit = 'chlorides' | 'plasticiser';
-const UNIT_LABELS: Record<Unit, string> = { chlorides: 'Suntek Chlorides', plasticiser: 'Suntek Plasticiser' };
-const UNIT_STORE_MANAGER: Record<Unit, string> = { chlorides: 'store_manager_chlorides', plasticiser: 'store_manager_plasticiser' };
-const ALL_STORE_MANAGER_IDS = ['store_manager_maint', 'store_manager_chlorides', 'store_manager_plasticiser', 'warehouse_manager'];
-/** Derive a unit from a profile's plant string. */
-function unitOf(plant?: string | null): Unit | null {
-  const p = (plant || '').toLowerCase();
-  if (p.includes('chlorid')) return 'chlorides';
-  if (p.includes('plastic')) return 'plasticiser';
-  return null;
-}
+// Store requests route to the store manager. There is ONE store-manager role.
+//
+// There used to be two more — store_manager_chlorides and _plasticiser — from
+// when Rehla was a single plant with Chlorides and Plasticiser as units inside
+// it, and a request had to reach the right unit's keeper. The factories now
+// carry that meaning (SCPL – Rehla IS chlorides, SPPL – Rehla IS plasticiser)
+// and they share one register, so routing by unit is routing by a distinction
+// that no longer exists. It also relied on substring-matching the plant NAME
+// for "chlorid"/"plastic" — exactly the name-as-logic this model removed.
+const ALL_STORE_MANAGER_IDS = ['store_manager_maint', 'warehouse_manager'];
 
 /** The technician's persisted first decision for an emergency ticket — the single
  *  source of truth for both the stage strip and the action body, so a reopened ticket
@@ -516,7 +514,6 @@ export function Maintenance() {
   const isUnitHead = role === 'unit_head';
   const isStoreManager = ALL_STORE_MANAGER_IDS.includes(role);
   const isPurchaseManager = role === 'purchase_manager';
-  const myStoreUnit = unitOf(activeProfile.plant); // for unit-specific store managers
 
   // Data
   const [tab, setTab] = useState<'periodic' | 'emergency' | 'schedule'>('periodic');
@@ -1440,16 +1437,12 @@ export function Maintenance() {
     await insertRows('maintenance_store_requests', rows);
     await updateTicketStatus(selectedTicket.id, 'pending_store');
     setSelectedTicket((t) => t ? { ...t, status: 'pending_store' } : t);
-    // Route to the store manager of the ticket's Jharkhand unit (Chlorides /
-    // Plasticiser); fall back to the generic store manager if no unit is set.
-    const unit = (selectedTicket.unit as Unit | null) || null;
-    const storeTargets = unit
-      ? [UNIT_STORE_MANAGER[unit], 'admin']
-      : ['admin', 'store_manager_maint', 'warehouse_manager'];
+    // One store per factory (shared at Rehla), so one store-manager audience.
+    const storeTargets = ['admin', 'store_manager_maint', 'warehouse_manager'];
     const names = items.map(i => i.partName).join(', ');
     notify({
       target_roles: storeTargets,
-      title: `Store parts needed${unit ? ` · ${UNIT_LABELS[unit]}` : ''}: ${items.length} item${items.length > 1 ? 's' : ''}`,
+      title: `Store parts needed: ${items.length} item${items.length > 1 ? 's' : ''}`,
       body: `${selectedTicket.equipment} · ${names} · Check availability`,
       type: 'warning', route: maintRoute(selectedTicket?.id),
       actor_name: activeProfile.name, actor_role: role, read_by: [],
@@ -1466,24 +1459,6 @@ export function Maintenance() {
     } finally { actionBusyRef.current = false; }
   }
 
-  // Unit head override: reroute the store request to the other unit's store manager.
-  async function rerouteStoreUnit() {
-    if (!selectedTicket) return;
-    const cur = (selectedTicket.unit as Unit | null) || 'chlorides';
-    const other: Unit = cur === 'chlorides' ? 'plasticiser' : 'chlorides';
-    const otherUnitId = scopeUnits.find(u => u.plant_id === selectedTicket.plant_id && (u.code === other || u.name.toLowerCase() === other))?.id || null;
-    await updateRows('maintenance_tickets', { unit: other, unit_id: otherUnitId }).eq('id', selectedTicket.id);
-    setSelectedTicket((t) => t ? { ...t, unit: other, unit_id: otherUnitId } : t);
-    notify({
-      target_roles: [UNIT_STORE_MANAGER[other], 'admin'],
-      title: `Rerouted to ${UNIT_LABELS[other]} store`,
-      body: `${activeProfile.name} rerouted "${selectedTicket.equipment}" to the ${UNIT_LABELS[other]} store manager.`,
-      type: 'warning', route: maintRoute(selectedTicket?.id),
-      actor_name: activeProfile.name, actor_role: role, read_by: [],
-      plant_id: selectedTicket.plant_id, unit_id: otherUnitId,
-    });
-    await loadData();
-  }
 
   async function startRepair() {
     if (!selectedTicket) return;
@@ -2301,10 +2276,9 @@ export function Maintenance() {
     // Each item card shows its own stage + the action for the current role.
     // Items flow independently; the Purchase Manager bills the procured ones
     // together below. The ticket status is a roll-up of the least-advanced item.
-    const ticketUnit = (tk.unit as Unit | null) || null;
-    const storeManagerCanAct = isAdmin || (isStoreManager && (
-      role === 'store_manager_maint' || role === 'warehouse_manager' || !ticketUnit || myStoreUnit === ticketUnit
-    ));
+    // Any store manager may act: the register they serve is decided by the
+    // ticket's factory, not by which unit-flavoured role they happen to hold.
+    const storeManagerCanAct = isAdmin || isStoreManager;
     const cancelBtn: React.CSSProperties = { flex: 1, padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', fontWeight: 600, fontSize: 12.5, fontFamily: 'inherit' };
     const primaryBtn = (bg: string): React.CSSProperties => ({ padding: '9px 12px', borderRadius: 10, border: 'none', background: bg, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit' });
     const awaitTxt: React.CSSProperties = { fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '10px 0', marginTop: 6 };
@@ -2527,10 +2501,6 @@ export function Maintenance() {
             );
           });
         })()}
-
-        {(isUnitHead || isAdmin) && storeReqs.some(r => itemStage(r) === 'store') && ticketUnit && (
-          <button onClick={rerouteStoreUnit} style={{ width: '100%', padding: '9px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{t('maint.rerouteToStore', { defaultValue: '⇄ Reroute to {{unit}} store', unit: UNIT_LABELS[ticketUnit === 'plasticiser' ? 'chlorides' : 'plasticiser'] })}</button>
-        )}
 
         {/* PURCHASE MANAGER — aggregate bill for all procured items */}
         {procuredAwaitingBill.length > 0 && (isPurchaseManager || isAdmin) && (
@@ -3097,7 +3067,10 @@ export function Maintenance() {
               <div style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>
                 #{selectedTicket.id.slice(0, 8)} · {t('maint.colRaisedBy', 'Raised by')} {selectedTicket.raised_by || '—'}
                 {selectedTicket.assigned_to && <> · {t('maint.colAssignedTo', 'Assigned to')} {selectedTicket.assigned_to}</>} · {formatDate(selectedTicket.created_at)}
-                {selectedTicket.unit && <> · <span style={{ color: '#A21CAF', fontWeight: 700 }}>{UNIT_LABELS[selectedTicket.unit as Unit] || selectedTicket.unit}</span></>}
+                {/* Historical only — tickets raised before the units were retired
+                    still record which one they were routed to. Shown so the old
+                    audit trail stays readable; nothing writes it any more. */}
+                {selectedTicket.unit && <> · <span style={{ color: '#A21CAF', fontWeight: 700 }}>{selectedTicket.unit}</span></>}
               </div>
               {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><TicketDescription entityId={selectedTicket.id} text={selectedTicket.description} /></div>}
             </div>

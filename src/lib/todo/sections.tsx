@@ -275,7 +275,7 @@ export const TODO_SECTIONS: TodoSectionDef[] = [
     tone: 'amber',
     columns: TICKET_COLS('todo.col.stage'),
     appliesTo: (ctx) =>
-      hasRole(ctx, 'store_manager_maint', 'store_manager_chlorides', 'store_manager_plasticiser', 'warehouse_manager'),
+      hasRole(ctx, 'store_manager_maint', 'warehouse_manager'),
     fetch: async (ctx) => {
       const { data } = await ctx.scopeQuery(
         supabase.from('maintenance_tickets').select(TICKET_SELECT).in('status', ['pending_store', 'pending_handover']),

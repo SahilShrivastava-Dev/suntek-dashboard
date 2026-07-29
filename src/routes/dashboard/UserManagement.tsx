@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Users, UserCheck, Shield } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { fetchActivePlants } from '../../lib/plants';
+import { humanizeError } from '../../lib/errors';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
 import { insertRows, updateRows } from '../../lib/db';
 import { createLogin, updateLogin } from '../../lib/adminUsers';
@@ -491,7 +492,10 @@ export function UserManagement() {
           role_id: form.role_id,
           plant_id: plant?.id || null,
         });
-        if (error) { toast.error(t('userMgmt.errLoginUpdateFailed', { msg: error })); return; }
+        if (error) {
+          toast.error(humanizeError(error, { action: 'update this login', context: 'UserManagement.updateLogin' }));
+          return;
+        }
       } else {
         const { error } = await createLogin({
           user_account_id: accountId,
@@ -510,7 +514,7 @@ export function UserManagement() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (supabase.from('user_accounts') as any).delete().eq('id', accountId);
           }
-          toast.error(t('userMgmt.errLoginCreateFailed', { msg: error }));
+          toast.error(humanizeError(error, { action: 'create this login', context: 'UserManagement.createLogin' }));
           return;
         }
       }

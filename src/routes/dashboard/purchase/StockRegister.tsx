@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+// Shared humanizer — a user should never be shown a raw error object.
+import { humanizeError as errMsg } from '../../../lib/errors';
 import { fetchActivePlants } from '../../../lib/plants';
 import { insertRows } from '../../../lib/db';
 import { useToast } from '../../../components/ui/toast';
@@ -33,15 +35,6 @@ interface MergedRow {
 }
 
 const CHUNK = 500;
-
-/** Supabase/Postgrest errors are plain objects, not Error instances. */
-function errMsg(e: unknown): string {
-  if (!e) return 'Unknown error';
-  if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message;
-  const o = e as { message?: string; details?: string; hint?: string; code?: string };
-  return o.message || o.details || o.hint || (o.code ? `Error ${o.code}` : JSON.stringify(e));
-}
 
 function stockStatus(onHand: number): { key: 'out' | 'low' | 'in'; label: string; bg: string; color: string } {
   if (onHand <= 0) return { key: 'out', label: 'Out', bg: '#FEE2E2', color: '#DC2626' };

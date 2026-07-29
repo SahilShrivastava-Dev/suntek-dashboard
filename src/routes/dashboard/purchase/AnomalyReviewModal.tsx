@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
+// Shared humanizer — a user should never be shown a raw error object.
+import { humanizeError as errMsg } from '../../../lib/errors';
 import { callRpc } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import type { ReviewedAnomaly, AnomalyAction } from '../../../lib/store/anomalyKeys';
@@ -14,14 +16,6 @@ interface EventRow {
   corrected_value: number | null;
   actor_name: string | null;
   created_at: string;
-}
-
-function errMsg(e: unknown): string {
-  if (!e) return 'Unknown error';
-  if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message;
-  const o = e as { message?: string };
-  return o.message || JSON.stringify(e);
 }
 
 const STATUS_TONE: Record<string, { bg: string; color: string }> = {

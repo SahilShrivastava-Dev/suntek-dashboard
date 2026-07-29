@@ -7,6 +7,7 @@
  * attached automatically by supabase-js when a session exists.
  */
 import { supabase } from './supabase';
+import { rawErrorText } from './errors';
 
 export interface CreateLoginInput {
   user_account_id: string;
@@ -36,18 +37,27 @@ interface AdminUsersResult {
 async function invoke(body: Record<string, unknown>): Promise<{ data: AdminUsersResult | null; error: string | null }> {
   const { data, error } = await supabase.functions.invoke<AdminUsersResult>('admin-users', { body });
   if (error) {
-    // Edge function errors carry the JSON body in error.context when available.
-    let msg = error.message;
+    // Edge function errors carry the real JSON body in error.context; the
+    // top-level message is only ever "non-2xx status code".
+    //
+    // Everything is funnelled through rawErrorText so this ALWAYS returns a
+    // string. It used to assign whatever `j.error` happened to be — and when
+    // that was an object, the caller interpolated it into a toast and the user
+    // saw "Login update failed: {}".
+    let msg = rawErrorText(error);
     try {
       const ctx = (error as { context?: Response }).context;
       if (ctx && typeof ctx.json === 'function') {
-        const j = await ctx.json();
-        if (j?.error) msg = j.error;
+        const body = await ctx.json();
+        const fromBody = rawErrorText(body?.error ?? body);
+        if (fromBody) msg = fromBody;
       }
-    } catch { /* ignore */ }
-    return { data: null, error: msg };
+    } catch { /* body already consumed or not JSON — keep what we have */ }
+    return { data: null, error: msg || 'The server rejected the request.' };
   }
-  if (data && data.ok === false) return { data: null, error: data.error ?? 'Request failed' };
+  if (data && data.ok === false) {
+    return { data: null, error: rawErrorText(data.error) || 'The server rejected the request.' };
+  }
   return { data: data ?? null, error: null };
 }
 

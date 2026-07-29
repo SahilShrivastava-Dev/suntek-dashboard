@@ -55,6 +55,7 @@ Run **in order**, and mind the two gates. Each has a paired `*_rollback_*.sql`.
 | 65 | `65_tag_events_and_requests.sql` | Guard triggers so stock movements and part requests always carry their store + requesting factory. Without it the purchase / repair-return RPCs and the split-fulfilment path keep writing untagged rows, invisible to the reconciliation report | 🟡 |
 | 66 | `66_retire_unit_store_manager_roles.sql` | Drops `store_manager_chlorides` / `_plasticiser`. The factories now carry that meaning and share one register, so there is one store-manager role. **Refuses to run if anyone still holds them** | 🟢 |
 | 67 | `67_store_month_purchase_closing.sql` | Persists the Purchase sheet's Closing on `store_stock_months`, so the Anomaly panel can apply the client-confirmed rule (Sales opening == Purchase closing) instead of approximating it | 🟢 |
+| 68 | `68_reset_far_and_stock_TESTING_ONLY.sql` | ⚠️ **DESTRUCTIVE, TEST DATA ONLY.** Empties the FAR and the whole Stock Register for a clean re-import. Dry-runs by default; you must set `v_i_understand := true`. Deliberately NOT part of any migration — replaying the list must never wipe a live register | 🔴 **manual** |
 | ✅ | `99_verify_factory_store_model.sql` | **Read-only acceptance sweep** — 36 assertions across naming, access, Rehla sharing, single-store regression, stock integrity, FAR isolation, maintenance ownership and the L0 ladder. Run after any of the above | 🟢 |
 
 **Why renaming is safe:** access is keyed on `plants.id` (uuid) — `user_plants`, RLS

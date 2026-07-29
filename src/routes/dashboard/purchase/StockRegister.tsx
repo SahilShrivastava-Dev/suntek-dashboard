@@ -114,6 +114,10 @@ export function StockRegister() {
   const [importStore, setImportStore] = useState('');   // a workbook belongs to a STORE
   const [importAnoms, setImportAnoms] = useState<Anomaly[]>([]);
   const [importedCount, setImportedCount] = useState(0);
+  // Items whose computed closing was negative in the source workbook. The
+  // register cannot hold negative stock, so they land at 0 — but the person who
+  // uploaded needs to know WHICH, or the sheet never gets corrected.
+  const [clampedItems, setClampedItems] = useState<{ name: string; closing: number }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Manual edit modal
@@ -346,13 +350,24 @@ export function StockRegister() {
 
       // 3) Seed the living register from the latest month's computed closing.
       const nowIso = new Date().toISOString();
+      // A negative closing means the sheet recorded more issued than was ever
+      // available — a real bookkeeping error, and exactly what the parser's
+      // `negative` anomaly type is for. The living register has a hard
+      // on_hand >= 0 constraint, so those rows are clamped to zero rather than
+      // failing the whole import: one impossible row must not block the other
+      // 515 legitimate ones. The month snapshot below keeps the TRUE negative
+      // value, so the audit trail stays honest and the anomaly still surfaces.
+      const negatives = latest.items.filter(it => it.closing < 0);
+      setClampedItems(negatives.map(it => ({ name: it.itemName, closing: it.closing })));
+
       const itemRows = latest.items.map(it => ({
         // store_id decides which register the row lands in. A DB trigger
         // (migration 62) fills it from plant_id if omitted, but sending it
         // explicitly is what lets the upsert below match on it.
         plant_id: anchorPlantId, store_id: storeId, item_name: it.itemName, unit: it.unit, equipment: it.equipment, model: it.model,
-        baseline_qty: it.closing, baseline_month: latest.periodMonth, procured_qty: 0, issued_qty: 0, manual_delta: 0,
-        ticket_procured_qty: 0, on_hand: it.closing, updated_at: nowIso,
+        baseline_qty: Math.max(0, it.closing), baseline_month: latest.periodMonth,
+        procured_qty: 0, issued_qty: 0, manual_delta: 0,
+        ticket_procured_qty: 0, on_hand: Math.max(0, it.closing), updated_at: nowIso,
       }));
       for (let i = 0; i < itemRows.length; i += CHUNK) {
         // Conflict target follows the authoritative key. Migration 60 replaced
@@ -675,7 +690,28 @@ export function StockRegister() {
 
             {stage === 'done' && (
               <div>
-                <div style={{ fontSize: 13, color: '#16A34A', marginBottom: 14 }}>{t('storereq.stockImportedDone', { defaultValue: '✓ Imported {{n}} items into the register.', n: importedCount })}</div>
+                <div style={{ fontSize: 13, color: '#16A34A', marginBottom: clampedItems.length ? 10 : 14 }}>{t('storereq.stockImportedDone', { defaultValue: '✓ Imported {{n}} items into the register.', n: importedCount })}</div>
+                {clampedItems.length > 0 && (
+                  <div style={{ fontSize: 12, color: '#92400E', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, padding: 10, marginBottom: 14 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                      {t('storereq.stockClampedTitle', {
+                        defaultValue: '{{n}} item(s) showed less than zero in the sheet and were set to 0',
+                        n: clampedItems.length,
+                      })}
+                    </div>
+                    <div style={{ marginBottom: 6 }}>
+                      {t('storereq.stockClampedBody', 'The sheet records more issued than was ever received, so the closing balance is impossible. Everything else imported normally. Please correct these rows in the workbook and upload again:')}
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {clampedItems.slice(0, 8).map(c => (
+                        <li key={c.name}><strong>{c.name}</strong> — sheet says {c.closing}</li>
+                      ))}
+                    </ul>
+                    {clampedItems.length > 8 && (
+                      <div style={{ marginTop: 4 }}>{t('storereq.stockClampedMore', { defaultValue: '…and {{n}} more.', n: clampedItems.length - 8 })}</div>
+                    )}
+                  </div>
+                )}
                 <button onClick={resetImport} style={{ ...btnPrimary, width: '100%' }}>{t('storereq.stockDone', 'Done')}</button>
               </div>
             )}

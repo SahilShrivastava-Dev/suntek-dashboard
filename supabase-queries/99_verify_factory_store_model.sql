@@ -252,6 +252,16 @@ select 'H3', 'Every role sits on a real tier',
        case when count(*) = 0 then 'PASS' else 'FAIL' end
   from roles r where not exists (select 1 from tiers t where t.id = r.level)
 union all
+select 'H5', 'Every role assignment points at a role that exists',
+       '0 orphans', count(*)::text,
+       case when count(*) = 0 then 'PASS' else 'FAIL' end
+  from user_roles ur where not exists (select 1 from roles r where r.id = ur.role_id)
+union all
+select 'H6', 'One store-manager role, not the retired per-unit variants',
+       '0 retired', count(*)::text,
+       case when count(*) = 0 then 'PASS' else 'FAIL' end
+  from roles where id in ('store_manager_chlorides', 'store_manager_plasticiser')
+union all
 select 'H4', 'Admin is on the top tier',
        'L0', coalesce((select level from roles where id='admin'), 'MISSING'),
        case when (select level from roles where id='admin') = 'L0' then 'PASS' else 'FAIL' end

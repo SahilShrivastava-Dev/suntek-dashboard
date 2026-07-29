@@ -35,7 +35,7 @@ export interface PlantRow {
 }
 export interface UnitRow { id: string; plant_id: string; name: string; code: string | null }
 export interface LocationRow { id: string; state: string; name: string; code: string | null }
-export interface StoreRow { id: string; location_id: string | null; name: string; code: string | null }
+export interface StoreRow { id: string; location_id: string | null; name: string; code: string | null; is_active?: boolean | null }
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000'; // matches no row (fail-closed)
 const EMPTY_IDS: string[] = []; // stable ref so scope memoization doesn't churn each render
@@ -127,7 +127,14 @@ export function PlantScopeProvider({ children }: { children: React.ReactNode }) 
       const [u, loc, st, fsa] = await Promise.all([
         supabase.from('units').select('id, plant_id, name, code').order('name').returns<UnitRow[]>(),
         supabase.from('locations').select('id, state, name, code').order('name').returns<LocationRow[]>(),
-        supabase.from('stores').select('id, location_id, name, code').order('name').returns<StoreRow[]>(),
+        // Retired stores are kept (migration 60 deactivates the per-factory
+        // Rehla registers rather than deleting them, so history still resolves)
+        // but must never appear in a picker — otherwise the store-access list
+        // shows three identical "Rehla Store" rows next to the real shared one.
+        // `is_active.is.null` covers a store row created before the column
+        // existed. Same rule as fetchActivePlants().
+        supabase.from('stores').select('id, location_id, name, code, is_active')
+          .or('is_active.is.null,is_active.eq.true').order('name').returns<StoreRow[]>(),
         supabase.from('factory_store_access').select('plant_id, store_id').returns<{ plant_id: string; store_id: string }[]>(),
       ]);
 

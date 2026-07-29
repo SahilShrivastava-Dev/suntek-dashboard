@@ -51,6 +51,7 @@ const STATUS_LABEL_KEYS: Record<'out' | 'low' | 'in', string> = {
 const ANOM_META: Record<Anomaly['type'], { label: string; labelKey: string; icon: string }> = {
   carry_forward: { label: 'Carry-forward drift', labelKey: 'storereq.stockAnomCarryForward', icon: '⚠' },
   intra_month:   { label: 'Sheet mismatch',      labelKey: 'storereq.stockAnomSheetMismatch', icon: '⚠' },
+  sheet_self:    { label: 'Sheet contradicts itself', labelKey: 'storereq.stockAnomSheetSelf', icon: '✎' },
   negative:      { label: 'Negative stock',      labelKey: 'storereq.stockAnomNegative',      icon: '🔴' },
   added:         { label: 'New item',            labelKey: 'storereq.stockAnomNewItem',       icon: '＋' },
   removed:       { label: 'Removed item',        labelKey: 'storereq.stockAnomRemovedItem',   icon: '－' },

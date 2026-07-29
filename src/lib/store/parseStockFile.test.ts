@@ -82,16 +82,74 @@ describe('reconcile — Sales opening vs Purchase closing, same month', () => {
     expect(a.filter(x => x.type === 'intra_month')).toHaveLength(0);
   });
 
-  it('never compares across months', () => {
-    // Even with a previous month whose closing differs wildly, no carry-forward
-    // anomaly is raised — the client's rule is same-month only.
+  it('is independent of the cross-month check', () => {
+    // Same-month reconciliation passes even when the month boundary does not:
+    // the two are separate hand-offs and must be reported separately.
     const prev = month([item({ closing: 999 })]);
-    const a = reconcile(prev, month([item({ opening: 5, purchaseClosing: 5, closing: 5 })]));
-    expect(a.some(x => x.type === 'carry_forward')).toBe(false);
+    const a = reconcile(prev, month([item({ opening: 5, purchaseOpening: 5, purchaseClosing: 5, closing: 5 })]));
+    expect(a.some(x => x.type === 'intra_month')).toBe(false);   // sheets agree
+    expect(a.some(x => x.type === 'carry_forward')).toBe(true);  // boundary does not
   });
 
   it('still reports an impossible closing', () => {
     const a = reconcile(null, month([item({ opening: 0, purchaseClosing: 0, used: 1, closing: -1 })]));
     expect(a.find(x => x.type === 'negative')).toBeDefined();
+  });
+});
+
+describe('carry_forward — only when a previous month exists', () => {
+  it('is SKIPPED when the workbook holds a single month', () => {
+    // A file with only the latest month has nothing to hand over from. The
+    // check must be skipped, not compared against zero — otherwise every item
+    // in a one-month upload looks like stock appeared from nowhere.
+    const a = reconcile(null, month([item({ opening: 20, purchaseOpening: 20, purchaseClosing: 20, closing: 20 })]));
+    expect(a.some(x => x.type === 'carry_forward')).toBe(false);
+    expect(a).toHaveLength(0);
+  });
+
+  it('is skipped for an item that is new this month', () => {
+    const prev = month([item({ itemName: 'Old', key: 'old', closing: 5 })]);
+    const a = reconcile(prev, month([item({ itemName: 'New', key: 'new', opening: 7, purchaseOpening: 7, purchaseClosing: 7, closing: 7 })]));
+    expect(a.some(x => x.type === 'carry_forward')).toBe(false);
+  });
+
+  it('compares last month closing to this month PURCHASE opening', () => {
+    const prev = month([item({ closing: 24 })]);
+    const a = reconcile(prev, month([item({ opening: 151, purchaseOpening: 151, purchaseClosing: 151, closing: 151 })]));
+    const cf = a.find(x => x.type === 'carry_forward');
+    expect(cf).toBeDefined();
+    expect(cf!.delta).toBe(127);          // Coupling 100: closed 24, reopened 151
+    expect(cf!.severity).toBe('high');
+  });
+
+  it('does not fire when stock carries across cleanly', () => {
+    const prev = month([item({ closing: 30 })]);
+    // 30 carried in, 5 received -> 35 available, 35 copied to sales opening.
+    const a = reconcile(prev, month([item({ opening: 35, purchaseOpening: 30, purchased: 5, purchaseClosing: 35, used: 0, closing: 35 })]));
+    expect(a).toHaveLength(0);
+  });
+});
+
+describe('sheet_self — a sheet contradicting its own arithmetic', () => {
+  it('catches a hand-typed closing that BOTH books then agree on', () => {
+    // Real row: Acid Pump (NZRP50200TBGV1J) Impeller O Ring.
+    // 14 opening + 0 received = 14, but the purchase sheet states 20 — and the
+    // sales sheet was copied from it, so intra_month stays silent.
+    const a = reconcile(null, month([item({
+      opening: 20, purchaseOpening: 14, purchased: 0, purchaseClosing: 20, used: 0, closing: 20,
+    })]));
+    expect(a.some(x => x.type === 'intra_month')).toBe(false);   // the books agree…
+    const self = a.find(x => x.type === 'sheet_self');           // …but the maths does not
+    expect(self).toBeDefined();
+    expect(self!.detail).toContain('14');
+    expect(self!.detail).toContain('20');
+  });
+
+  it('is silent when both sheets add up', () => {
+    // 30 opening + 5 received = 35 available; 35 − 2 issued = 33 closing.
+    const a = reconcile(null, month([item({
+      opening: 35, purchaseOpening: 30, purchased: 5, purchaseClosing: 35, used: 2, closing: 33,
+    })]));
+    expect(a).toHaveLength(0);
   });
 });

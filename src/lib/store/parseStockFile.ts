@@ -47,7 +47,7 @@ export interface StockParseResult {
   totalItems: number;       // item count in the latest month
 }
 
-export type AnomalyType = 'carry_forward' | 'intra_month' | 'negative' | 'added' | 'removed';
+export type AnomalyType = 'carry_forward' | 'intra_month' | 'sheet_self' | 'negative' | 'added' | 'removed';
 export interface Anomaly {
   type: AnomalyType;
   item: string;
@@ -262,20 +262,32 @@ export async function parseStockFile(file: File): Promise<StockParseResult> {
 
 /**
  * Compare two consecutive months and surface anomalies:
- *  - intra_month: Sales "Op Stock" ≠ Purchase "Closing" for the SAME month.
- *      The store team carries the Purchase closing across by hand into the
- *      Sales opening, so the two must agree. Client-confirmed as THE stock
- *      reconciliation check. Measured on their workbook: Apr 413/421,
- *      May 415/418, Jun 367/427, Jul 515/515.
- *  - negative:    a stated closing below zero (more issued than ever received)
- *  - added/removed: the item list changed vs the previous month
+ * Three hand-offs, three checks. Together they close the loop:
  *
- *  NOTE: there is deliberately NO cross-month stock comparison. The previous
- *  `carry_forward` rule compared last month's closing to this month's Sales
- *  opening — but the Sales opening ALREADY includes this month's receipts, so
- *  it fired on any item that was purchased. It produced 282 flags where the
- *  correct reading gives 206, and has been removed rather than corrected: the
- *  client's rule reconciles the two sheets within a month, full stop.
+ *     Sales Closing (n-1) ──[carry_forward]──► Purchase Opening (n)
+ *                                                    + receipts
+ *                                              Purchase Closing (n)
+ *                                                    │
+ *                                              [intra_month]
+ *                                                    │
+ *                                              Sales Op Stock (n)
+ *                                                    − issues
+ *                                              Sales Closing (n)  → the register
+ *
+ *  - intra_month:   Sales "Op Stock" ≠ Purchase "Closing", same month. The
+ *      store team copies one into the other by hand, so they must agree.
+ *      Client-confirmed. Measured: Apr 413/421, May 415/418, Jun 367/427,
+ *      Jul 515/515.
+ *  - carry_forward: Sales "Closing" (n-1) ≠ Purchase "Opening" (n). Stock that
+ *      appeared or vanished between months. Measured: 412/418, 400/408,
+ *      211/403 — the last is a real July stock-take, not noise.
+ *  - sheet_self:    a sheet disagrees with its OWN arithmetic. This is the only
+ *      check that catches a hand-typed closing: if someone overwrites the cell,
+ *      BOTH books agree on the wrong number and the two checks above stay
+ *      silent. Found exactly that on "Acid Pump (NZRP50200TBGV1J) Impeller O
+ *      Ring" — 15 + 0 received, but the sheet states 20, in two months running.
+ *  - negative:      a stated closing below zero.
+ *  - added/removed: the item list changed vs the previous month.
  */
 export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] {
   const out: Anomaly[] = [];
@@ -283,8 +295,30 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
   const currByKey = new Map(curr.items.map(i => [i.key, i]));
 
   for (const it of curr.items) {
-    // THE reconciliation check: the two sheets must agree on the stock that was
-    // available this month. Same month only — no offset.
+    // Hand-off across the month boundary: last month's true closing must be
+    // what the new Purchase book opens with. Compared against the PURCHASE
+    // opening, not the Sales opening — the Sales opening already includes this
+    // month's receipts, which is why the old version of this check fired on
+    // every item that had been bought.
+    // `prev` is null when the workbook contains only ONE month — there is no
+    // previous closing to hand over from, so this check is simply skipped
+    // rather than compared against zero. Same when an item is new: it has no
+    // row in the previous month.
+    if (prev) {
+      const p = prevByKey.get(it.key);
+      if (p && p.closing !== it.purchaseOpening) {
+        const delta = it.purchaseOpening - p.closing;
+        out.push({
+          type: 'carry_forward', item: it.itemName,
+          severity: Math.abs(delta) > 5 ? 'high' : 'medium',
+          prev: p.closing, curr: it.purchaseOpening, delta,
+          detail: `Last month closed at ${p.closing}, this month's purchase book opens at ${it.purchaseOpening} (${delta > 0 ? '+' : ''}${delta}).`,
+        });
+      }
+    }
+
+    // Hand-off within the month: the two sheets must agree on the stock that
+    // was available. Client-confirmed.
     if (it.opening !== it.purchaseClosing) {
       const delta = it.opening - it.purchaseClosing;
       out.push({
@@ -294,6 +328,26 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
         detail: `Sales opening ${it.opening} ≠ Purchase closing ${it.purchaseClosing} (${delta > 0 ? '+' : ''}${delta}).`,
       });
     }
+    // Each sheet must agree with its own arithmetic. Catches an overwritten
+    // closing cell — the one error the two cross-checks cannot see, because a
+    // bad number copied forward makes both books agree.
+    const salesExpected = it.opening - it.used;
+    if (it.closing !== salesExpected) {
+      out.push({
+        type: 'sheet_self', item: it.itemName, severity: 'high',
+        prev: salesExpected, curr: it.closing, delta: it.closing - salesExpected,
+        detail: `Sales sheet: ${it.opening} available − ${it.used} issued = ${salesExpected}, but the sheet states ${it.closing}.`,
+      });
+    }
+    const purchExpected = it.purchaseOpening + it.purchased;
+    if (it.purchaseClosing !== purchExpected) {
+      out.push({
+        type: 'sheet_self', item: it.itemName, severity: 'high',
+        prev: purchExpected, curr: it.purchaseClosing, delta: it.purchaseClosing - purchExpected,
+        detail: `Purchase sheet: ${it.purchaseOpening} opening + ${it.purchased} received = ${purchExpected}, but the sheet states ${it.purchaseClosing}.`,
+      });
+    }
+
     // A stated closing below zero — more issued than was ever received.
     if (it.closing < 0) {
       out.push({

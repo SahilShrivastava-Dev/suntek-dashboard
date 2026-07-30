@@ -24,6 +24,7 @@
  */
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { History, Trash2, AlertTriangle, FileSpreadsheet, ShieldAlert, Download } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
@@ -100,10 +101,17 @@ export function UploadHistory() {
    *  ticking checkboxes. */
   const [loadedAt, setLoadedAt] = useState(() => Date.now());
 
-  // Filters (requirement §2: filter by plant, module, date, uploader)
+  // Filters (requirement §2: filter by plant, module, date, uploader).
+  //
+  // Seeded from the URL so the Stock Register can link straight here already
+  // narrowed to the register the user was looking at — arriving at an unfiltered
+  // list of every upload across every factory would make them do the filtering
+  // again, at the exact moment they are trying to undo one specific file.
+  const [params] = useSearchParams();
   const [search, setSearch] = useState('');
   const [plantFilter, setPlantFilter] = useState('all');
-  const [moduleFilter, setModuleFilter] = useState('all');
+  const [storeFilter, setStoreFilter] = useState(() => params.get('store') ?? 'all');
+  const [moduleFilter, setModuleFilter] = useState(() => params.get('module') ?? 'all');
   const [uploaderFilter, setUploaderFilter] = useState('all');
   const [rangeFilter, setRangeFilter] = useState<string>('all');
   const [showDeleted, setShowDeleted] = useState(false);
@@ -167,6 +175,7 @@ export function UploadHistory() {
     return batches.filter(b => {
       if (!showDeleted && b.status === 'deleted') return false;
       if (plantFilter !== 'all' && b.plant_id !== plantFilter) return false;
+      if (storeFilter !== 'all' && b.store_id !== storeFilter) return false;
       if (moduleFilter !== 'all' && b.module !== moduleFilter) return false;
       if (uploaderFilter !== 'all' && b.uploaded_by_name !== uploaderFilter) return false;
       if (cutoff && new Date(b.created_at).getTime() < cutoff) return false;
@@ -175,7 +184,7 @@ export function UploadHistory() {
               || (b.uploaded_by_name || '').toLowerCase().includes(q))) return false;
       return true;
     });
-  }, [batches, search, plantFilter, moduleFilter, uploaderFilter, rangeFilter, showDeleted, plantName, loadedAt]);
+  }, [batches, search, plantFilter, storeFilter, moduleFilter, uploaderFilter, rangeFilter, showDeleted, plantName, loadedAt]);
 
   const sort = useSortable(filtered, {
     created_at: b => b.created_at,
@@ -186,7 +195,7 @@ export function UploadHistory() {
     uploaded_by_name: b => b.uploaded_by_name ?? '',
   }, { key: 'created_at', dir: 'desc' });
   const { pageRows, controls } = usePagination(sort.sorted, {
-    resetKey: `${search}|${plantFilter}|${moduleFilter}|${uploaderFilter}|${rangeFilter}|${showDeleted}`,
+    resetKey: `${search}|${plantFilter}|${storeFilter}|${moduleFilter}|${uploaderFilter}|${rangeFilter}|${showDeleted}`,
   });
 
   const auditSort = useSortable(deletions, {
@@ -319,7 +328,7 @@ export function UploadHistory() {
             onSearch={setSearch}
             searchPlaceholder={t('uploads.searchPh', 'Search file name, factory or uploader…')}
             onReset={() => {
-              setSearch(''); setPlantFilter('all'); setModuleFilter('all');
+              setSearch(''); setPlantFilter('all'); setStoreFilter('all'); setModuleFilter('all');
               setUploaderFilter('all'); setRangeFilter('all'); setShowDeleted(false);
             }}
           >
@@ -328,6 +337,15 @@ export function UploadHistory() {
               options={[{ value: 'all', label: t('common.allPlants', 'All plants') },
                         ...plants.map(p => ({ value: p.id, label: p.name }))]}
             />
+            {/* Only meaningful for stock uploads — FAR and PM are factory-owned
+                and carry no store — so it appears once a store is in play. */}
+            {stores.length > 1 && (
+              <FilterSelect
+                label={t('uploads.filterStore', 'Store')} value={storeFilter} onChange={setStoreFilter}
+                options={[{ value: 'all', label: t('uploads.allStores', 'All stores') },
+                          ...stores.map(s => ({ value: s.id, label: s.name }))]}
+              />
+            )}
             <FilterSelect
               label={t('uploads.filterModule', 'Module')} value={moduleFilter} onChange={setModuleFilter}
               options={[{ value: 'all', label: t('uploads.allModules', 'All modules') },

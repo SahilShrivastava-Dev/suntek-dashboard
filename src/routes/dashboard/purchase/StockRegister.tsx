@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 // Shared humanizer — a user should never be shown a raw error object.
 import { humanizeError as errMsg } from '../../../lib/errors';
@@ -100,6 +101,7 @@ const inputStyle: React.CSSProperties = {
 
 export function StockRegister() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const toast = useToast();
   const { scopeQuery, allowedPlants, stores, allowedStores, storeIdFor } = usePlantScope();
   const { activeProfile } = useRoleContext();
@@ -571,6 +573,28 @@ export function StockRegister() {
         <div className="flex items-center gap-2 flex-wrap">
           {items.length > 0 && profileHasCapability(activeProfile, 'add_stock_purchase') && (
             <button onClick={() => setShowPurchase(true)} className="pill px-4 py-2 font-semibold text-sm" style={{ border: '1px solid #E2E8F0', background: '#fff', color: '#334155', cursor: 'pointer' }}>{t('storereq.stockAddPurchase', '＋ Add Purchase')}</button>
+          )}
+          {/* The delete-a-bad-upload flow lives in Admin → Upload History, but
+              the moment you NEED it is while you are standing here looking at a
+              register full of wrong numbers. Linking from the point of use,
+              pre-filtered to this store, saves hunting for it — and re-uploading
+              a corrected file cannot on its own remove rows that were in the bad
+              file and are absent from the good one, so this is the only route
+              back to a clean register. */}
+          {profileHasCapability(activeProfile, 'delete_import_batch') && (
+            <button
+              onClick={() => {
+                const p = new URLSearchParams({ module: 'stock' });
+                const sid = plantFilter.length === 1 ? plantFilter[0] : (storeChips.length === 1 ? storeChips[0].id : '');
+                if (sid) p.set('store', sid);
+                navigate(`/dashboard/admin/uploads?${p.toString()}`);
+              }}
+              className="pill px-4 py-2 font-semibold text-sm"
+              style={{ border: '1px solid #E2E8F0', background: '#fff', color: '#334155', cursor: 'pointer' }}
+              title={t('storereq.manageUploadsHint', 'View the files this register was built from, and delete the records imported by an incorrect one')}
+            >
+              {t('storereq.manageUploads', '⌫ Manage uploads')}
+            </button>
           )}
           <button onClick={() => fileRef.current?.click()} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm">{t('storereq.stockUploadExcel', '↑ Upload Excel')}</button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}

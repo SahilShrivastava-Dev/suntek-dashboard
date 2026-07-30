@@ -1081,6 +1081,7 @@ const en = {
     "successLabel": "Activity logged",
     "successSub": "Entry saved · photo uploading to OneDrive",
     "requiredHint": "Fill in Equipment and Done by to save",
+    "noFactoryAccess": "You do not have access to that factory, so its Fixed Asset Register cannot be imported. Ask an admin to add you to it under User Management.",
     "saveFailed": "Save failed: {{message}}",
     "taggedTitle": "{{name}} tagged you in an activity log",
     "blacklistHit": "⚠ \"{{value}}\" ≈ blacklisted {{type}} \"{{name}}\" ({{pct}}%). Admin notified.",

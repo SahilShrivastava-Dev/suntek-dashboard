@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../../lib/supabase';
 import { fetchActivePlants } from '../../../lib/plants';
+// Shared humanizer — a user must never be shown a raw error object.
+import { humanizeError as errMsg } from '../../../lib/errors';
 import { insertRows, updateRows } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
@@ -237,7 +239,7 @@ export function FAR() {
   const { t } = useTranslation();
   const toast = useToast();
   const { activeProfile } = useRoleContext();
-  const { scopeQuery, allowedPlants } = usePlantScope();
+  const { scopeQuery, allowedPlants, ready: scopeReady } = usePlantScope();
   // Machine-photo lightbox (PIC column → view).
   const [picView, setPicView] = useState<LightboxImage[] | null>(null);
 
@@ -364,8 +366,17 @@ export function FAR() {
   // Factory options come from the DB — never a hard-coded list, which a rename
   // would leave stale. The form stores the plant ID, not the display name.
   const plantOptions = useMemo(
-    () => [...(allowedPlants.length > 0 ? allowedPlants : dbPlants)].sort((a, b) => a.name.localeCompare(b.name)),
-    [allowedPlants, dbPlants],
+    () => {
+      // The fallback to every factory is ONLY for the moment before scope has
+      // resolved, so the picker isn't briefly blank. Once it HAS resolved, an
+      // empty allowedPlants means the user genuinely has no factory access —
+      // and offering them the full list would let them pick a factory they
+      // cannot write to. The insert is then rejected by RLS (plant_in_scope)
+      // and they get a database error instead of being told they lack access.
+      const src = allowedPlants.length > 0 ? allowedPlants : (scopeReady ? [] : dbPlants);
+      return [...src].sort((a, b) => a.name.localeCompare(b.name));
+    },
+    [allowedPlants, dbPlants, scopeReady],
   );
 
   // Plants present in the FAR. Used ONLY for the "does this factory have any
@@ -512,12 +523,22 @@ export function FAR() {
       setImportPlantId(opts.length === 1 ? opts[0].id : '');
       setImportStage('review');
     } catch (e) {
-      setImportError(e instanceof Error ? e.message : String(e));
+      // NOT String(e): Supabase/PostgREST rejections are plain objects, not
+      // Error instances, so `instanceof Error` is false and String() renders
+      // them as "[object Object]" — hiding the only thing that explains the
+      // failure. humanizeError() is the shared path every other importer uses.
+      setImportError(errMsg(e, { action: 'import this FAR file', context: 'FAR.import' }));
       setImportStage('error');
     }
   }
   async function confirmImport() {
     if (!importPlantId) { setImportError(t('far.selectFactoryError', 'Select the factory this FAR belongs to.')); setImportStage('error'); return; }
+    // Fail with a sentence the user can act on, rather than letting RLS reject
+    // the insert and surfacing a Postgres policy violation.
+    if (scopeReady && !plantOptions.some(p => p.id === importPlantId)) {
+      setImportError(t('far.noFactoryAccess', 'You do not have access to that factory, so its Fixed Asset Register cannot be imported. Ask an admin to add you to it under User Management.'));
+      setImportStage('error'); return;
+    }
     setImportStage('importing');
     try {
       // Register the upload BEFORE writing a single asset, so every row can be
@@ -560,7 +581,11 @@ export function FAR() {
       setImportStage('done');
       await load();
     } catch (e) {
-      setImportError(e instanceof Error ? e.message : String(e));
+      // NOT String(e): Supabase/PostgREST rejections are plain objects, not
+      // Error instances, so `instanceof Error` is false and String() renders
+      // them as "[object Object]" — hiding the only thing that explains the
+      // failure. humanizeError() is the shared path every other importer uses.
+      setImportError(errMsg(e, { action: 'import this FAR file', context: 'FAR.import' }));
       setImportStage('error');
     }
   }

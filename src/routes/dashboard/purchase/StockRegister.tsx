@@ -19,6 +19,7 @@ import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { parseStockFile, reconcile, type StockParseResult, type MonthParse, type MonthItem, type Anomaly } from '../../../lib/store/parseStockFile';
 import { indexResolutions, joinAnomalies, type AnomalyResolutionRow, type ReviewedAnomaly } from '../../../lib/store/anomalyKeys';
 import { registerIdOf } from '../../../lib/store/registers';
+import { createImportBatch, setImportBatchRowCount, buildItemOwnerMap, resolveItemOwner } from '../../../lib/imports/batches';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { AnomalyReviewModal } from './AnomalyReviewModal';
 import { StoreReconciliation } from './StoreReconciliation';
@@ -159,7 +160,8 @@ export function StockRegister() {
   }
   useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const plantOptions = allowedPlants.length > 0 ? allowedPlants as Plant[] : plants;
+  // (No plantOptions here: this screen is keyed on STORES, not factories — see
+  // storeChips below. A factory list was left over from before the store split.)
   const plantName = (id: string | null) => plants.find(p => p.id === id)?.name || '—';
 
   // Live anomalies from persisted snapshots (latest two months). Respects the active
@@ -229,7 +231,8 @@ export function StockRegister() {
   // Shared helper (lib/store/registers) — the chips, the table and the anomaly
   // reconciler must all key a row the same way, or a chip selects nothing.
 
-  // Registers that actually have stock rows → the filter chips.
+  // Registers that actually have stock rows. Used ONLY to mark which registers
+  // are still empty — never as the source of the selector, see storeChips.
   const plantsInData = useMemo(() => {
     const seen = new Map<string, string>();
     for (const it of items) {
@@ -242,6 +245,45 @@ export function StockRegister() {
     }
     return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [items, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * The store selector.
+   *
+   * Sourced from the stores the user may ACT ON, not from the stores that happen
+   * to hold items. Keying it on the data is what produced the reported bug: with
+   * one store's workbook uploaded the chips disappeared, so the register never
+   * said which store it was showing, and an empty register said nothing at all.
+   *
+   * Falls back to the registers present in the data on a database where
+   * migration 59 has not been applied and `stores` is therefore empty — the same
+   * degrade-gracefully posture as registerIdOf().
+   */
+  const storeChips = useMemo(() => {
+    const withData = new Set(plantsInData.map(p => p.id));
+    if (allowedStores.length) {
+      return allowedStores
+        .map(s => ({ id: s.id, name: s.name, hasData: withData.has(s.id) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return plantsInData.map(p => ({ ...p, hasData: true }));
+  }, [allowedStores, plantsInData]);
+
+  /** What the header says this register is. Never blank. */
+  const activeStoreLabel = useMemo(() => {
+    if (plantFilter.length === 1) {
+      return storeChips.find(s => s.id === plantFilter[0])?.name ?? null;
+    }
+    if (plantFilter.length > 1) {
+      return t('storereq.stockPlantsOf', {
+        defaultValue: '{{sel}} of {{total}} stores', sel: plantFilter.length, total: storeChips.length,
+      });
+    }
+    if (storeChips.length === 1) return storeChips[0].name;
+    if (storeChips.length > 1) {
+      return t('storereq.stockPlantsCount', { defaultValue: '{{n}} stores', n: storeChips.length });
+    }
+    return null;
+  }, [plantFilter, storeChips, t]);
 
   function togglePlant(id: string) { setPlantFilter(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]); }
 
@@ -331,6 +373,22 @@ export function StockRegister() {
       const anchorPlantId = plants.find(p => storeIdFor(p.id) === storeId)?.id ?? null;
       const monthDates = res.months.map(m => m.periodMonth);
 
+      // 0) Register the upload batch first, so the manifest and every register
+      //    row this file creates can be stamped with it. Without that stamp a
+      //    wrong workbook is unremovable — which is the problem this whole
+      //    batch mechanism exists to fix.
+      const batchId = await createImportBatch({
+        module: 'stock',
+        plantId: anchorPlantId,
+        storeId,
+        fileName,
+        fileUrl: cloudUrl,
+        periodMonth: latest.periodMonth,
+        rowCount: res.totalItems,
+        sheetCount: res.sheetCount,
+        uploadedByName: activeProfile.name,
+      });
+
       // 1) Upload manifest (latest month; re-upload replaces).
       //    Keyed on (store_id, period_month) — migration 60 replaced the old
       //    (plant_id, period_month) constraint, and upserting against a
@@ -340,6 +398,11 @@ export function StockRegister() {
         store_id: storeId, plant_id: anchorPlantId, period_month: latest.periodMonth,
         file_name: fileName, file_url: cloudUrl,
         uploaded_by_name: activeProfile.name, row_count: res.totalItems, sheet_count: res.sheetCount,
+        // Re-uploading the same store+month REPLACES the manifest, so this
+        // repoints it at the new batch. The previous batch is left as an empty
+        // 'active' row in Upload History, which is honest: its data no longer
+        // exists, and deleting it is a one-click no-op.
+        import_batch_id: batchId,
       }, { onConflict: 'store_id,period_month' }).select('id').single();
       if (upErr) throw upErr;
       const uploadId = up?.id ?? null;
@@ -368,6 +431,18 @@ export function StockRegister() {
       const negatives = latest.items.filter(it => it.closing < 0);
       setClampedItems(negatives.map(it => ({ name: it.itemName, closing: it.closing })));
 
+      // Which items this register ALREADY holds, and which batch created each.
+      //
+      // The upsert below writes every column it is given, so sending
+      // created_by_batch_id blindly would re-stamp rows that a PREVIOUS upload
+      // created — and then deleting this batch would delete their rows instead
+      // of only rolling their baseline back. Read the current owner first and
+      // preserve it per row; only genuinely new items get this batch's id.
+      const { data: existing } = await supabase
+        .from('store_items').select('item_name, created_by_batch_id').eq('store_id', storeId)
+        .returns<{ item_name: string; created_by_batch_id: string | null }[]>();
+      const ownerByName = buildItemOwnerMap(existing ?? []);
+
       const itemRows = latest.items.map(it => ({
         // store_id decides which register the row lands in. A DB trigger
         // (migration 62) fills it from plant_id if omitted, but sending it
@@ -376,6 +451,7 @@ export function StockRegister() {
         baseline_qty: Math.max(0, it.closing), baseline_month: latest.periodMonth,
         procured_qty: 0, issued_qty: 0, manual_delta: 0,
         ticket_procured_qty: 0, on_hand: Math.max(0, it.closing), updated_at: nowIso,
+        created_by_batch_id: resolveItemOwner(ownerByName, it.itemName, batchId),
       }));
       for (let i = 0; i < itemRows.length; i += CHUNK) {
         // Conflict target follows the authoritative key. Migration 60 replaced
@@ -387,6 +463,7 @@ export function StockRegister() {
         if (error) throw error;
       }
 
+      await setImportBatchRowCount(batchId, latest.items.length);
       setImportedCount(latest.items.length);
       setStage('done');
       await load();
@@ -465,7 +542,18 @@ export function StockRegister() {
       </div>
 
       {loading ? <SkeletonRows rows={4} /> : items.length === 0 ? (
+        // The empty state names the store too. "No stock file uploaded yet" on
+        // its own is the worst version of the reported bug: the one screen where
+        // the user most needs to know WHICH register they are looking at said
+        // nothing about it at all.
         <div className="text-center text-slate-400 py-8 text-sm">
+          {activeStoreLabel && (
+            <div className="mb-2">
+              <span className="chip active" style={{ cursor: 'default' }}>
+                {t('storereq.storePrefix', 'Store')}: {activeStoreLabel}
+              </span>
+            </div>
+          )}
           {t('storereq.stockEmptyTitle', 'No stock file uploaded yet.')}<br />{t('storereq.stockEmptyBodyPre', 'Upload the monthly')} <strong>{t('storereq.stockEmptyBodyStrong', 'Store Keeping')}</strong> {t('storereq.stockEmptyBodyPost', 'Excel to seed the register.')}
         </div>
       ) : (
@@ -474,7 +562,9 @@ export function StockRegister() {
           <div className="flex items-center justify-between flex-wrap gap-2" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: '10px 14px' }}>
             <div style={{ fontSize: 13, color: '#334155' }}>
               <strong>{summary.total}</strong> {summary.total === 1 ? t('storereq.stockItemSingular', 'item') : t('storereq.stockItemPlural', 'items')}
-              {plantsInData.length > 1 && <span className="text-slate-500"> · {plantFilter.length ? t('storereq.stockPlantsOf', { defaultValue: '{{sel}} of {{total}} plants', sel: plantFilter.length, total: plantsInData.length }) : t('storereq.stockPlantsCount', { defaultValue: '{{n}} plants', n: plantsInData.length })}</span>}
+              {/* Always name the register — including when there is only one
+                  store, which is exactly the case that used to show nothing. */}
+              {activeStoreLabel && <span> · <strong>{activeStoreLabel}</strong></span>}
               <span className="text-slate-400"> · </span>
               <span style={{ color: '#16A34A' }}>{t('storereq.stockInStockCount', { defaultValue: '{{n}} in stock', n: summary.inStock })}</span>
               <span className="text-slate-400"> · </span>
@@ -494,12 +584,33 @@ export function StockRegister() {
 
           {!collapsed && (
             <div style={{ marginTop: 14 }}>
-              {/* Plant filter chips */}
-              {plantsInData.length > 1 && (
+              {/* Store selector — ALWAYS rendered. With a single store it is a
+                  plain label rather than a button: there is nothing to switch to,
+                  but the register still has to say whose stock this is. */}
+              {storeChips.length === 1 && (
+                <div className="flex gap-2 mb-3 flex-wrap items-center">
+                  <span className="chip active" style={{ cursor: 'default' }}>
+                    {t('storereq.storePrefix', 'Store')}: {storeChips[0].name}
+                  </span>
+                  {!storeChips[0].hasData && (
+                    <span style={{ fontSize: 11, color: '#94A3B8' }}>{t('storereq.storeNoStock', 'no stock file uploaded yet')}</span>
+                  )}
+                </div>
+              )}
+              {storeChips.length > 1 && (
                 <div className="flex gap-2 mb-3 flex-wrap">
                   <button onClick={() => setPlantFilter([])} className={`chip${plantFilter.length === 0 ? ' active' : ''}`}>{t('storereq.all_stores', 'All stores')}</button>
-                  {plantsInData.map(p => (
-                    <button key={p.id} onClick={() => togglePlant(p.id)} className={`chip${plantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
+                  {storeChips.map(p => (
+                    <button
+                      key={p.id} onClick={() => togglePlant(p.id)}
+                      className={`chip${plantFilter.includes(p.id) ? ' active' : ''}`}
+                      // An empty register stays selectable — that is how you
+                      // confirm it is genuinely empty rather than filtered out.
+                      style={p.hasData ? undefined : { opacity: 0.55 }}
+                      title={p.hasData ? undefined : t('storereq.storeNoStock', 'no stock file uploaded yet')}
+                    >
+                      {p.name}{p.hasData ? '' : ' ·'}
+                    </button>
                   ))}
                   {plantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>{t('storereq.stockCombinedNote', 'combined · identical items summed')}</span>}
                 </div>

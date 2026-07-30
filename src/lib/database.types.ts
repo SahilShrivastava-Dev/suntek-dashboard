@@ -289,10 +289,70 @@ export interface Database {
           row_count: number;
           sheet_count: number;
           notes: string | null;
+          /** The deletable upload batch this manifest belongs to (migration 70). */
+          import_batch_id: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['store_stock_uploads']['Row'], 'id' | 'created_at'>>;
         Update: Partial<Database['public']['Tables']['store_stock_uploads']['Insert']>;
+      };
+
+      // ── Bulk-import batches (migration 70) ────────────────────────────────
+      // One row per uploaded CSV/Excel file. Every row the file created carries
+      // its id, which is what makes an incorrect upload reversible: deleting a
+      // batch deletes ONLY rows stamped with it, never a hand-entered record.
+      import_batches: {
+        Row: {
+          id: string;
+          module: 'far' | 'stock' | 'pm_schedule';
+          plant_id: string | null;
+          /** Set for stock uploads only — FAR and PM are factory-owned. */
+          store_id: string | null;
+          file_name: string | null;
+          file_url: string | null;         // Cloudinary archive of the raw file
+          period_month: string | null;     // date; stock only
+          uploaded_by: string | null;
+          uploaded_by_name: string | null;
+          row_count: number;
+          sheet_count: number;
+          notes: string | null;
+          status: 'active' | 'deleted';
+          created_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['import_batches']['Row'], 'id' | 'created_at' | 'status'>>
+                & { status?: 'active' | 'deleted' };
+        Update: Partial<Database['public']['Tables']['import_batches']['Insert']>;
+      };
+
+      // The deletion audit trail. Deliberately denormalised and NOT foreign-keyed
+      // to import_batches — it has to outlive the batch it describes, and stay
+      // readable after a plant or store is renamed or retired. Written only by
+      // delete_import_batch(); there is no client write policy.
+      import_batch_deletions: {
+        Row: {
+          id: string;
+          batch_id: string;
+          module: string;
+          plant_id: string | null;
+          plant_name: string | null;
+          store_name: string | null;
+          file_name: string | null;
+          period_month: string | null;
+          uploaded_by_name: string | null;
+          uploaded_at: string | null;
+          deleted_count: number;
+          /** Per-table breakdown behind `deleted_count`. */
+          deleted_counts: Record<string, number> | null;
+          /** True when an admin overrode a blocker. */
+          forced: boolean;
+          blockers: { kind: string; count: number; detail: string }[] | null;
+          reason: string | null;
+          deleted_by: string | null;
+          deleted_by_name: string | null;
+          deleted_at: string;
+        };
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['import_batch_deletions']['Row'], 'id' | 'deleted_at'>>;
+        Update: Partial<Database['public']['Tables']['import_batch_deletions']['Insert']>;
       };
 
       store_stock_months: {
@@ -342,6 +402,11 @@ export interface Database {
           ticket_procured_qty: number;    // external units bought for tickets (audit only)
           repaired_qty: number;           // repaired & returned units (separate bucket; part of on_hand)
           on_hand: number;
+          /** The upload that CREATED this register row (migration 70). A row an
+           *  upload merely re-baselined keeps whatever this was — only the
+           *  creating batch may delete the row; others just roll the baseline
+           *  back. NULL = created by a purchase or by hand. */
+          created_by_batch_id: string | null;
           updated_at: string;
           created_at: string;
         };
@@ -511,6 +576,8 @@ export interface Database {
           uploaded_by_name: string | null;
           sheet_count: number;
           schedule_count: number;
+          /** The deletable upload batch this manifest belongs to (migration 70). */
+          import_batch_id: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['pm_schedule_uploads']['Row'], 'id' | 'created_at'>>;
@@ -913,6 +980,9 @@ export interface Database {
           qr_token: string | null;
           qr_generated_at: string | null;
           qr_generated_by: string | null;
+          /** The upload that created this asset (migration 70). NULL = entered
+           *  by hand, which makes it immune to any batch deletion. */
+          import_batch_id: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['fixed_assets']['Row'], 'id' | 'created_at'>>;
@@ -960,6 +1030,9 @@ export interface Database {
           requires_approval: boolean | null;
           unmatched_justification: string | null;
           source: string | null;
+          /** The PM workbook import that created this schedule (migration 70).
+           *  NULL = created by hand, and therefore never batch-deletable. */
+          import_batch_id: string | null;
           created_at: string;
         };
         Insert: OptionalNulls<Omit<Database['public']['Tables']['maintenance_schedules']['Row'], 'id' | 'created_at'>>;

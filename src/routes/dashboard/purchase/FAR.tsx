@@ -19,6 +19,7 @@ import * as XLSX from 'xlsx';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
 import { groupAssetsByType, normMark } from '../../../lib/far/assets';
+import { createImportBatch, setImportBatchRowCount } from '../../../lib/imports/batches';
 import type { Database } from '../../../lib/database.types';
 
 // ── FAR bulk-import (CSV / Excel → verify → register) ─────────────────────────
@@ -367,12 +368,49 @@ export function FAR() {
     [allowedPlants, dbPlants],
   );
 
-  // Plants present in the FAR → the combine/individual filter chips.
+  // Plants present in the FAR. Used ONLY for the "does this factory have any
+  // assets yet" hint — never as the source of the selector, see plantChips.
   const plantsInFar = useMemo(() => {
     const seen = new Map<string, string>();
     for (const a of assets) if (a.plant_id) seen.set(a.plant_id, a.plants?.name || a.plant_id);
     return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [assets]);
+
+  /**
+   * The factory selector.
+   *
+   * Sourced from the factories the user may SEE, not from the factories that
+   * happen to have assets. Those are different sets, and keying the control on
+   * the data is what produced the reported bug: with one factory's FAR uploaded
+   * the control vanished entirely, so the screen never said whose assets these
+   * were — and an empty register said nothing at all.
+   *
+   * Now it always renders. A factory with no assets yet is still listed, and
+   * marked, which also tells an admin at a glance which registers are missing.
+   */
+  const plantChips = useMemo(() => {
+    const withData = new Set(plantsInFar.map(p => p.id));
+    return plantOptions.map(p => ({ id: p.id, name: p.name, hasData: withData.has(p.id) }));
+  }, [plantOptions, plantsInFar]);
+
+  /** What the header says this register belongs to — one factory by name, or how
+   *  many are combined. Never blank. */
+  const activePlantLabel = useMemo(() => {
+    if (equipPlantFilter.length === 1) {
+      return plantChips.find(p => p.id === equipPlantFilter[0])?.name ?? null;
+    }
+    if (equipPlantFilter.length > 1) {
+      return t('far.nPlantsSelected', {
+        defaultValue: '{{sel}} of {{total}} factories',
+        sel: equipPlantFilter.length, total: plantChips.length,
+      });
+    }
+    if (plantChips.length === 1) return plantChips[0].name;
+    if (plantChips.length > 1) {
+      return t('far.nPlants', { defaultValue: '{{count}} plants', count: plantChips.length });
+    }
+    return null;
+  }, [equipPlantFilter, plantChips, t]);
 
   // Equipment List — a derived, grouped view of the FAR (the PM master).
   const equipGroups = useMemo(() => {
@@ -482,9 +520,25 @@ export function FAR() {
     if (!importPlantId) { setImportError(t('far.selectFactoryError', 'Select the factory this FAR belongs to.')); setImportStage('error'); return; }
     setImportStage('importing');
     try {
+      // Register the upload BEFORE writing a single asset, so every row can be
+      // stamped with its batch id. That stamp is what makes a wrong file
+      // reversible from Admin → Upload History; without it these rows would be
+      // indistinguishable from assets someone registered by hand, and therefore
+      // permanent. If the insert below fails we are left with an empty batch,
+      // which is visible and deletable in one click — a much better failure
+      // mode than unattributed rows.
+      const batchId = await createImportBatch({
+        module: 'far',
+        plantId: importPlantId,
+        fileName: importFileName,
+        fileUrl: cloudUrl,
+        rowCount: parsedRows.length,
+        uploadedByName: activeProfile.name,
+      });
       // One row per asset, owned by exactly one factory.
       const payload = parsedRows.map((r) => ({
         plant_id: importPlantId,
+        import_batch_id: batchId,
         name: r.name || r.mark || r.model || 'Unnamed asset',
         identification_mark: r.mark || null,
         make: r.make || null,
@@ -501,6 +555,7 @@ export function FAR() {
       }));
       const { error } = await insertRows('fixed_assets', payload);
       if (error) throw error;
+      await setImportBatchRowCount(batchId, payload.length);
       setImportedCount(payload.length);
       setImportStage('done');
       await load();
@@ -567,8 +622,16 @@ export function FAR() {
       {/* KPI row */}
       <div className="grid grid-cols-12 gap-4 mb-4">
         <div className="col-span-12 sm:col-span-6 lg:col-span-4 relative">
-          <KpiInfoButton info={{ title: 'Total Fixed Assets', what: 'Count of all capitalised fixed assets registered across all 4 factory plants (SHD, Rehla, Ganjam, HQ). Each asset is named and tracked in the FAR.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Live count from the Supabase fixed_assets table.' }} />
-          <StatCard className="h-full" icon={<Boxes />} label={t('far.totalFixedAssets')} value={assets.length} caption={t('far.across4Factories')} />
+          {/* Factories are NOT enumerated here — the list is DB-driven and has
+              changed twice (migration 58's rename, migration 69's Drum Plant).
+              A hard-coded roster in help text goes stale silently. */}
+          <KpiInfoButton info={{ title: 'Total Fixed Assets', what: 'Count of all capitalised fixed assets registered across the factories you have access to. Each asset is named and tracked in the FAR, and belongs to exactly one factory.', source: 'Form entry', formLabel: 'Add Asset form', formPath: '/dashboard/purchase/far', note: 'Live count from the Supabase fixed_assets table, scoped to your factories.' }} />
+          <StatCard className="h-full" icon={<Boxes />} label={t('far.totalFixedAssets')} value={assets.length}
+            caption={plantsInFar.length === 0
+              ? t('far.captionNoFactories', 'no assets registered yet')
+              : plantsInFar.length === 1
+                ? t('far.captionOneFactory', { defaultValue: 'in {{plant}}', plant: plantsInFar[0].name })
+                : t('far.captionNFactories', { defaultValue: 'across {{count}} factories', count: plantsInFar.length })} />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-4 relative">
           <KpiInfoButton info={{ title: 'Assets Flagged for Repair', what: 'Count of fixed assets that have been flagged as requiring repair or maintenance and are awaiting resolution. High count = production downtime risk.', source: 'Derived', note: 'Open (not yet closed) emergency maintenance tickets from the maintenance workflow.' }} />
@@ -759,11 +822,11 @@ export function FAR() {
             <div className="flex items-center justify-between flex-wrap gap-2 bg-slate-50 border border-slate-200 rounded-[10px] px-3.5 py-2.5">
               <div className="text-[13px] text-slate-600">
                 <strong>{assets.length}</strong> {assets.length === 1 ? t('far.assetWord', 'asset') : t('far.assetsWord', 'assets')} · <strong>{equipGroups.length}</strong> {equipGroups.length === 1 ? t('far.equipTypeWord', 'equipment type') : t('far.equipTypesWord', 'equipment types')}
-                {/* Always say WHICH factory this register belongs to. Hiding it
-                    when only one exists means someone returning months after an
-                    import cannot tell whose assets they are looking at. */}
-                {plantsInFar.length === 1 && <span> · <strong>{plantsInFar[0].name}</strong></span>}
-                {plantsInFar.length > 1 && <span> · {t('far.nPlants', { defaultValue: '{{count}} plants', count: plantsInFar.length })}</span>}
+                {/* Always say WHICH factory this register belongs to — including
+                    when there is only one, and when it is still empty. Hiding it
+                    means someone returning months after an import cannot tell
+                    whose assets they are looking at. */}
+                {activePlantLabel && <span> · <strong>{activePlantLabel}</strong></span>}
               </div>
               <button onClick={() => setEquipOpenTable(o => !o)} className="text-sm font-semibold text-slate-700 hover:text-slate-900" style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
                 {equipOpenTable ? `${t('far.hideRegister', 'Hide register')} ▴` : `${t('far.showRegister', 'Show register')} ▾`}
@@ -772,16 +835,36 @@ export function FAR() {
 
             {equipOpenTable && (
               <div style={{ marginTop: 14 }}>
-                {plantsInFar.length === 1 && (
-                  <div className="flex gap-2 mb-3 flex-wrap">
-                    <span className="chip active" style={{ cursor: 'default' }}>{plantsInFar[0].name}</span>
+                {/* The factory control is ALWAYS present — never hidden because
+                    only one option exists. With a single factory it is a plain
+                    label ("Plant: …") rather than a button, since there is
+                    nothing to switch to but everything to identify. */}
+                {plantChips.length === 1 && (
+                  <div className="flex gap-2 mb-3 flex-wrap items-center">
+                    <span className="chip active" style={{ cursor: 'default' }}>
+                      {t('far.plantPrefix', 'Plant')}: {plantChips[0].name}
+                    </span>
+                    {!plantChips[0].hasData && (
+                      <span style={{ fontSize: 11, color: '#94A3B8' }}>{t('far.plantNoAssets', 'no assets imported yet')}</span>
+                    )}
                   </div>
                 )}
-                {plantsInFar.length > 1 && (
+                {plantChips.length > 1 && (
                   <div className="flex gap-2 mb-3 flex-wrap">
                     <button onClick={() => setEquipPlantFilter([])} className={`chip${equipPlantFilter.length === 0 ? ' active' : ''}`}>{t('common.allPlants')}</button>
-                    {plantsInFar.map(p => (
-                      <button key={p.id} onClick={() => setEquipPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])} className={`chip${equipPlantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
+                    {plantChips.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => setEquipPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])}
+                        className={`chip${equipPlantFilter.includes(p.id) ? ' active' : ''}`}
+                        // A factory with no assets yet stays selectable — picking
+                        // it is how you confirm the register really is empty
+                        // rather than filtered — but is dimmed so the gap shows.
+                        style={p.hasData ? undefined : { opacity: 0.55 }}
+                        title={p.hasData ? undefined : t('far.plantNoAssets', 'no assets imported yet')}
+                      >
+                        {p.name}{p.hasData ? '' : ' ·'}
+                      </button>
                     ))}
                     {equipPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>{t('far.combined', 'combined')}</span>}
                   </div>

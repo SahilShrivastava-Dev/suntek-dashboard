@@ -5,14 +5,17 @@ import {
 } from './registers';
 
 // The client's actual shape: three factories at Rehla on ONE store; Sikandrabad
-// and Ganjam each on their own.
+// and Ganjam each on their own; and — migration 69 — the Drum Plant, which sits
+// at the Rehla SITE but must be completely independent of the common store.
 const SCPL_REHLA = 'p-scpl-rehla';
 const SPPL_REHLA = 'p-sppl-rehla';
 const SPPLK_REHLA = 'p-spplk-rehla';
+const DRUM_REHLA = 'p-drum-rehla';
 const GANJAM = 'p-scpl-ganjam';
 const SIKANDRABAD = 'p-madan-sikandrabad';
 
 const REHLA_COMMON = 's-rehla-common';
+const DRUM_STORE = 's-drum-rehla';
 const GANJAM_STORE = 's-ganjam';
 const SIKANDRABAD_STORE = 's-sikandrabad';
 
@@ -20,6 +23,8 @@ const LINKS: FactoryStoreLink[] = [
   { plant_id: SCPL_REHLA, store_id: REHLA_COMMON },
   { plant_id: SPPL_REHLA, store_id: REHLA_COMMON },
   { plant_id: SPPLK_REHLA, store_id: REHLA_COMMON },
+  // Same location, DIFFERENT store. One row, and it is the whole feature.
+  { plant_id: DRUM_REHLA, store_id: DRUM_STORE },
   { plant_id: GANJAM, store_id: GANJAM_STORE },
   { plant_id: SIKANDRABAD, store_id: SIKANDRABAD_STORE },
 ];
@@ -53,6 +58,58 @@ describe('Rehla — one store, three factories', () => {
   it('refuses a Rehla factory drawing from another location’s store', () => {
     expect(canDrawFrom(LINKS, SPPLK_REHLA, GANJAM_STORE)).toBe(false);
     expect(canDrawFrom(LINKS, SPPLK_REHLA, SIKANDRABAD_STORE)).toBe(false);
+  });
+});
+
+// ── Migration 69 ────────────────────────────────────────────────────────────
+// The Drum Plant is the hardest case for the store/factory split: it is at the
+// SAME site as the three factories that share the Rehla common store, so nothing
+// about geography separates them. Only the absence of a factory_store_access row
+// does — which makes these assertions the ones that would actually catch a
+// regression where someone "helpfully" mapped it to the common store.
+describe('Drum Plant — independent, at a shared site', () => {
+  it('resolves to its OWN store, not the Rehla common store', () => {
+    const m = buildStoreByPlant(LINKS);
+    expect(storeIdForPlant(m, DRUM_REHLA)).toBe(DRUM_STORE);
+    expect(storeIdForPlant(m, DRUM_REHLA)).not.toBe(REHLA_COMMON);
+  });
+
+  it('leaves the common store serving exactly the three original factories', () => {
+    expect(factoriesForStore(LINKS, REHLA_COMMON).sort())
+      .toEqual([SCPL_REHLA, SPPLK_REHLA, SPPL_REHLA].sort());
+    expect(factoriesForStore(LINKS, REHLA_COMMON)).not.toContain(DRUM_REHLA);
+  });
+
+  it('serves only itself from its own store', () => {
+    expect(factoriesForStore(LINKS, DRUM_STORE)).toEqual([DRUM_REHLA]);
+  });
+
+  it('is not a shared store — so buyer and user can never diverge there', () => {
+    const shared = sharedStoreIds(LINKS);
+    expect(shared.has(DRUM_STORE)).toBe(false);
+    // …and adding it did not make the common store stop being shared.
+    expect(shared.has(REHLA_COMMON)).toBe(true);
+  });
+
+  it('cannot draw from the Rehla common store', () => {
+    expect(canDrawFrom(LINKS, DRUM_REHLA, REHLA_COMMON)).toBe(false);
+  });
+
+  it('cannot have its store drawn on by any other Rehla factory', () => {
+    for (const p of [SCPL_REHLA, SPPL_REHLA, SPPLK_REHLA]) {
+      expect(canDrawFrom(LINKS, p, DRUM_STORE)).toBe(false);
+    }
+  });
+
+  it('can draw from its own store', () => {
+    expect(canDrawFrom(LINKS, DRUM_REHLA, DRUM_STORE)).toBe(true);
+  });
+
+  it('keeps its register distinct even for an identically named item', () => {
+    // Same item name in both stores is legitimate — they are separate
+    // registers. What must never happen is the two collapsing to one key.
+    expect(registerIdOf({ store_id: DRUM_STORE, plant_id: DRUM_REHLA }))
+      .not.toBe(registerIdOf({ store_id: REHLA_COMMON, plant_id: SCPL_REHLA }));
   });
 });
 

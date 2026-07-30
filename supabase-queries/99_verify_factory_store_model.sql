@@ -1,13 +1,15 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 99_verify_factory_store_model.sql — READ-ONLY acceptance sweep
 -- ═══════════════════════════════════════════════════════════════════════════
--- Asserts the whole 57→64 restructure in one run. Writes nothing, changes
+-- Asserts the whole 57→69 restructure in one run. Writes nothing, changes
 -- nothing — safe against production.
 --
 -- Covers the client's three requirements at Rehla ("store common for all 3,
 -- FAR different for all 3, maintenance different for all 3"), the regression
--- guarantee for the single-store sites (Sikandrabad, Ganjam), and the rename
--- safety properties that the whole project rests on.
+-- guarantee for the single-store sites (Sikandrabad, Ganjam), the rename
+-- safety properties that the whole project rests on, and — section J — the
+-- independence of the Drum Plant, which sits at the SAME site as those three
+-- Rehla factories and must share nothing with them (migration 69).
 --
 -- Every row is assertion / expected / actual / status. Scan the status column:
 --   PASS  — asserted and correct
@@ -19,19 +21,26 @@ with
 
 -- ── Reference ───────────────────────────────────────────────────────────────
 f as (select id, name, factory_code, location_id from plants where is_active and is_factory),
+-- The three factories that SHARE the Rehla common store. The Drum Plant is at
+-- the same site but is deliberately NOT in this set — it has its own store, and
+-- section J asserts that separation.
 rehla as (select id from f where factory_code in ('SCPL_REHLA','SPPL_REHLA','SPPLK_REHLA')),
 
 checks as (
 
 -- ═══ A. NAMING & RENAME SAFETY ═════════════════════════════════════════════
-select 'A1' as id, 'Exactly five active factories' as assertion,
-       '5' as expected, count(*)::text as actual,
-       case when count(*) = 5 then 'PASS' else 'FAIL' end as status
+select 'A1' as id, 'Exactly six active factories (five + Drum Plant)' as assertion,
+       '6' as expected, count(*)::text as actual,
+       case when count(*) = 6 then 'PASS' else 'FAIL' end as status
   from f
 union all
-select 'A2', 'Factory names follow <Entity> – <Location>',
-       '5', count(*)::text,
-       case when count(*) = 5 then 'PASS' else 'FAIL' end
+-- All six carry the en-dash separator. Note the Drum Plant is the one factory
+-- whose right-hand side is 'SCPL Rehla' rather than a bare location — the
+-- client chose that label explicitly (see 69's header), so the assertion is on
+-- the separator, not on the exact shape.
+select 'A2', 'Every factory name carries the – separator',
+       '6', count(*)::text,
+       case when count(*) = 6 then 'PASS' else 'FAIL' end
   from f where name like '%–%'
 union all
 select 'A3', 'Retired rows kept, never deleted (history still resolves)',
@@ -277,6 +286,156 @@ select 'I2', 'Every store grant points at a real store',
        '0 orphans', count(*)::text,
        case when count(*) = 0 then 'PASS' else 'FAIL' end
   from user_stores us where not exists (select 1 from stores s where s.id = us.store_id)
+
+-- ═══ J. DRUM PLANT — INDEPENDENT, AT A SHARED SITE (migration 69) ══════════
+-- The Drum Plant is the hard case for the whole store/factory split: it sits at
+-- the SAME location as the three factories that share the Rehla common store,
+-- so nothing about geography keeps it separate. Only the absence of a
+-- factory_store_access row does. J3 is the assertion that matters.
+union all
+select 'J1', 'Drum Plant exists and is an active factory',
+       'present',
+       coalesce((select name from plants
+                  where factory_code='DRUM_REHLA' and is_active and is_factory), 'MISSING'),
+       case when exists (select 1 from plants
+                          where factory_code='DRUM_REHLA' and is_active and is_factory)
+            then 'PASS' else 'FAIL' end
+union all
+select 'J2', 'Drum Plant draws from exactly one store',
+       '1',
+       coalesce((select count(distinct fsa.store_id)::text from factory_store_access fsa
+                  where fsa.plant_id = (select id from plants where factory_code='DRUM_REHLA')), '0'),
+       case when (select count(distinct fsa.store_id) from factory_store_access fsa
+                   where fsa.plant_id = (select id from plants where factory_code='DRUM_REHLA')) = 1
+            then 'PASS' else 'FAIL' end
+union all
+select 'J3', 'Drum Plant is NOT linked to the Rehla Common Store',
+       '0 links',
+       coalesce((select count(*)::text from factory_store_access fsa
+                   join stores s on s.id = fsa.store_id
+                  where s.code = 'REHLA_COMMON'
+                    and fsa.plant_id = (select id from plants where factory_code='DRUM_REHLA')), '0'),
+       case when coalesce((select count(*) from factory_store_access fsa
+                             join stores s on s.id = fsa.store_id
+                            where s.code = 'REHLA_COMMON'
+                              and fsa.plant_id = (select id from plants where factory_code='DRUM_REHLA')), 0) = 0
+            then 'PASS' else 'FAIL' end
+union all
+select 'J4', 'Drum Plant Store serves ONLY the Drum Plant',
+       '1 factory',
+       coalesce((select count(*)::text from factory_store_access fsa
+                   join stores s on s.id = fsa.store_id
+                  where s.code = 'DRUM_REHLA_STORE'), '0'),
+       case when coalesce((select count(*) from factory_store_access fsa
+                             join stores s on s.id = fsa.store_id
+                            where s.code = 'DRUM_REHLA_STORE'), 0) = 1
+            then 'PASS' else 'FAIL' end
+union all
+-- Requirement §11: adding the Drum Plant must not change anything for the
+-- entities that already shared the common store.
+select 'J5', 'Rehla Common Store still serves exactly the three original factories',
+       '3',
+       coalesce((select count(*)::text from factory_store_access fsa
+                   join stores s on s.id = fsa.store_id
+                   join plants p on p.id = fsa.plant_id
+                  where s.code='REHLA_COMMON'
+                    and p.factory_code in ('SCPL_REHLA','SPPL_REHLA','SPPLK_REHLA')), '0'),
+       case when coalesce((select count(*) from factory_store_access fsa
+                             join stores s on s.id = fsa.store_id
+                             join plants p on p.id = fsa.plant_id
+                            where s.code='REHLA_COMMON'
+                              and p.factory_code in ('SCPL_REHLA','SPPL_REHLA','SPPLK_REHLA')), 0) = 3
+            then 'PASS' else 'FAIL' end
+union all
+select 'J6', 'Rehla site: four factories drawing on two separate stores',
+       '4 factories / 2 stores',
+       coalesce((select count(distinct fsa.plant_id)::text || ' factories / '
+                     || count(distinct fsa.store_id)::text || ' stores'
+                   from factory_store_access fsa
+                   join plants p on p.id = fsa.plant_id
+                   join locations l on l.id = p.location_id
+                  where l.code = 'REHLA' and p.is_active and p.is_factory), 'NONE'),
+       case when (select count(distinct fsa.plant_id) = 4 and count(distinct fsa.store_id) = 2
+                    from factory_store_access fsa
+                    join plants p on p.id = fsa.plant_id
+                    join locations l on l.id = p.location_id
+                   where l.code = 'REHLA' and p.is_active and p.is_factory)
+            then 'PASS' else 'FAIL' end
+union all
+-- The duplication bug 60 had to clean up was caused by an importer that
+-- flat-mapped one file's rows across a multi-select of factories. These two
+-- catch a recurrence involving the Drum Plant, where the shared site makes the
+-- mistake easy to make and hard to spot.
+select 'J7', 'No asset mark exists under both the Drum Plant and a Rehla-three factory',
+       '0 shared marks',
+       coalesce((select count(*)::text from (
+          select lower(btrim(fa.identification_mark)) as mk
+            from fixed_assets fa
+           where fa.identification_mark is not null and btrim(fa.identification_mark) <> ''
+             and fa.plant_id = (select id from plants where factory_code='DRUM_REHLA')
+          intersect
+          select lower(btrim(fa2.identification_mark))
+            from fixed_assets fa2
+           where fa2.identification_mark is not null and btrim(fa2.identification_mark) <> ''
+             and fa2.plant_id in (select id from rehla)) d), '0'),
+       case when (select count(*) from fixed_assets
+                   where plant_id = (select id from plants where factory_code='DRUM_REHLA')) = 0
+            then 'EMPTY'
+            when coalesce((select count(*) from (
+                    select lower(btrim(fa.identification_mark)) as mk
+                      from fixed_assets fa
+                     where fa.identification_mark is not null and btrim(fa.identification_mark) <> ''
+                       and fa.plant_id = (select id from plants where factory_code='DRUM_REHLA')
+                    intersect
+                    select lower(btrim(fa2.identification_mark))
+                      from fixed_assets fa2
+                     where fa2.identification_mark is not null and btrim(fa2.identification_mark) <> ''
+                       and fa2.plant_id in (select id from rehla)) d), 0) = 0
+            then 'PASS' else 'FAIL' end
+union all
+select 'J8', 'No PM schedule mark shared between the Drum Plant and a Rehla-three factory',
+       '0 shared marks',
+       coalesce((select count(*)::text from (
+          select lower(btrim(s.equipment_mark)) as mk
+            from maintenance_schedules s
+           where s.equipment_mark is not null and btrim(s.equipment_mark) <> ''
+             and s.plant_id = (select id from plants where factory_code='DRUM_REHLA')
+          intersect
+          select lower(btrim(s2.equipment_mark))
+            from maintenance_schedules s2
+           where s2.equipment_mark is not null and btrim(s2.equipment_mark) <> ''
+             and s2.plant_id in (select id from rehla)) d), '0'),
+       case when (select count(*) from maintenance_schedules
+                   where plant_id = (select id from plants where factory_code='DRUM_REHLA')) = 0
+            then 'EMPTY'
+            when coalesce((select count(*) from (
+                    select lower(btrim(s.equipment_mark)) as mk
+                      from maintenance_schedules s
+                     where s.equipment_mark is not null and btrim(s.equipment_mark) <> ''
+                       and s.plant_id = (select id from plants where factory_code='DRUM_REHLA')
+                    intersect
+                    select lower(btrim(s2.equipment_mark))
+                      from maintenance_schedules s2
+                     where s2.equipment_mark is not null and btrim(s2.equipment_mark) <> ''
+                       and s2.plant_id in (select id from rehla)) d), 0) = 0
+            then 'PASS' else 'FAIL' end
+union all
+-- G3 already asserts this globally; called out separately because the Drum
+-- Plant is the case where a cross-draw would be a genuine data-isolation
+-- breach rather than a stale pointer.
+select 'J9', 'No requisition crosses between the Drum Plant and the common store',
+       '0 crossings',
+       coalesce((select count(*)::text from maintenance_store_requests r
+                  where (r.plant_id = (select id from plants where factory_code='DRUM_REHLA')
+                         and r.source_store_id = (select id from stores where code='REHLA_COMMON'))
+                     or (r.plant_id in (select id from rehla)
+                         and r.source_store_id = (select id from stores where code='DRUM_REHLA_STORE'))), '0'),
+       case when coalesce((select count(*) from maintenance_store_requests r
+                            where (r.plant_id = (select id from plants where factory_code='DRUM_REHLA')
+                                   and r.source_store_id = (select id from stores where code='REHLA_COMMON'))
+                               or (r.plant_id in (select id from rehla)
+                                   and r.source_store_id = (select id from stores where code='DRUM_REHLA_STORE'))), 0) = 0
+            then 'PASS' else 'FAIL' end
 )
 
 select id, assertion, expected, actual, status from checks order by id;

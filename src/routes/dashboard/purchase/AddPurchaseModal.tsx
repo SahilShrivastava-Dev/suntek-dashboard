@@ -252,8 +252,17 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
         </div>
         <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 14 }}>{t('addPurchase.subtitle', 'New stock bought is added to the register — matched items increment, new items are created.')}</div>
 
-        {/* Plant picker (always) */}
-        {plants.length > 1 && stage === 'choose' && (
+        {/* Plant picker — ALWAYS shown while choosing, even with one option.
+            This purchase is charged to a factory and lands in that factory's
+            store; hiding the destination because there is only one choice is how
+            a user ends up unsure which register they just added stock to. */}
+        {stage === 'choose' && plants.length === 1 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={label}>{t('addPurchase.plant', 'Plant')}</div>
+            <span className="chip active" style={{ cursor: 'default', display: 'inline-block' }}>{plants[0].name}</span>
+          </div>
+        )}
+        {stage === 'choose' && plants.length > 1 && (
           <div style={{ marginBottom: 14 }}>
             <div style={label}>{t('addPurchase.plant', 'Plant')}</div>
             <select value={plantId} onChange={e => setPlantId(e.target.value)} style={{ ...inputStyle, width: '100%' }}>

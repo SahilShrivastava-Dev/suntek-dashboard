@@ -11,6 +11,7 @@ import { useRoleContext } from '../../../contexts/RoleContext';
 import { useNotifications } from '../../../contexts/NotificationsContext';
 import { parseMaintenanceFile, type PMTemplate } from '../../../lib/pm/parseMaintenanceFile';
 import { matchAsset, type AssetLite } from '../../../lib/far/assets';
+import { createImportBatch, setImportBatchRowCount } from '../../../lib/imports/batches';
 import { FREQ_LABEL, calculateNextDue } from './maintenance/shared';
 
 type Plant = { id: string; name: string };
@@ -108,6 +109,26 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
       const nowStart = new Date(startDate).toISOString();
       const singlePlant = plantIds.length === 1;
       const payload: Record<string, unknown>[] = [];
+
+      // ONE BATCH PER FACTORY, not one per file. A workbook can be imported
+      // against several factories at once (each keeps its own PM register), and
+      // an admin must be able to undo the import for one factory without
+      // touching another's schedules — so the deletable unit is (file, factory),
+      // which is also how pm_schedule_uploads has always recorded it.
+      //
+      // Registered before the insert so every schedule row can be stamped.
+      const batchByPlant = new Map<string, string>();
+      for (const pid of plantIds) {
+        batchByPlant.set(pid, await createImportBatch({
+          module: 'pm_schedule',
+          plantId: pid,
+          fileName,
+          fileUrl: cloudUrl,
+          rowCount: 0, // corrected below, once we know what landed for this plant
+          uploadedByName: activeProfile.name,
+        }));
+      }
+
       // Create the schedule set for EACH selected factory (each has its own FAR copy).
       for (const pid of plantIds) {
         const plantAssets = assets.filter(a => a.plant_id === pid);
@@ -126,6 +147,7 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
             start_date: startDate, until_date: untilDate || null,
             checklist: tpl.checklist, requires_approval: tpl.frequency !== 'daily',
             unmatched_justification: match ? null : justification.trim(), source: 'pm_import',
+            import_batch_id: batchByPlant.get(pid) ?? null,
           });
         }
       }
@@ -134,7 +156,12 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
         if (error) throw error;
       }
       for (const pid of plantIds) {
-        await insertRows('pm_schedule_uploads', { plant_id: pid, file_name: fileName, file_url: cloudUrl, uploaded_by_name: activeProfile.name, sheet_count: 0, schedule_count: payload.filter(p => p.plant_id === pid).length });
+        const plantCount = payload.filter(p => p.plant_id === pid).length;
+        // The manifest now carries the batch id too, so Upload History and the
+        // older per-plant manifest agree on which file produced what.
+        await insertRows('pm_schedule_uploads', { plant_id: pid, file_name: fileName, file_url: cloudUrl, uploaded_by_name: activeProfile.name, sheet_count: 0, schedule_count: plantCount, import_batch_id: batchByPlant.get(pid) ?? null });
+        const bid = batchByPlant.get(pid);
+        if (bid) await setImportBatchRowCount(bid, plantCount);
         // Notify that plant's unit head so they can assign/verify technicians.
         addNotification({
           target_roles: ['unit_head', 'admin'],
@@ -166,7 +193,16 @@ export function PMScheduleImport({ open, onClose, onImported }: { open: boolean;
 
         {stage === 'form' && (
           <div>
-            {/* Factory selection — multi-select for an admin; auto-scoped (hidden) for a single-plant unit head. */}
+            {/* Factory selection — multi-select for an admin. A single-plant unit
+                head still sees WHICH factory this workbook will be written to,
+                as a read-only line: the destination is auto-scoped, but an import
+                form must never leave the user guessing where the data lands. */}
+            {plants.length === 1 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={label}>{t('far.pmFactoryLabel', 'Factory this workbook applies to')}</div>
+                <span className="chip active" style={{ cursor: 'default', marginTop: 2, display: 'inline-block' }}>{plants[0].name}</span>
+              </div>
+            )}
             {plants.length > 1 && (
               <div style={{ marginBottom: 12 }}>
                 <div style={label}>{t('far.pmFactoriesLabel', 'Factory / factories this workbook applies to *')}</div>

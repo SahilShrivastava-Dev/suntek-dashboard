@@ -320,10 +320,14 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapse
 
   const showIntelligence = INTELLIGENCE_TABS.length > 0;
 
-  // Admin section — user management + blacklist
+  // Admin section — user management + blacklist + upload history
   // User Management shows for anyone who can manage users or roles (delegated too).
   const showAdmin = can('manage_users') || can('manage_roles');
   const showBlacklist = activeProfile.id === 'admin' || activeProfile.id === 'unit_head';
+  // Upload History is where an incorrect CSV/Excel import gets undone. Shown to
+  // whoever holds the capability; the RPC checks it again server-side, so this
+  // only controls whether the link appears.
+  const showUploads = can('delete_import_batch');
 
   const isActive = (path: string) => {
     if (path === '/dashboard') return location.pathname === '/dashboard';
@@ -731,13 +735,13 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapse
       )}
 
       {/* ── ADMIN (dropdown) — expanded by default ────────────────────────── */}
-      {(showAdmin || showBlacklist) && (
+      {(showAdmin || showBlacklist || showUploads) && (
       <nav className="flex flex-col gap-1">
         <a
-          className={`nav-link${(isActive('/dashboard/users') || isActive('/dashboard/blacklist')) ? ' active' : ''}`}
+          className={`nav-link${(isActive('/dashboard/users') || isActive('/dashboard/blacklist') || isActive('/dashboard/admin/uploads')) ? ' active' : ''}`}
           onClick={() => {
             setAdminOpen((o) => !o);
-            if (!adminOpen) navTo(showAdmin ? '/dashboard/users' : '/dashboard/blacklist');
+            if (!adminOpen) navTo(showAdmin ? '/dashboard/users' : showBlacklist ? '/dashboard/blacklist' : '/dashboard/admin/uploads');
           }}
         >
           <IconShield />
@@ -756,6 +760,12 @@ export function Sidebar({ user, onSignOut, mobileOpen = false, onClose, collapse
               <a className={`nav-link${isActive('/dashboard/blacklist') ? ' active' : ''}`} onClick={() => navTo('/dashboard/blacklist')}>
                 <span>{t('nav.blacklist')}</span>
                 <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>{t('nav.pillRestrict', 'restrict')}</span>
+              </a>
+            )}
+            {showUploads && (
+              <a className={`nav-link${isActive('/dashboard/admin/uploads') ? ' active' : ''}`} onClick={() => navTo('/dashboard/admin/uploads')}>
+                <span>{t('nav.uploadHistory', 'Upload History')}</span>
+                <span className="pill-count" style={{ background: '#FEF2F2', color: '#DC2626' }}>{t('nav.pillDelete', 'delete')}</span>
               </a>
             )}
           </div>

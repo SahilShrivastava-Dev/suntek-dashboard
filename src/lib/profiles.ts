@@ -68,6 +68,11 @@ export const CAPABILITIES: { key: string; label: string; description: string }[]
   { key: 'resolve_stock_anomaly', label: 'Resolve stock anomalies', description: 'Review Stock Register anomalies and mark them confirmed / resolved / false positive (with a mandatory comment)' },
   { key: 'return_repairs', label: 'Return repaired items', description: 'Record repaired parts coming back from a vendor and add them to repaired stock' },
   { key: 'reverse_repair_return', label: 'Reverse repair returns', description: 'Reverse a recorded repair return with an offsetting stock movement (history is preserved)' },
+  // Destructive and irreversible — deliberately the last entry, and granted to
+  // nobody by default. Admin roles hold it implicitly via is_admin (see
+  // profileHasCapability / has_capability), which is what the client asked for:
+  // "restricted to authorised administrator accounts".
+  { key: 'delete_import_batch', label: 'Delete uploaded data', description: 'Delete the records imported through an incorrect CSV / Excel upload, so a corrected file can be uploaded. Only rows from that file are removed; manual entries are never touched. Every deletion is audited.' },
 ];
 
 /**

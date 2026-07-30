@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { resolveClosing, reconcile, type MonthParse, type MonthItem } from './parseStockFile';
+import {
+  resolveClosing, reconcile, reconcileAll, labelForPeriod,
+  type MonthParse, type MonthItem,
+} from './parseStockFile';
 
 /**
  * The register was seeding from `opening + purchased − used`, which double-counts
@@ -54,8 +57,10 @@ const item = (o: Partial<MonthItem>): MonthItem => ({
   itemName: 'Widget', key: 'widget', unit: 'Pcs', equipment: '', model: null,
   opening: 0, purchaseOpening: 0, purchaseClosing: 0, purchased: 0, used: 0, closing: 0, ...o,
 });
-const month = (items: MonthItem[]): MonthParse => ({
-  periodKey: '2026-07', periodMonth: '2026-07-01', label: 'July 2026',
+/** `periodKey` defaults to July 2026 so the single-month tests read unchanged;
+ *  pass one (e.g. '2026-06') when a test needs two DISTINCT months. */
+const month = (items: MonthItem[], periodKey = '2026-07'): MonthParse => ({
+  periodKey, periodMonth: `${periodKey}-01`, label: labelForPeriod(`${periodKey}-01`),
   items, hasSales: true, hasPurchase: true,
 });
 
@@ -123,7 +128,11 @@ describe('carry_forward — only when a previous month exists', () => {
   });
 
   it('does not fire when stock carries across cleanly', () => {
-    const prev = month([item({ closing: 30 })]);
+    // A genuinely clean previous month has BOTH books closing at 30. Leaving
+    // purchaseClosing at its default 0 would make the prior month internally
+    // inconsistent, which is a different scenario (and correctly raises a
+    // purchase_carry of its own — see the purchase_carry suite below).
+    const prev = month([item({ opening: 30, purchaseOpening: 30, purchaseClosing: 30, closing: 30 })], '2026-06');
     // 30 carried in, 5 received -> 35 available, 35 copied to sales opening.
     const a = reconcile(prev, month([item({ opening: 35, purchaseOpening: 30, purchased: 5, purchaseClosing: 35, used: 0, closing: 35 })]));
     expect(a).toHaveLength(0);
@@ -151,5 +160,175 @@ describe('sheet_self — a sheet contradicting its own arithmetic', () => {
       opening: 35, purchaseOpening: 30, purchased: 5, purchaseClosing: 35, used: 2, closing: 33,
     })]));
     expect(a).toHaveLength(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The client's reported case, verbatim from "Store Keeping 26-27 Jharkhand.xlsx"
+// ═══════════════════════════════════════════════════════════════════════════
+// Item: Acid Pump ( EXP 50CT)  Bello
+//   May  — Sales 31 → 31        Purchase 31 → 31
+//   June — Sales 29 → 29        Purchase  7 +24 → 31
+//   July — Sales 29 → 27        Purchase 29 → 29
+//
+// The bug report claimed the engine compared June's purchase opening (7) against
+// July. It did not: 31 vs 7 was the MAY→JUNE pair, correct for the months it
+// actually compared but unreadable because the message named neither month.
+const BELLO = 'Acid Pump ( EXP 50CT)  Bello';
+const bello = (o: Partial<MonthItem>) => item({ itemName: BELLO, key: 'acid pump  exp 50ct bello', ...o });
+const MAY  = month([bello({ opening: 31, purchaseOpening: 31, purchaseClosing: 31, purchased: 0, used: 0, closing: 31 })], '2026-05');
+const JUNE = month([bello({ opening: 29, purchaseOpening: 7,  purchaseClosing: 31, purchased: 24, used: 0, closing: 29 })], '2026-06');
+const JULY = month([bello({ opening: 29, purchaseOpening: 29, purchaseClosing: 29, purchased: 0, used: 2, closing: 27 })], '2026-07');
+
+describe("client case — Acid Pump ( EXP 50CT)  Bello", () => {
+  it('never uses June\'s opening (7) as July\'s opening', () => {
+    for (const a of reconcile(JUNE, JULY)) {
+      expect(a.curr).not.toBe(7);
+      expect(a.detail).not.toContain('opened at 7');
+    }
+  });
+
+  it('reports June→July as a 2-unit purchase carry, not 24', () => {
+    const a = reconcile(JUNE, JULY).filter(x => x.type === 'purchase_carry');
+    expect(a).toHaveLength(1);
+    expect(a[0].prev).toBe(31);
+    expect(a[0].curr).toBe(29);
+    expect(a[0].delta).toBe(-2);
+    // The client asked for this wording specifically.
+    expect(a[0].detail).toBe(
+      'Jun 2026 Purchase Register closed at 31, but Jul 2026 Purchase Register opened at 29. Difference: 2 units short.',
+    );
+  });
+
+  it('passes check 1 — June Sales closing 29 matches July Purchase opening 29', () => {
+    expect(reconcile(JUNE, JULY).filter(x => x.type === 'carry_forward')).toHaveLength(0);
+  });
+
+  it('passes check 2 — July Purchase closing 29 matches July Sales opening 29', () => {
+    expect(reconcile(JUNE, JULY).filter(x => x.type === 'intra_month')).toHaveLength(0);
+  });
+
+  it('attributes the 24-unit gap to MAY→JUNE and names both months', () => {
+    const a = reconcile(MAY, JUNE).filter(x => x.type === 'carry_forward');
+    expect(a).toHaveLength(1);
+    expect(a[0].delta).toBe(-24);
+    expect(a[0].prevPeriod).toBe('2026-05');
+    expect(a[0].currPeriod).toBe('2026-06');
+    expect(a[0].detail).toContain('May 2026');
+    expect(a[0].detail).toContain('Jun 2026');
+  });
+
+  it('still reports June\'s own 2-unit internal disagreement', () => {
+    const a = reconcile(MAY, JUNE).filter(x => x.type === 'intra_month');
+    expect(a).toHaveLength(1);
+    expect(a[0].delta).toBe(-2);
+  });
+
+  it('keeps June\'s discrepancies visible once July is uploaded', () => {
+    // The substantive bug: reconcile() only ever saw the newest pair, so
+    // uploading July silently erased June's findings.
+    const all = reconcileAll([MAY, JUNE, JULY]);
+    const june = all.filter(d => d.periodKey === '2026-06').map(d => d.anomaly.type);
+    expect(june).toContain('carry_forward');   // the 24
+    expect(june).toContain('intra_month');     // the 2
+    const july = all.filter(d => d.periodKey === '2026-07').map(d => d.anomaly.type);
+    expect(july).toContain('purchase_carry');  // the client's check 3
+  });
+});
+
+describe('reconcileAll — nothing is dropped, order does not matter', () => {
+  it('files each anomaly under the LATER month of its pair', () => {
+    for (const d of reconcileAll([MAY, JUNE, JULY])) {
+      if (d.anomaly.currPeriod) expect(d.periodKey).toBe(d.anomaly.currPeriod);
+    }
+  });
+
+  it('is identical whatever order the months arrive in', () => {
+    const norm = (ms: MonthParse[]) => reconcileAll(ms)
+      .map(d => `${d.periodKey}|${d.anomaly.type}|${d.anomaly.item}|${d.anomaly.delta}`).sort();
+    expect(norm([JULY, MAY, JUNE])).toEqual(norm([MAY, JUNE, JULY]));
+    expect(norm([JUNE, JULY, MAY])).toEqual(norm([MAY, JUNE, JULY]));
+  });
+
+  it('reconciles a single month without a previous one', () => {
+    expect(() => reconcileAll([JULY])).not.toThrow();
+    expect(reconcileAll([JULY]).every(d => d.periodKey === '2026-07')).toBe(true);
+  });
+
+  it('handles an empty workbook', () => {
+    expect(reconcileAll([])).toEqual([]);
+  });
+});
+
+describe('year rollover — December to January', () => {
+  const DEC = month([item({ opening: 10, purchaseOpening: 10, purchaseClosing: 10, closing: 10 })], '2026-12');
+  const JAN = month([item({ opening: 4, purchaseOpening: 4, purchaseClosing: 4, closing: 4 })], '2027-01');
+
+  it('compares Dec 2026 against Jan 2027, not Jan 2026', () => {
+    const a = reconcile(DEC, JAN).filter(x => x.type === 'carry_forward');
+    expect(a).toHaveLength(1);
+    expect(a[0].prevPeriod).toBe('2026-12');
+    expect(a[0].currPeriod).toBe('2027-01');
+    // Both years are stated, so the pair cannot be misread as same-year.
+    expect(a[0].detail).toContain('Dec 2026');
+    expect(a[0].detail).toContain('Jan 2027');
+  });
+
+  it('orders across the year boundary correctly', () => {
+    const all = reconcileAll([JAN, DEC]);
+    expect(all.filter(d => d.anomaly.type === 'carry_forward')[0].periodKey).toBe('2027-01');
+  });
+
+  it('labels every month with its year', () => {
+    expect(labelForPeriod('2026-12-01')).toBe('Dec 2026');
+    expect(labelForPeriod('2027-01-01')).toBe('Jan 2027');
+  });
+});
+
+describe('purchase_carry — only when it says something new', () => {
+  it('fires when the previous month\'s two books disagree', () => {
+    const a = reconcile(JUNE, JULY).filter(x => x.type === 'purchase_carry');
+    expect(a).toHaveLength(1);
+  });
+
+  it('stays silent when both books agree, so nothing is double-counted', () => {
+    // Prev closes at 30 on BOTH books; next opens at 25. carry_forward reports
+    // the 5 — purchase_carry would report the identical 5 against the identical
+    // number, which reads as two separate discrepancies.
+    const prev = month([item({ opening: 30, purchaseOpening: 30, purchaseClosing: 30, closing: 30 })], '2026-06');
+    const next = month([item({ opening: 25, purchaseOpening: 25, purchaseClosing: 25, closing: 25 })], '2026-07');
+    const a = reconcile(prev, next);
+    expect(a.filter(x => x.type === 'carry_forward')).toHaveLength(1);
+    expect(a.filter(x => x.type === 'purchase_carry')).toHaveLength(0);
+  });
+
+  it('names the purchase register on both sides', () => {
+    const a = reconcile(JUNE, JULY).filter(x => x.type === 'purchase_carry')[0];
+    expect(a.prevRegister).toBe('purchase');
+    expect(a.currRegister).toBe('purchase');
+  });
+});
+
+describe('provenance — every anomaly says where its numbers came from', () => {
+  it('tags the register side on both figures of a cross-month check', () => {
+    const a = reconcile(MAY, JUNE).filter(x => x.type === 'carry_forward')[0];
+    expect(a.prevRegister).toBe('sales');
+    expect(a.currRegister).toBe('purchase');
+  });
+
+  it('tags a same-month check with the same period on both sides', () => {
+    const a = reconcile(MAY, JUNE).filter(x => x.type === 'intra_month')[0];
+    expect(a.prevPeriod).toBe('2026-06');
+    expect(a.currPeriod).toBe('2026-06');
+  });
+
+  it('never leaves a cross-month anomaly without both periods', () => {
+    for (const d of reconcileAll([MAY, JUNE, JULY])) {
+      if (d.anomaly.type === 'carry_forward' || d.anomaly.type === 'purchase_carry') {
+        expect(d.anomaly.prevPeriod).toBeTruthy();
+        expect(d.anomaly.currPeriod).toBeTruthy();
+        expect(d.anomaly.prevPeriod).not.toBe(d.anomaly.currPeriod);
+      }
+    }
   });
 });

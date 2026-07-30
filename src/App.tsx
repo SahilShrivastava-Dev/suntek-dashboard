@@ -31,6 +31,7 @@ const WarehouseEntry   = lazy(() => import('./routes/dashboard/WarehouseEntry').
 const DailyLogPage     = lazy(() => import('./routes/dashboard/DailyLogPage').then(m => ({ default: m.DailyLogPage })));
 const UserManagement   = lazy(() => import('./routes/dashboard/UserManagement').then(m => ({ default: m.UserManagement })));
 const Blacklist        = lazy(() => import('./routes/dashboard/Blacklist').then(m => ({ default: m.Blacklist })));
+const UploadHistory    = lazy(() => import('./routes/dashboard/UploadHistory').then(m => ({ default: m.UploadHistory })));
 const AnomalyDashboard = lazy(() => import('./routes/dashboard/AnomalyDashboard').then(m => ({ default: m.AnomalyDashboard })));
 const AnomalyOperationsCenter = lazy(() => import('./routes/dashboard/AnomalyOperationsCenter').then(m => ({ default: m.AnomalyOperationsCenter })));
 const CostIntelligence = lazy(() => import('./routes/dashboard/CostIntelligence').then(m => ({ default: m.CostIntelligence })));
@@ -118,6 +119,10 @@ function App() {
             <Route path="daily-log"         element={<DailyLogPage />} />
             <Route path="users"             element={<UserManagement />} />
             <Route path="blacklist"         element={<Blacklist />} />
+            {/* Admin-only: delete data imported through an incorrect CSV/Excel
+                upload. Gated by the '*' route wildcard that only admin holds,
+                and again by the delete_import_batch capability inside the RPC. */}
+            <Route path="admin/uploads"     element={<UploadHistory />} />
             <Route path="anomalies"         element={<AnomalyDashboard />} />
             <Route path="anomaly-center"    element={<AnomalyOperationsCenter />} />
             <Route path="cost-intelligence" element={<CostIntelligence />} />

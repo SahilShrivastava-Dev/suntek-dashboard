@@ -858,11 +858,16 @@ export function Maintenance() {
 
   const periodicTickets = tickets.filter(t => t.type === 'periodic');
   // Schedule-list plant filter (each plant has its own PM workbook).
-  const schedulePlants = (() => {
-    const m = new Map<string, string>();
-    for (const s of schedules) if (s.plant_id) m.set(s.plant_id, s.plants?.name || s.plant_id);
-    return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  })();
+  //
+  // Sourced from the factories the user may SEE, not from the factories that
+  // happen to have schedules — otherwise the control disappears whenever only
+  // one workbook has been imported and the register stops saying whose schedules
+  // it is showing. `hasData` marks the ones still waiting for a workbook, which
+  // is also the fastest way to spot a factory nobody has set up yet.
+  const schedulePlants = useMemo(() => {
+    const withData = new Set(schedules.map(s => s.plant_id).filter(Boolean) as string[]);
+    return plantOptions.map(p => ({ id: p.id, name: p.name, hasData: withData.has(p.id) }));
+  }, [plantOptions, schedules]);
   const shownSchedules = schedPlantFilter.length ? schedules.filter(s => s.plant_id && schedPlantFilter.includes(s.plant_id)) : schedules;
   const emergencyTickets = tickets.filter(t => t.type === 'emergency');
 
@@ -2863,12 +2868,32 @@ export function Maintenance() {
             </>
           )}
         >
-          {/* Each plant maintains its own PM workbook — filter the register by plant. */}
+          {/* Each plant maintains its own PM workbook — filter the register by
+              plant. Always shown, even with one factory, so the register is never
+              ambiguous about whose schedules these are. */}
+          {schedulePlants.length === 1 && (
+            <div className="flex gap-2 mb-3 flex-wrap px-5 items-center">
+              <span className="chip active" style={{ cursor: 'default' }}>
+                {t('common.plant', 'Plant')}: {schedulePlants[0].name}
+              </span>
+              {!schedulePlants[0].hasData && (
+                <span style={{ fontSize: 11, color: '#94A3B8' }}>{t('maint.noScheduleImport', 'no PM workbook imported yet')}</span>
+              )}
+            </div>
+          )}
           {schedulePlants.length > 1 && (
             <div className="flex gap-2 mb-3 flex-wrap px-5">
               <button onClick={() => setSchedPlantFilter([])} className={`chip${schedPlantFilter.length === 0 ? ' active' : ''}`}>{t('common.allPlants')}</button>
               {schedulePlants.map(p => (
-                <button key={p.id} onClick={() => setSchedPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])} className={`chip${schedPlantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
+                <button
+                  key={p.id}
+                  onClick={() => setSchedPlantFilter(f => f.includes(p.id) ? f.filter(x => x !== p.id) : [...f, p.id])}
+                  className={`chip${schedPlantFilter.includes(p.id) ? ' active' : ''}`}
+                  style={p.hasData ? undefined : { opacity: 0.55 }}
+                  title={p.hasData ? undefined : t('maint.noScheduleImport', 'no PM workbook imported yet')}
+                >
+                  {p.name}{p.hasData ? '' : ' ·'}
+                </button>
               ))}
               {schedPlantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>{t('maint.combined', 'combined')}</span>}
             </div>

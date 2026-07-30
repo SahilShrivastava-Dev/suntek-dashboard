@@ -12,7 +12,9 @@ const anom = (over: Partial<Anomaly> = {}): Anomaly => ({
 } as Anomaly);
 
 const row = (over: Partial<AnomalyResolutionRow> = {}): AnomalyResolutionRow => ({
-  id: 'r1', plant_id: 'p1', period_month: '2026-06-01',
+  // store_id is the join key since migration 72; plant_id remains as the
+  // informational owning factory (null for a shared store).
+  id: 'r1', plant_id: 'p1', store_id: 'p1', period_month: '2026-06-01',
   item_name: 'Acid Pump ( EXP 50CT) Bello', anomaly_type: 'carry_forward',
   status: 'resolved', action: 'resolve', corrected_value: null,
   resolution_comment: 'verified against physical count', resolved_by_name: 'Sagar',

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 // Shared humanizer — a user should never be shown a raw error object.
 import { humanizeError as errMsg } from '../../../lib/errors';
@@ -16,9 +17,10 @@ import { useRoleContext } from '../../../contexts/RoleContext';
 import { profileHasCapability } from '../../../lib/profiles';
 import { withEmbedFallback } from '../../../lib/scopedList';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
-import { parseStockFile, reconcile, type StockParseResult, type MonthParse, type MonthItem, type Anomaly } from '../../../lib/store/parseStockFile';
+import { parseStockFile, reconcile, reconcileAll, labelForPeriod, type StockParseResult, type MonthParse, type MonthItem, type Anomaly } from '../../../lib/store/parseStockFile';
 import { indexResolutions, joinAnomalies, type AnomalyResolutionRow, type ReviewedAnomaly } from '../../../lib/store/anomalyKeys';
 import { registerIdOf } from '../../../lib/store/registers';
+import { createImportBatch, setImportBatchRowCount, buildItemOwnerMap, resolveItemOwner } from '../../../lib/imports/batches';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { AnomalyReviewModal } from './AnomalyReviewModal';
 import { StoreReconciliation } from './StoreReconciliation';
@@ -49,7 +51,8 @@ const STATUS_LABEL_KEYS: Record<'out' | 'low' | 'in', string> = {
 
 // label = English default; labelKey resolved via t() at render.
 const ANOM_META: Record<Anomaly['type'], { label: string; labelKey: string; icon: string }> = {
-  carry_forward: { label: 'Carry-forward drift', labelKey: 'storereq.stockAnomCarryForward', icon: '⚠' },
+  carry_forward:  { label: 'Carry-forward drift', labelKey: 'storereq.stockAnomCarryForward', icon: '⚠' },
+  purchase_carry: { label: 'Purchase carry-forward', labelKey: 'storereq.stockAnomPurchaseCarry', icon: '⚠' },
   intra_month:   { label: 'Sheet mismatch',      labelKey: 'storereq.stockAnomSheetMismatch', icon: '⚠' },
   sheet_self:    { label: 'Sheet contradicts itself', labelKey: 'storereq.stockAnomSheetSelf', icon: '✎' },
   negative:      { label: 'Negative stock',      labelKey: 'storereq.stockAnomNegative',      icon: '🔴' },
@@ -84,8 +87,12 @@ function monthsFromRows(rows: StockMonthRow[]): MonthParse[] {
     });
     byPeriod.set(r.period_month, list);
   }
+  // `label` feeds the anomaly text ("Jun 2026 Purchase Register closed at …"),
+  // so it must be a readable month, not the raw '2026-06-01' the snapshot is
+  // keyed by — and it must always carry the year so a Dec→Jan pair reads
+  // unambiguously.
   return [...byPeriod.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([pk, items]) => ({ periodKey: pk.slice(0, 7), periodMonth: pk, label: pk, items, hasSales: true, hasPurchase: true }));
+    .map(([pk, items]) => ({ periodKey: pk.slice(0, 7), periodMonth: pk, label: labelForPeriod(pk), items, hasSales: true, hasPurchase: true }));
 }
 
 const inputStyle: React.CSSProperties = {
@@ -94,6 +101,7 @@ const inputStyle: React.CSSProperties = {
 
 export function StockRegister() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const toast = useToast();
   const { scopeQuery, allowedPlants, stores, allowedStores, storeIdFor } = usePlantScope();
   const { activeProfile } = useRoleContext();
@@ -147,7 +155,7 @@ export function StockRegister() {
       try {
         const { data: ar, error: arErr } = await scopeQuery(
           supabase.from('store_stock_anomalies')
-            .select('id, plant_id, period_month, item_name, anomaly_type, status, action, corrected_value, resolution_comment, resolved_by_name, resolved_at, version'),
+            .select('id, plant_id, store_id, period_month, item_name, anomaly_type, status, action, corrected_value, resolution_comment, resolved_by_name, resolved_at, version'),
         ).returns<AnomalyResolutionRow[]>();
         setResolutions(arErr ? [] : (ar || []));
       } catch { setResolutions([]); }
@@ -159,7 +167,8 @@ export function StockRegister() {
   }
   useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const plantOptions = allowedPlants.length > 0 ? allowedPlants as Plant[] : plants;
+  // (No plantOptions here: this screen is keyed on STORES, not factories — see
+  // storeChips below. A factory list was left over from before the store split.)
   const plantName = (id: string | null) => plants.find(p => p.id === id)?.name || '—';
 
   // Live anomalies from persisted snapshots (latest two months). Respects the active
@@ -182,35 +191,67 @@ export function StockRegister() {
       const arr = byPlant.get(k);
       if (arr) arr.push(r); else byPlant.set(k, [r]);
     }
-    const out: { anomaly: Anomaly; plant?: string; plantId: string | null; periodMonth: string }[] = [];
+    const out: { anomaly: Anomaly; plant?: string; plantId: string | null; periodMonth: string; periodKey: string }[] = [];
     for (const [pid, rows] of byPlant.entries()) {
       const ms = monthsFromRows(rows);
       if (!ms.length) continue;
       // `pid` may now be a store id, so resolve the label from either master.
       const plant = pid === '—' ? undefined : (stores.find(s => s.id === pid)?.name ?? plantName(pid));
-      const periodMonth = ms[ms.length - 1].periodMonth;
-      for (const a of reconcile(ms.length >= 2 ? ms[ms.length - 2] : null, ms[ms.length - 1])) {
-        out.push({ anomaly: a, plant, plantId: pid === '—' ? null : pid, periodMonth });
+      // EVERY consecutive pair, not just the newest. Reconciling only the last
+      // two months meant an unresolved discrepancy silently disappeared the
+      // moment a newer month was uploaded — a real mismatch inside June stopped
+      // being reported as soon as July landed, without anyone having looked at
+      // it. Each anomaly is filed under the later month of its pair.
+      for (const d of reconcileAll(ms)) {
+        out.push({
+          anomaly: d.anomaly, plant, plantId: pid === '—' ? null : pid,
+          periodMonth: d.periodMonth, periodKey: d.periodKey,
+        });
       }
     }
     return out;
   }, [months, plantFilter, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Months that actually produced anomalies, newest first — the month picker. */
+  const anomalyMonths = useMemo(
+    () => [...new Set(anomalies.map(a => a.periodKey))].sort().reverse(),
+    [anomalies],
+  );
+  /** '' = every month. Defaults to the newest, so the day-to-day view stays as
+   *  quiet as it was while older months remain one click away rather than
+   *  silently dropped. */
+  const [anomMonth, setAnomMonth] = useState<string>('');
+  const effectiveAnomMonth = anomMonth || anomalyMonths[0] || '';
+
   // Join computed anomalies to their persisted review state (natural-key match).
   const reviewed = useMemo(() => {
     const idx = indexResolutions(resolutions);
+    const inMonth = anomMonth === '*'
+      ? anomalies
+      : anomalies.filter(a => a.periodKey === effectiveAnomMonth);
     const joined = joinAnomalies(
-      anomalies.filter(a => a.plantId).map(a => ({ anomaly: a.anomaly, plantId: a.plantId as string, periodMonth: a.periodMonth })),
+      inMonth.filter(a => a.plantId).map(a => ({ anomaly: a.anomaly, plantId: a.plantId as string, periodMonth: a.periodMonth })),
       idx,
     );
-    // Anomalies without a plant can't be persisted — always open, review disabled.
-    const noPlant: ReviewedAnomaly[] = anomalies.filter(a => !a.plantId)
+    // Anomalies without a register can't be persisted — always open, review disabled.
+    const noPlant: ReviewedAnomaly[] = inMonth.filter(a => !a.plantId)
       .map(a => ({ anomaly: a.anomaly, plantId: '', periodMonth: a.periodMonth, resolution: null, isOpen: true }));
     return [...joined, ...noPlant];
-  }, [anomalies, resolutions]);
+  }, [anomalies, resolutions, anomMonth, effectiveAnomMonth]);
 
   const openAnoms    = reviewed.filter(r => r.isOpen);
   const settledAnoms = reviewed.filter(r => !r.isOpen);
+
+  /** Open anomalies in EVERY month, so the banner never understates the backlog
+   *  just because the view is scoped to one month. */
+  const openAllMonths = useMemo(() => {
+    const idx = indexResolutions(resolutions);
+    return joinAnomalies(
+      anomalies.filter(a => a.plantId).map(a => ({ anomaly: a.anomaly, plantId: a.plantId as string, periodMonth: a.periodMonth })),
+      idx,
+    ).filter(r => r.isOpen).length
+      + anomalies.filter(a => !a.plantId).length;
+  }, [anomalies, resolutions]);
   const canReview = profileHasCapability(activeProfile, 'resolve_stock_anomaly');
 
   const latestUpload = useMemo(() => {
@@ -229,7 +270,8 @@ export function StockRegister() {
   // Shared helper (lib/store/registers) — the chips, the table and the anomaly
   // reconciler must all key a row the same way, or a chip selects nothing.
 
-  // Registers that actually have stock rows → the filter chips.
+  // Registers that actually have stock rows. Used ONLY to mark which registers
+  // are still empty — never as the source of the selector, see storeChips.
   const plantsInData = useMemo(() => {
     const seen = new Map<string, string>();
     for (const it of items) {
@@ -242,6 +284,45 @@ export function StockRegister() {
     }
     return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [items, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * The store selector.
+   *
+   * Sourced from the stores the user may ACT ON, not from the stores that happen
+   * to hold items. Keying it on the data is what produced the reported bug: with
+   * one store's workbook uploaded the chips disappeared, so the register never
+   * said which store it was showing, and an empty register said nothing at all.
+   *
+   * Falls back to the registers present in the data on a database where
+   * migration 59 has not been applied and `stores` is therefore empty — the same
+   * degrade-gracefully posture as registerIdOf().
+   */
+  const storeChips = useMemo(() => {
+    const withData = new Set(plantsInData.map(p => p.id));
+    if (allowedStores.length) {
+      return allowedStores
+        .map(s => ({ id: s.id, name: s.name, hasData: withData.has(s.id) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return plantsInData.map(p => ({ ...p, hasData: true }));
+  }, [allowedStores, plantsInData]);
+
+  /** What the header says this register is. Never blank. */
+  const activeStoreLabel = useMemo(() => {
+    if (plantFilter.length === 1) {
+      return storeChips.find(s => s.id === plantFilter[0])?.name ?? null;
+    }
+    if (plantFilter.length > 1) {
+      return t('storereq.stockPlantsOf', {
+        defaultValue: '{{sel}} of {{total}} stores', sel: plantFilter.length, total: storeChips.length,
+      });
+    }
+    if (storeChips.length === 1) return storeChips[0].name;
+    if (storeChips.length > 1) {
+      return t('storereq.stockPlantsCount', { defaultValue: '{{n}} stores', n: storeChips.length });
+    }
+    return null;
+  }, [plantFilter, storeChips, t]);
 
   function togglePlant(id: string) { setPlantFilter(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]); }
 
@@ -331,6 +412,22 @@ export function StockRegister() {
       const anchorPlantId = plants.find(p => storeIdFor(p.id) === storeId)?.id ?? null;
       const monthDates = res.months.map(m => m.periodMonth);
 
+      // 0) Register the upload batch first, so the manifest and every register
+      //    row this file creates can be stamped with it. Without that stamp a
+      //    wrong workbook is unremovable — which is the problem this whole
+      //    batch mechanism exists to fix.
+      const batchId = await createImportBatch({
+        module: 'stock',
+        plantId: anchorPlantId,
+        storeId,
+        fileName,
+        fileUrl: cloudUrl,
+        periodMonth: latest.periodMonth,
+        rowCount: res.totalItems,
+        sheetCount: res.sheetCount,
+        uploadedByName: activeProfile.name,
+      });
+
       // 1) Upload manifest (latest month; re-upload replaces).
       //    Keyed on (store_id, period_month) — migration 60 replaced the old
       //    (plant_id, period_month) constraint, and upserting against a
@@ -340,6 +437,11 @@ export function StockRegister() {
         store_id: storeId, plant_id: anchorPlantId, period_month: latest.periodMonth,
         file_name: fileName, file_url: cloudUrl,
         uploaded_by_name: activeProfile.name, row_count: res.totalItems, sheet_count: res.sheetCount,
+        // Re-uploading the same store+month REPLACES the manifest, so this
+        // repoints it at the new batch. The previous batch is left as an empty
+        // 'active' row in Upload History, which is honest: its data no longer
+        // exists, and deleting it is a one-click no-op.
+        import_batch_id: batchId,
       }, { onConflict: 'store_id,period_month' }).select('id').single();
       if (upErr) throw upErr;
       const uploadId = up?.id ?? null;
@@ -368,6 +470,18 @@ export function StockRegister() {
       const negatives = latest.items.filter(it => it.closing < 0);
       setClampedItems(negatives.map(it => ({ name: it.itemName, closing: it.closing })));
 
+      // Which items this register ALREADY holds, and which batch created each.
+      //
+      // The upsert below writes every column it is given, so sending
+      // created_by_batch_id blindly would re-stamp rows that a PREVIOUS upload
+      // created — and then deleting this batch would delete their rows instead
+      // of only rolling their baseline back. Read the current owner first and
+      // preserve it per row; only genuinely new items get this batch's id.
+      const { data: existing } = await supabase
+        .from('store_items').select('item_name, created_by_batch_id').eq('store_id', storeId)
+        .returns<{ item_name: string; created_by_batch_id: string | null }[]>();
+      const ownerByName = buildItemOwnerMap(existing ?? []);
+
       const itemRows = latest.items.map(it => ({
         // store_id decides which register the row lands in. A DB trigger
         // (migration 62) fills it from plant_id if omitted, but sending it
@@ -376,6 +490,7 @@ export function StockRegister() {
         baseline_qty: Math.max(0, it.closing), baseline_month: latest.periodMonth,
         procured_qty: 0, issued_qty: 0, manual_delta: 0,
         ticket_procured_qty: 0, on_hand: Math.max(0, it.closing), updated_at: nowIso,
+        created_by_batch_id: resolveItemOwner(ownerByName, it.itemName, batchId),
       }));
       for (let i = 0; i < itemRows.length; i += CHUNK) {
         // Conflict target follows the authoritative key. Migration 60 replaced
@@ -387,6 +502,7 @@ export function StockRegister() {
         if (error) throw error;
       }
 
+      await setImportBatchRowCount(batchId, latest.items.length);
       setImportedCount(latest.items.length);
       setStage('done');
       await load();
@@ -458,6 +574,28 @@ export function StockRegister() {
           {items.length > 0 && profileHasCapability(activeProfile, 'add_stock_purchase') && (
             <button onClick={() => setShowPurchase(true)} className="pill px-4 py-2 font-semibold text-sm" style={{ border: '1px solid #E2E8F0', background: '#fff', color: '#334155', cursor: 'pointer' }}>{t('storereq.stockAddPurchase', '＋ Add Purchase')}</button>
           )}
+          {/* The delete-a-bad-upload flow lives in Admin → Upload History, but
+              the moment you NEED it is while you are standing here looking at a
+              register full of wrong numbers. Linking from the point of use,
+              pre-filtered to this store, saves hunting for it — and re-uploading
+              a corrected file cannot on its own remove rows that were in the bad
+              file and are absent from the good one, so this is the only route
+              back to a clean register. */}
+          {profileHasCapability(activeProfile, 'delete_import_batch') && (
+            <button
+              onClick={() => {
+                const p = new URLSearchParams({ module: 'stock' });
+                const sid = plantFilter.length === 1 ? plantFilter[0] : (storeChips.length === 1 ? storeChips[0].id : '');
+                if (sid) p.set('store', sid);
+                navigate(`/dashboard/admin/uploads?${p.toString()}`);
+              }}
+              className="pill px-4 py-2 font-semibold text-sm"
+              style={{ border: '1px solid #E2E8F0', background: '#fff', color: '#334155', cursor: 'pointer' }}
+              title={t('storereq.manageUploadsHint', 'View the files this register was built from, and delete the records imported by an incorrect one')}
+            >
+              {t('storereq.manageUploads', '⌫ Manage uploads')}
+            </button>
+          )}
           <button onClick={() => fileRef.current?.click()} className="btn-accent rounded-[10px] px-4 py-2 font-semibold text-sm">{t('storereq.stockUploadExcel', '↑ Upload Excel')}</button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
             onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
@@ -465,7 +603,18 @@ export function StockRegister() {
       </div>
 
       {loading ? <SkeletonRows rows={4} /> : items.length === 0 ? (
+        // The empty state names the store too. "No stock file uploaded yet" on
+        // its own is the worst version of the reported bug: the one screen where
+        // the user most needs to know WHICH register they are looking at said
+        // nothing about it at all.
         <div className="text-center text-slate-400 py-8 text-sm">
+          {activeStoreLabel && (
+            <div className="mb-2">
+              <span className="chip active" style={{ cursor: 'default' }}>
+                {t('storereq.storePrefix', 'Store')}: {activeStoreLabel}
+              </span>
+            </div>
+          )}
           {t('storereq.stockEmptyTitle', 'No stock file uploaded yet.')}<br />{t('storereq.stockEmptyBodyPre', 'Upload the monthly')} <strong>{t('storereq.stockEmptyBodyStrong', 'Store Keeping')}</strong> {t('storereq.stockEmptyBodyPost', 'Excel to seed the register.')}
         </div>
       ) : (
@@ -474,7 +623,9 @@ export function StockRegister() {
           <div className="flex items-center justify-between flex-wrap gap-2" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: '10px 14px' }}>
             <div style={{ fontSize: 13, color: '#334155' }}>
               <strong>{summary.total}</strong> {summary.total === 1 ? t('storereq.stockItemSingular', 'item') : t('storereq.stockItemPlural', 'items')}
-              {plantsInData.length > 1 && <span className="text-slate-500"> · {plantFilter.length ? t('storereq.stockPlantsOf', { defaultValue: '{{sel}} of {{total}} plants', sel: plantFilter.length, total: plantsInData.length }) : t('storereq.stockPlantsCount', { defaultValue: '{{n}} plants', n: plantsInData.length })}</span>}
+              {/* Always name the register — including when there is only one
+                  store, which is exactly the case that used to show nothing. */}
+              {activeStoreLabel && <span> · <strong>{activeStoreLabel}</strong></span>}
               <span className="text-slate-400"> · </span>
               <span style={{ color: '#16A34A' }}>{t('storereq.stockInStockCount', { defaultValue: '{{n}} in stock', n: summary.inStock })}</span>
               <span className="text-slate-400"> · </span>
@@ -494,12 +645,33 @@ export function StockRegister() {
 
           {!collapsed && (
             <div style={{ marginTop: 14 }}>
-              {/* Plant filter chips */}
-              {plantsInData.length > 1 && (
+              {/* Store selector — ALWAYS rendered. With a single store it is a
+                  plain label rather than a button: there is nothing to switch to,
+                  but the register still has to say whose stock this is. */}
+              {storeChips.length === 1 && (
+                <div className="flex gap-2 mb-3 flex-wrap items-center">
+                  <span className="chip active" style={{ cursor: 'default' }}>
+                    {t('storereq.storePrefix', 'Store')}: {storeChips[0].name}
+                  </span>
+                  {!storeChips[0].hasData && (
+                    <span style={{ fontSize: 11, color: '#94A3B8' }}>{t('storereq.storeNoStock', 'no stock file uploaded yet')}</span>
+                  )}
+                </div>
+              )}
+              {storeChips.length > 1 && (
                 <div className="flex gap-2 mb-3 flex-wrap">
                   <button onClick={() => setPlantFilter([])} className={`chip${plantFilter.length === 0 ? ' active' : ''}`}>{t('storereq.all_stores', 'All stores')}</button>
-                  {plantsInData.map(p => (
-                    <button key={p.id} onClick={() => togglePlant(p.id)} className={`chip${plantFilter.includes(p.id) ? ' active' : ''}`}>{p.name}</button>
+                  {storeChips.map(p => (
+                    <button
+                      key={p.id} onClick={() => togglePlant(p.id)}
+                      className={`chip${plantFilter.includes(p.id) ? ' active' : ''}`}
+                      // An empty register stays selectable — that is how you
+                      // confirm it is genuinely empty rather than filtered out.
+                      style={p.hasData ? undefined : { opacity: 0.55 }}
+                      title={p.hasData ? undefined : t('storereq.storeNoStock', 'no stock file uploaded yet')}
+                    >
+                      {p.name}{p.hasData ? '' : ' ·'}
+                    </button>
                   ))}
                   {plantFilter.length > 1 && <span style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'center' }}>{t('storereq.stockCombinedNote', 'combined · identical items summed')}</span>}
                 </div>
@@ -513,13 +685,43 @@ export function StockRegister() {
                 <div style={{ border: '1px solid #FED7AA', background: '#FFFBEB', borderRadius: 12, padding: 12, marginBottom: 14 }}>
                   <button onClick={() => setShowAnoms(v => !v)} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#B45309' }}>
+                      {/* The heading names the month being shown. It used to say
+                          "the latest file vs the prior month" regardless of what
+                          was actually compared, which is how a May→June anomaly
+                          came to be read as a June→July one. */}
                       {openAnoms.length === 1
-                        ? t('storereq.stockOpenAnomOne', { defaultValue: '⚠ {{n}} open anomaly in the latest file vs the prior month', n: openAnoms.length })
-                        : t('storereq.stockOpenAnomMany', { defaultValue: '⚠ {{n}} open anomalies in the latest file vs the prior month', n: openAnoms.length })}
+                        ? t('storereq.stockOpenAnomOneIn', { defaultValue: '⚠ {{n}} open anomaly in {{month}}', n: openAnoms.length, month: anomMonth === '*' ? t('storereq.allMonths', 'all months') : labelForPeriod(`${effectiveAnomMonth}-01`) })
+                        : t('storereq.stockOpenAnomManyIn', { defaultValue: '⚠ {{n}} open anomalies in {{month}}', n: openAnoms.length, month: anomMonth === '*' ? t('storereq.allMonths', 'all months') : labelForPeriod(`${effectiveAnomMonth}-01`) })}
                       {settledAnoms.length > 0 && <span style={{ fontWeight: 600, color: '#92400E' }}> {t('storereq.stockSettledCount', { defaultValue: '· {{n}} settled', n: settledAnoms.length })}</span>}
+                      {/* Never let a month-scoped view hide the real backlog. */}
+                      {anomMonth !== '*' && openAllMonths > openAnoms.length && (
+                        <span style={{ fontWeight: 600, color: '#92400E' }}>
+                          {' '}{t('storereq.stockOpenElsewhere', { defaultValue: '· {{n}} more in earlier months', n: openAllMonths - openAnoms.length })}
+                        </span>
+                      )}
                     </span>
                     <span style={{ fontSize: 12, color: '#B45309' }}>{showAnoms ? t('storereq.stockHide', 'Hide') : t('storereq.stockShow', 'Show')}</span>
                   </button>
+                  {/* Month picker — every pair is reconciled, so earlier months
+                      stay reachable instead of vanishing when a newer file lands. */}
+                  {showAnoms && anomalyMonths.length > 1 && (
+                    <div className="flex gap-2 mt-2.5 flex-wrap items-center">
+                      {anomalyMonths.map(mk => (
+                        <button
+                          key={mk} onClick={() => setAnomMonth(mk)}
+                          className={`chip${effectiveAnomMonth === mk && anomMonth !== '*' ? ' active' : ''}`}
+                        >
+                          {labelForPeriod(`${mk}-01`)}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setAnomMonth('*')}
+                        className={`chip${anomMonth === '*' ? ' active' : ''}`}
+                      >
+                        {t('storereq.allMonths', 'All months')}
+                      </button>
+                    </div>
+                  )}
                   {showAnoms && (
                     <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
                       {(showSettled ? reviewed : openAnoms).map((r, i) => {

@@ -92,6 +92,7 @@ const PAGE_TITLES: Record<string, L> = {
   '/dashboard/batch-entry':     ['nav.batchLogger', 'Batch Logger'],
   '/dashboard/warehouse-entry': ['nav.warehouseConsole', 'Warehouse Console'],
   '/dashboard/blacklist':       ['nav.blacklist', 'Blacklist'],
+  '/dashboard/admin/uploads':   ['nav.uploadHistory', 'Upload History'],
   '/dashboard/users':           ['nav.userManagement', 'User Management'],
   '/dashboard/daily-log':       ['nav.dailyUnitLog', 'Daily Unit Log'],
 };
@@ -123,6 +124,7 @@ const BREADCRUMBS: Record<string, readonly L[]> = {
   '/dashboard/owner': [C_MONITORING, ['nav.ownerIntelligence', 'Owner Intelligence']],
   '/dashboard/users': [C_ADMIN, ['nav.userManagement', 'User Management']],
   '/dashboard/blacklist': [C_ADMIN, ['nav.blacklist', 'Blacklist']],
+  '/dashboard/admin/uploads': [C_ADMIN, ['nav.uploadHistory', 'Upload History']],
   '/dashboard/daily-log': [C_REFERENCE, ['nav.dailyUnitLog', 'Daily Unit Log']],
   '/dashboard/night-entry':     [C_WORKSPACE, ['nav.nightCheckin', 'Night Check-in']],
   '/dashboard/batch-entry':     [C_WORKSPACE, ['nav.batchLogger', 'Batch Logger']],
@@ -156,6 +158,7 @@ const PAGE_SUBTITLES: Record<string, L> = {
   '/dashboard/anomaly-center': ['nav.subAnomalyCenter', 'Investigate, assign and resolve anomalies.'],
   '/dashboard/users': ['nav.subUsers', 'All staff registered in CaratSense — roles and access.'],
   '/dashboard/blacklist': ['nav.subBlacklist', 'Restricted persons, vehicles and vendors.'],
+  '/dashboard/admin/uploads': ['nav.subUploadHistory', 'Review bulk imports and remove data from an incorrect file.'],
   '/dashboard/daily-log': ['nav.subDailyLog', 'OCR-read daily unit sheets per plant.'],
 };
 

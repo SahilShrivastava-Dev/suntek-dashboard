@@ -21,6 +21,7 @@ import * as XLSX from 'xlsx';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
 import { groupAssetsByType, normMark } from '../../../lib/far/assets';
+import { normalizeAssetDate } from '../../../lib/far/dates';
 import { createImportBatch, setImportBatchRowCount } from '../../../lib/imports/batches';
 import type { Database } from '../../../lib/database.types';
 
@@ -52,16 +53,6 @@ function mapHeader(h: string): keyof FarImportRow | null {
   if (!k) return null;
   for (const m of FAR_HEADER_MAP) if (m.keys.some(x => k.includes(x))) return m.field;
   return null;
-}
-function normDate(v: string): string | null {
-  if (!v) return null;
-  // Excel serial number → date
-  if (/^\d{4,5}$/.test(v.trim())) {
-    const d = XLSX.SSF ? XLSX.SSF.parse_date_code(Number(v)) : null;
-    if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
-  }
-  const dt = new Date(v);
-  return isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10);
 }
 async function parseFarFile(file: File): Promise<FarImportRow[]> {
   const buf = await file.arrayBuffer();
@@ -404,6 +395,24 @@ export function FAR() {
     return plantOptions.map(p => ({ id: p.id, name: p.name, hasData: withData.has(p.id) }));
   }, [plantOptions, plantsInFar]);
 
+  /**
+   * Rows whose Date of Purchase cell could not be read.
+   *
+   * Surfaced at the REVIEW step, before anything is written, because the
+   * alternative is what actually happened to the client: one typo'd cell
+   * ("03.07.20223") made Postgres reject the whole insert with
+   * `22009 invalid_time_zone_displacement_value`, and all 210 assets were lost
+   * behind an error nobody could act on. The import now proceeds with the date
+   * left blank — one empty field beats losing the file — but it says exactly
+   * which cells to fix and what they currently contain.
+   */
+  const unreadableDates = useMemo(
+    () => parsedRows
+      .map((r, i) => ({ row: i + 1, name: r.name || r.mark || r.model || '—', raw: r.purchaseDate.trim() }))
+      .filter(x => x.raw !== '' && normalizeAssetDate(x.raw) === null),
+    [parsedRows],
+  );
+
   /** What the header says this register belongs to — one factory by name, or how
    *  many are combined. Never blank. */
   const activePlantLabel = useMemo(() => {
@@ -571,7 +580,7 @@ export function FAR() {
         year: r.year ? (parseInt(r.year) || null) : null,
         value: r.value ? (parseFloat(String(r.value).replace(/[^0-9.]/g, '')) || null) : null,
         invoice_no: r.invoice || null,
-        purchase_date: normDate(r.purchaseDate),
+        purchase_date: normalizeAssetDate(r.purchaseDate),
         account_head: r.account || null,
       }));
       const { error } = await insertRows('fixed_assets', payload);
@@ -807,6 +816,30 @@ export function FAR() {
                     {t('far.selectFactoryHint', 'Each asset belongs to exactly one factory. Factories that share a store still keep separate registers — import each factory\u2019s FAR separately.')}
                   </div>
                 </div>
+                {unreadableDates.length > 0 && (
+                  <div style={{ background: '#FFFBEB', border: '1px solid #FED7AA', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#B45309' }}>
+                      {t('far.badDatesTitle', { defaultValue: '⚠ {{n}} row(s) have a Date of Purchase we cannot read', n: unreadableDates.length })}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: '#92400E', marginTop: 4 }}>
+                      {t('far.badDatesBody', 'These assets will import with the date left blank. Fix the cells in the sheet and re-upload if you need the dates. Expected format: DD.MM.YYYY (e.g. 29.07.2017).')}
+                    </div>
+                    <div style={{ maxHeight: 110, overflowY: 'auto', marginTop: 8 }}>
+                      {unreadableDates.slice(0, 25).map(x => (
+                        <div key={x.row} style={{ fontSize: 11.5, color: '#7C2D12', display: 'flex', gap: 8 }}>
+                          <span style={{ opacity: 0.7, minWidth: 52 }}>{t('far.badDatesRow', { defaultValue: 'Row {{n}}', n: x.row })}</span>
+                          <span style={{ flex: 1 }}>{x.name}</span>
+                          <strong>{x.raw}</strong>
+                        </div>
+                      ))}
+                      {unreadableDates.length > 25 && (
+                        <div style={{ fontSize: 11, color: '#92400E', marginTop: 4 }}>
+                          {t('far.badDatesMore', { defaultValue: '…and {{n}} more', n: unreadableDates.length - 25 })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="overflow-x-auto scroll-x" style={{ maxHeight: 280 }}>
                   <table className="dt2">
                     <thead><tr><th>{t('far.thEquipment')}</th><th>{t('far.thIdMark')}</th><th>{t('far.thMake', 'Make')}</th><th>{t('far.thSerial', 'Serial')}</th><th>{t('far.thQty', 'Qty')}</th><th>{t('far.thModel')}</th><th>{t('far.thYear')}</th><th>{t('far.thTaxableValue')}</th><th>{t('far.thInvoice')}</th><th>{t('far.thPurchaseDate')}</th><th>{t('far.thAccountHead')}</th></tr></thead>

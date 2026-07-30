@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Users, UserCheck, Shield, Settings, Pencil, History as HistoryIcon, Trash2, UserX, UserPlus } from 'lucide-react';
@@ -242,6 +242,9 @@ export function UserManagement() {
    *  escape an `overflow` ancestor, so the menu was being clipped at the edge of
    *  the card and the lower items were unreachable without scrolling. */
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  /** The open menu's element, so the outside-click handler can tell an inside
+   *  click from an outside one by containment rather than by event phase. */
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [deleteUser, setDeleteUser] = useState<DisplayUser | null>(null);
   const [deleting, setDeleting] = useState(false);
   const canDeleteUser = profileHasCapability(activeProfile, 'delete_user');
@@ -252,9 +255,27 @@ export function UserManagement() {
     if (!menuFor) return;
     const close = () => { setMenuFor(null); setMenuPos(null); };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    // `capture` so the handler runs before a click inside another row's gear,
-    // which would otherwise reopen it in the same tick.
-    document.addEventListener('click', close, true);
+    /**
+     * Outside-click, decided by CONTAINMENT — not by event phase.
+     *
+     * This was registered on `document` in the CAPTURE phase, which runs before
+     * the clicked menu item's own React handler: the menu closed, the portal
+     * unmounted, and the click never reached Edit/Deactivate/History/Delete.
+     * Clicking any item did nothing at all. `stopPropagation` on the menu could
+     * not save it, because capture had already fired.
+     *
+     * Bubble phase + a containment check is deterministic: the item's handler
+     * runs first, and a click inside the menu is recognised and ignored here
+     * instead of racing it. Also NOT on mousedown — closing there would unmount
+     * the menu before the click could land on the item, the same bug wearing a
+     * different hat.
+     */
+    const onDocClick = (e: MouseEvent) => {
+      const el = menuRef.current;
+      if (el && e.target instanceof Node && el.contains(e.target)) return;
+      close();
+    };
+    document.addEventListener('click', onDocClick);
     document.addEventListener('keydown', onKey);
     // A fixed-position menu is anchored to coordinates captured when it opened,
     // so any scroll would leave it floating away from its row. Close instead of
@@ -263,7 +284,7 @@ export function UserManagement() {
     window.addEventListener('scroll', close, true);
     window.addEventListener('resize', close);
     return () => {
-      document.removeEventListener('click', close, true);
+      document.removeEventListener('click', onDocClick);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('resize', close);
@@ -1209,7 +1230,7 @@ export function UserManagement() {
         return createPortal(
           <div
             role="menu"
-            onClick={e => e.stopPropagation()}
+            ref={menuRef}
             style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_W, zIndex: 1200, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12, boxShadow: '0 12px 32px rgba(15,23,42,0.18)', padding: 5 }}
           >
             <MenuItem icon={<Pencil size={13} />} label={t('userMgmt.edit')}

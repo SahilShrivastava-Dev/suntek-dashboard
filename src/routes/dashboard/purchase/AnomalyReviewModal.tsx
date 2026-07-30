@@ -6,6 +6,22 @@ import { humanizeError as errMsg } from '../../../lib/errors';
 import { callRpc } from '../../../lib/db';
 import { useRoleContext } from '../../../contexts/RoleContext';
 import type { ReviewedAnomaly, AnomalyAction } from '../../../lib/store/anomalyKeys';
+import { labelForPeriod, type RegisterSide } from '../../../lib/store/parseStockFile';
+
+/**
+ * "Jun 2026 Purchase Register" — where one side of a comparison came from.
+ *
+ * Falls back to the generic word when an anomaly predates the provenance
+ * columns (migration 72), so an older stored row still renders rather than
+ * showing a blank label.
+ */
+function sideLabel(period: string | undefined, register: RegisterSide | undefined, fallback: string): string {
+  if (!period) return fallback;
+  const book = register === 'purchase' ? 'Purchase Register'
+             : register === 'sales' ? 'Sales Register'
+             : '';
+  return `${labelForPeriod(`${period}-01`)}${book ? ` ${book}` : ''}`;
+}
 
 interface EventRow {
   id: string;
@@ -83,7 +99,14 @@ export function AnomalyReviewModal({ item, onClose, onSaved }: {
     try {
       const { error } = await callRpc('resolve_stock_anomaly', {
         payload: {
-          plant_id: item.plantId,
+          // The register key is a STORE id (registerIdOf → store_id since
+          // migration 60). It used to be sent as `plant_id`, which is a foreign
+          // key to plants — so every review at a shared-store site was rejected
+          // with a 23503 that surfaced as "This record is linked to other
+          // records. Remove those links first." Nothing was ever linked; the
+          // anomaly tables just had not been moved onto the store model.
+          // Migration 72 adds store_id and keys on it.
+          store_id: item.plantId,
           period_month: item.periodMonth,
           item_name: a.item,
           anomaly_type: a.type,
@@ -92,7 +115,17 @@ export function AnomalyReviewModal({ item, onClose, onSaved }: {
           corrected_value: corrN,
           expected_version: res?.version,
           actor_name: activeProfile.name,
-          detected: { severity: a.severity, detail: a.detail, prev: a.prev ?? null, curr: a.curr ?? null, delta: a.delta ?? null, suggestion: a.suggestion ?? null },
+          // Provenance travels with the review so the stored row records WHICH
+          // two figures were compared, not just the numbers.
+          detected: {
+            severity: a.severity, detail: a.detail,
+            prev: a.prev ?? null, curr: a.curr ?? null, delta: a.delta ?? null,
+            suggestion: a.suggestion ?? null,
+            prevPeriod: a.prevPeriod ? `${a.prevPeriod}-01` : null,
+            currPeriod: a.currPeriod ? `${a.currPeriod}-01` : null,
+            prevRegister: a.prevRegister ?? null,
+            currRegister: a.currRegister ?? null,
+          },
         },
       });
       if (error) throw new Error(friendly(error.message || ''));
@@ -128,9 +161,21 @@ export function AnomalyReviewModal({ item, onClose, onSaved }: {
               {t(`stockAnomaly.status.${status}`, status.replace('_', ' '))}
             </span>
           </div>
+          {/* Each side names its MONTH and its REGISTER.
+              "Previous month" / "Latest file" was the whole problem: a reviewer
+              looking at July assumed those were June and July figures, when the
+              anomaly was actually a May→June comparison — and concluded the
+              engine had compared the wrong periods. The numbers were right; the
+              labels never said what they belonged to. */}
           <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', fontSize: 12 }}>
-            <span>{t('stockAnomaly.prev', 'Previous month')}: <strong>{fmt(a.prev)}</strong></span>
-            <span>{t('stockAnomaly.curr', 'Latest file')}: <strong>{fmt(a.curr)}</strong></span>
+            <span>
+              {sideLabel(a.prevPeriod, a.prevRegister, t('stockAnomaly.prev', 'Previous'))}:{' '}
+              <strong>{fmt(a.prev)}</strong>
+            </span>
+            <span>
+              {sideLabel(a.currPeriod, a.currRegister, t('stockAnomaly.curr', 'Current'))}:{' '}
+              <strong>{fmt(a.curr)}</strong>
+            </span>
             <span>{t('stockAnomaly.delta', 'Difference')}: <strong>{a.delta != null && a.delta > 0 ? '+' : ''}{fmt(a.delta)}</strong></span>
           </div>
           {res?.resolution_comment && (

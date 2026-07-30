@@ -16,7 +16,7 @@ import { useRoleContext } from '../../../contexts/RoleContext';
 import { profileHasCapability } from '../../../lib/profiles';
 import { withEmbedFallback } from '../../../lib/scopedList';
 import { uploadWorkflowFile } from '../../../lib/cloudinary';
-import { parseStockFile, reconcile, type StockParseResult, type MonthParse, type MonthItem, type Anomaly } from '../../../lib/store/parseStockFile';
+import { parseStockFile, reconcile, reconcileAll, labelForPeriod, type StockParseResult, type MonthParse, type MonthItem, type Anomaly } from '../../../lib/store/parseStockFile';
 import { indexResolutions, joinAnomalies, type AnomalyResolutionRow, type ReviewedAnomaly } from '../../../lib/store/anomalyKeys';
 import { registerIdOf } from '../../../lib/store/registers';
 import { createImportBatch, setImportBatchRowCount, buildItemOwnerMap, resolveItemOwner } from '../../../lib/imports/batches';
@@ -50,7 +50,8 @@ const STATUS_LABEL_KEYS: Record<'out' | 'low' | 'in', string> = {
 
 // label = English default; labelKey resolved via t() at render.
 const ANOM_META: Record<Anomaly['type'], { label: string; labelKey: string; icon: string }> = {
-  carry_forward: { label: 'Carry-forward drift', labelKey: 'storereq.stockAnomCarryForward', icon: '⚠' },
+  carry_forward:  { label: 'Carry-forward drift', labelKey: 'storereq.stockAnomCarryForward', icon: '⚠' },
+  purchase_carry: { label: 'Purchase carry-forward', labelKey: 'storereq.stockAnomPurchaseCarry', icon: '⚠' },
   intra_month:   { label: 'Sheet mismatch',      labelKey: 'storereq.stockAnomSheetMismatch', icon: '⚠' },
   sheet_self:    { label: 'Sheet contradicts itself', labelKey: 'storereq.stockAnomSheetSelf', icon: '✎' },
   negative:      { label: 'Negative stock',      labelKey: 'storereq.stockAnomNegative',      icon: '🔴' },
@@ -85,8 +86,12 @@ function monthsFromRows(rows: StockMonthRow[]): MonthParse[] {
     });
     byPeriod.set(r.period_month, list);
   }
+  // `label` feeds the anomaly text ("Jun 2026 Purchase Register closed at …"),
+  // so it must be a readable month, not the raw '2026-06-01' the snapshot is
+  // keyed by — and it must always carry the year so a Dec→Jan pair reads
+  // unambiguously.
   return [...byPeriod.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([pk, items]) => ({ periodKey: pk.slice(0, 7), periodMonth: pk, label: pk, items, hasSales: true, hasPurchase: true }));
+    .map(([pk, items]) => ({ periodKey: pk.slice(0, 7), periodMonth: pk, label: labelForPeriod(pk), items, hasSales: true, hasPurchase: true }));
 }
 
 const inputStyle: React.CSSProperties = {
@@ -148,7 +153,7 @@ export function StockRegister() {
       try {
         const { data: ar, error: arErr } = await scopeQuery(
           supabase.from('store_stock_anomalies')
-            .select('id, plant_id, period_month, item_name, anomaly_type, status, action, corrected_value, resolution_comment, resolved_by_name, resolved_at, version'),
+            .select('id, plant_id, store_id, period_month, item_name, anomaly_type, status, action, corrected_value, resolution_comment, resolved_by_name, resolved_at, version'),
         ).returns<AnomalyResolutionRow[]>();
         setResolutions(arErr ? [] : (ar || []));
       } catch { setResolutions([]); }
@@ -184,35 +189,67 @@ export function StockRegister() {
       const arr = byPlant.get(k);
       if (arr) arr.push(r); else byPlant.set(k, [r]);
     }
-    const out: { anomaly: Anomaly; plant?: string; plantId: string | null; periodMonth: string }[] = [];
+    const out: { anomaly: Anomaly; plant?: string; plantId: string | null; periodMonth: string; periodKey: string }[] = [];
     for (const [pid, rows] of byPlant.entries()) {
       const ms = monthsFromRows(rows);
       if (!ms.length) continue;
       // `pid` may now be a store id, so resolve the label from either master.
       const plant = pid === '—' ? undefined : (stores.find(s => s.id === pid)?.name ?? plantName(pid));
-      const periodMonth = ms[ms.length - 1].periodMonth;
-      for (const a of reconcile(ms.length >= 2 ? ms[ms.length - 2] : null, ms[ms.length - 1])) {
-        out.push({ anomaly: a, plant, plantId: pid === '—' ? null : pid, periodMonth });
+      // EVERY consecutive pair, not just the newest. Reconciling only the last
+      // two months meant an unresolved discrepancy silently disappeared the
+      // moment a newer month was uploaded — a real mismatch inside June stopped
+      // being reported as soon as July landed, without anyone having looked at
+      // it. Each anomaly is filed under the later month of its pair.
+      for (const d of reconcileAll(ms)) {
+        out.push({
+          anomaly: d.anomaly, plant, plantId: pid === '—' ? null : pid,
+          periodMonth: d.periodMonth, periodKey: d.periodKey,
+        });
       }
     }
     return out;
   }, [months, plantFilter, plants, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Months that actually produced anomalies, newest first — the month picker. */
+  const anomalyMonths = useMemo(
+    () => [...new Set(anomalies.map(a => a.periodKey))].sort().reverse(),
+    [anomalies],
+  );
+  /** '' = every month. Defaults to the newest, so the day-to-day view stays as
+   *  quiet as it was while older months remain one click away rather than
+   *  silently dropped. */
+  const [anomMonth, setAnomMonth] = useState<string>('');
+  const effectiveAnomMonth = anomMonth || anomalyMonths[0] || '';
+
   // Join computed anomalies to their persisted review state (natural-key match).
   const reviewed = useMemo(() => {
     const idx = indexResolutions(resolutions);
+    const inMonth = anomMonth === '*'
+      ? anomalies
+      : anomalies.filter(a => a.periodKey === effectiveAnomMonth);
     const joined = joinAnomalies(
-      anomalies.filter(a => a.plantId).map(a => ({ anomaly: a.anomaly, plantId: a.plantId as string, periodMonth: a.periodMonth })),
+      inMonth.filter(a => a.plantId).map(a => ({ anomaly: a.anomaly, plantId: a.plantId as string, periodMonth: a.periodMonth })),
       idx,
     );
-    // Anomalies without a plant can't be persisted — always open, review disabled.
-    const noPlant: ReviewedAnomaly[] = anomalies.filter(a => !a.plantId)
+    // Anomalies without a register can't be persisted — always open, review disabled.
+    const noPlant: ReviewedAnomaly[] = inMonth.filter(a => !a.plantId)
       .map(a => ({ anomaly: a.anomaly, plantId: '', periodMonth: a.periodMonth, resolution: null, isOpen: true }));
     return [...joined, ...noPlant];
-  }, [anomalies, resolutions]);
+  }, [anomalies, resolutions, anomMonth, effectiveAnomMonth]);
 
   const openAnoms    = reviewed.filter(r => r.isOpen);
   const settledAnoms = reviewed.filter(r => !r.isOpen);
+
+  /** Open anomalies in EVERY month, so the banner never understates the backlog
+   *  just because the view is scoped to one month. */
+  const openAllMonths = useMemo(() => {
+    const idx = indexResolutions(resolutions);
+    return joinAnomalies(
+      anomalies.filter(a => a.plantId).map(a => ({ anomaly: a.anomaly, plantId: a.plantId as string, periodMonth: a.periodMonth })),
+      idx,
+    ).filter(r => r.isOpen).length
+      + anomalies.filter(a => !a.plantId).length;
+  }, [anomalies, resolutions]);
   const canReview = profileHasCapability(activeProfile, 'resolve_stock_anomaly');
 
   const latestUpload = useMemo(() => {
@@ -624,13 +661,43 @@ export function StockRegister() {
                 <div style={{ border: '1px solid #FED7AA', background: '#FFFBEB', borderRadius: 12, padding: 12, marginBottom: 14 }}>
                   <button onClick={() => setShowAnoms(v => !v)} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#B45309' }}>
+                      {/* The heading names the month being shown. It used to say
+                          "the latest file vs the prior month" regardless of what
+                          was actually compared, which is how a May→June anomaly
+                          came to be read as a June→July one. */}
                       {openAnoms.length === 1
-                        ? t('storereq.stockOpenAnomOne', { defaultValue: '⚠ {{n}} open anomaly in the latest file vs the prior month', n: openAnoms.length })
-                        : t('storereq.stockOpenAnomMany', { defaultValue: '⚠ {{n}} open anomalies in the latest file vs the prior month', n: openAnoms.length })}
+                        ? t('storereq.stockOpenAnomOneIn', { defaultValue: '⚠ {{n}} open anomaly in {{month}}', n: openAnoms.length, month: anomMonth === '*' ? t('storereq.allMonths', 'all months') : labelForPeriod(`${effectiveAnomMonth}-01`) })
+                        : t('storereq.stockOpenAnomManyIn', { defaultValue: '⚠ {{n}} open anomalies in {{month}}', n: openAnoms.length, month: anomMonth === '*' ? t('storereq.allMonths', 'all months') : labelForPeriod(`${effectiveAnomMonth}-01`) })}
                       {settledAnoms.length > 0 && <span style={{ fontWeight: 600, color: '#92400E' }}> {t('storereq.stockSettledCount', { defaultValue: '· {{n}} settled', n: settledAnoms.length })}</span>}
+                      {/* Never let a month-scoped view hide the real backlog. */}
+                      {anomMonth !== '*' && openAllMonths > openAnoms.length && (
+                        <span style={{ fontWeight: 600, color: '#92400E' }}>
+                          {' '}{t('storereq.stockOpenElsewhere', { defaultValue: '· {{n}} more in earlier months', n: openAllMonths - openAnoms.length })}
+                        </span>
+                      )}
                     </span>
                     <span style={{ fontSize: 12, color: '#B45309' }}>{showAnoms ? t('storereq.stockHide', 'Hide') : t('storereq.stockShow', 'Show')}</span>
                   </button>
+                  {/* Month picker — every pair is reconciled, so earlier months
+                      stay reachable instead of vanishing when a newer file lands. */}
+                  {showAnoms && anomalyMonths.length > 1 && (
+                    <div className="flex gap-2 mt-2.5 flex-wrap items-center">
+                      {anomalyMonths.map(mk => (
+                        <button
+                          key={mk} onClick={() => setAnomMonth(mk)}
+                          className={`chip${effectiveAnomMonth === mk && anomMonth !== '*' ? ' active' : ''}`}
+                        >
+                          {labelForPeriod(`${mk}-01`)}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setAnomMonth('*')}
+                        className={`chip${anomMonth === '*' ? ' active' : ''}`}
+                      >
+                        {t('storereq.allMonths', 'All months')}
+                      </button>
+                    </div>
+                  )}
                   {showAnoms && (
                     <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
                       {(showSettled ? reviewed : openAnoms).map((r, i) => {

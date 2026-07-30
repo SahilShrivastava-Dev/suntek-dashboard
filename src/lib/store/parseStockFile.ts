@@ -47,7 +47,16 @@ export interface StockParseResult {
   totalItems: number;       // item count in the latest month
 }
 
-export type AnomalyType = 'carry_forward' | 'intra_month' | 'sheet_self' | 'negative' | 'added' | 'removed';
+export type AnomalyType =
+  | 'carry_forward'    // prev month SALES closing  → this month PURCHASE opening
+  | 'purchase_carry'   // prev month PURCHASE closing → this month PURCHASE opening
+  | 'intra_month'      // this month PURCHASE closing ↔ this month SALES opening
+  | 'sheet_self'       // a sheet disagrees with its own arithmetic
+  | 'negative' | 'added' | 'removed';
+
+/** Which book a compared figure was read from. */
+export type RegisterSide = 'sales' | 'purchase';
+
 export interface Anomaly {
   type: AnomalyType;
   item: string;
@@ -57,6 +66,32 @@ export interface Anomaly {
   curr?: number;
   delta?: number;
   suggestion?: string;      // possible rename target
+  /**
+   * PROVENANCE — which two figures were actually compared.
+   *
+   * Every cross-month check reads one number from one month's book and another
+   * from a different month's book. Without saying so, "Last month closed at 31,
+   * this month's purchase book opens at 7" is unreadable: a reviewer looking at
+   * the newest month assumes those are the newest two months, maps the numbers
+   * onto the wrong sheets, and concludes the engine compared the wrong periods.
+   * That misreading is exactly what this field exists to prevent, so every
+   * anomaly carries the period and register behind each side.
+   *
+   * `prevPeriod` is undefined for the single-month checks (sheet_self, negative,
+   * added, removed), which compare a month against itself.
+   */
+  prevPeriod?: string;      // 'YYYY-MM' the `prev` figure came from
+  currPeriod?: string;      // 'YYYY-MM' the `curr` figure came from
+  prevRegister?: RegisterSide;
+  currRegister?: RegisterSide;
+}
+
+/** An anomaly plus the month it is filed under (the later of the pair). */
+export interface DatedAnomaly {
+  anomaly: Anomaly;
+  /** 'YYYY-MM-01' — the month this anomaly is attributed to, for persistence. */
+  periodMonth: string;
+  periodKey: string;        // 'YYYY-MM'
 }
 
 // ── Unit normalization ───────────────────────────────────────────────────────
@@ -85,6 +120,28 @@ export function deriveEquipment(name: string): { equipment: string; model: strin
 // ── Join key: fold spacing/punctuation so the two sheets line up ─────────────
 function joinKey(name: string): string {
   return name.toLowerCase().replace(/\s+/g, ' ').replace(/[^a-z0-9 ]/g, '').trim();
+}
+
+/** "2 units" / "24 units short" — a signed count read as English, not "+2". */
+function fmtDelta(delta: number): string {
+  const n = Math.abs(delta);
+  const unit = n === 1 ? 'unit' : 'units';
+  if (delta === 0) return `0 ${unit}`;
+  return delta > 0 ? `${n} ${unit} more` : `${n} ${unit} short`;
+}
+
+/**
+ * 'Jun 2026' from a '2026-06-01' period date.
+ *
+ * The label ALWAYS carries the year, so a December→January comparison reads
+ * "Dec 2026 … Jan 2027" and cannot be mistaken for a same-year pair.
+ * Used when months are rebuilt from stored snapshots, which carry a date rather
+ * than the original sheet name.
+ */
+export function labelForPeriod(periodMonth: string): string {
+  const m = /^(\d{4})-(\d{2})/.exec(periodMonth);
+  if (!m) return periodMonth;
+  return `${MONTH_LABELS[parseInt(m[2], 10)] ?? m[2]} ${m[1]}`;
 }
 
 function num(v: unknown): number {
@@ -312,7 +369,35 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
           type: 'carry_forward', item: it.itemName,
           severity: Math.abs(delta) > 5 ? 'high' : 'medium',
           prev: p.closing, curr: it.purchaseOpening, delta,
-          detail: `Last month closed at ${p.closing}, this month's purchase book opens at ${it.purchaseOpening} (${delta > 0 ? '+' : ''}${delta}).`,
+          prevPeriod: prev.periodKey, currPeriod: curr.periodKey,
+          prevRegister: 'sales', currRegister: 'purchase',
+          detail: `${prev.label} Sales Register closed at ${p.closing}, but ${curr.label} Purchase Register opened at ${it.purchaseOpening}. Difference: ${fmtDelta(delta)}.`,
+        });
+      }
+
+      // CHECK 3 — the same hand-off measured on the PURCHASE side.
+      //
+      // Distinct from carry_forward above, which carries the SALES closing
+      // forward. Each answers a different question:
+      //   carry_forward  — did the stock we ISSUED FROM carry over?
+      //   purchase_carry — did the stock we BOUGHT INTO carry over?
+      //
+      // Only emitted when the previous month's two books DISAGREE
+      // (`p.closing !== p.purchaseClosing`). When they agree, the two checks
+      // are the same subtraction against the same number and would report one
+      // discrepancy twice — which reads as double-counting and is what makes a
+      // reviewer stop trusting the totals. Where they diverge the extra row
+      // earns its place: it names which book is out of step, and it is the only
+      // check that catches a purchase closing that never carried forward.
+      if (p && p.closing !== p.purchaseClosing && p.purchaseClosing !== it.purchaseOpening) {
+        const delta = it.purchaseOpening - p.purchaseClosing;
+        out.push({
+          type: 'purchase_carry', item: it.itemName,
+          severity: Math.abs(delta) > 5 ? 'high' : 'medium',
+          prev: p.purchaseClosing, curr: it.purchaseOpening, delta,
+          prevPeriod: prev.periodKey, currPeriod: curr.periodKey,
+          prevRegister: 'purchase', currRegister: 'purchase',
+          detail: `${prev.label} Purchase Register closed at ${p.purchaseClosing}, but ${curr.label} Purchase Register opened at ${it.purchaseOpening}. Difference: ${fmtDelta(delta)}.`,
         });
       }
     }
@@ -325,7 +410,9 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
         type: 'intra_month', item: it.itemName,
         severity: Math.abs(delta) > 5 ? 'high' : 'medium',
         prev: it.purchaseClosing, curr: it.opening, delta,
-        detail: `Sales opening ${it.opening} ≠ Purchase closing ${it.purchaseClosing} (${delta > 0 ? '+' : ''}${delta}).`,
+        prevPeriod: curr.periodKey, currPeriod: curr.periodKey,
+        prevRegister: 'purchase', currRegister: 'sales',
+        detail: `${curr.label} Purchase Register closed at ${it.purchaseClosing}, but ${curr.label} Sales Register opened at ${it.opening}. Difference: ${fmtDelta(delta)}.`,
       });
     }
     // Each sheet must agree with its own arithmetic. Catches an overwritten
@@ -336,7 +423,9 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
       out.push({
         type: 'sheet_self', item: it.itemName, severity: 'high',
         prev: salesExpected, curr: it.closing, delta: it.closing - salesExpected,
-        detail: `Sales sheet: ${it.opening} available − ${it.used} issued = ${salesExpected}, but the sheet states ${it.closing}.`,
+        prevPeriod: curr.periodKey, currPeriod: curr.periodKey,
+        prevRegister: 'sales', currRegister: 'sales',
+        detail: `${curr.label} Sales Register: ${it.opening} available − ${it.used} issued = ${salesExpected}, but the sheet states ${it.closing}.`,
       });
     }
     const purchExpected = it.purchaseOpening + it.purchased;
@@ -344,7 +433,9 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
       out.push({
         type: 'sheet_self', item: it.itemName, severity: 'high',
         prev: purchExpected, curr: it.purchaseClosing, delta: it.purchaseClosing - purchExpected,
-        detail: `Purchase sheet: ${it.purchaseOpening} opening + ${it.purchased} received = ${purchExpected}, but the sheet states ${it.purchaseClosing}.`,
+        prevPeriod: curr.periodKey, currPeriod: curr.periodKey,
+        prevRegister: 'purchase', currRegister: 'purchase',
+        detail: `${curr.label} Purchase Register: ${it.purchaseOpening} opening + ${it.purchased} received = ${purchExpected}, but the sheet states ${it.purchaseClosing}.`,
       });
     }
 
@@ -352,7 +443,8 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
     if (it.closing < 0) {
       out.push({
         type: 'negative', item: it.itemName, severity: 'high', curr: it.closing,
-        detail: `Closing ${it.closing}: ${it.used} issued from ${it.opening} available.`,
+        currPeriod: curr.periodKey, currRegister: 'sales',
+        detail: `${curr.label} Sales Register closing ${it.closing}: ${it.used} issued from ${it.opening} available.`,
       });
     }
   }
@@ -369,16 +461,53 @@ export function reconcile(prev: MonthParse | null, curr: MonthParse): Anomaly[] 
       }
       out.push({
         type: 'added', item: a.itemName, severity: 'info',
-        detail: best ? `New item — possibly renamed from "${best.name}".` : 'New item this month.',
+        currPeriod: curr.periodKey,
+        detail: best
+          ? `New in ${curr.label} — possibly renamed from "${best.name}".`
+          : `New item in ${curr.label}.`,
         suggestion: best?.name,
       });
     }
     for (const r of removed) {
       const wasRenamed = added.some(a => similarity(a.itemName, r.itemName) > 0.8);
       if (wasRenamed) continue; // already surfaced as a rename on the "added" side
-      out.push({ type: 'removed', item: r.itemName, severity: 'info', detail: 'Item dropped from this month.' });
+      out.push({
+        type: 'removed', item: r.itemName, severity: 'info',
+        prevPeriod: prev.periodKey, currPeriod: curr.periodKey,
+        detail: `Present in ${prev.label} but dropped from ${curr.label}.`,
+      });
     }
   }
 
+  return out;
+}
+
+/**
+ * Reconcile EVERY consecutive month pair in the workbook, not just the newest.
+ *
+ * Why this exists: both callers used to reconcile only `months[n-2] → months[n-1]`.
+ * That makes a discrepancy disappear the moment a newer month is uploaded — a
+ * real mismatch inside June stops being reported as soon as July lands, even
+ * though nobody ever looked at it or resolved it. Anomalies are not transient
+ * observations about the newest sheet; they are defects in the register that
+ * stay true until someone fixes them.
+ *
+ * Each anomaly is filed under the LATER month of its pair, so a June→July
+ * carry-forward is a July anomaly and the persisted review key stays stable no
+ * matter how many further months are uploaded afterwards.
+ *
+ * Months are sorted by period, so re-uploading the same workbook with its sheets
+ * in a different order produces identical results (acceptance criterion 11).
+ */
+export function reconcileAll(months: MonthParse[]): DatedAnomaly[] {
+  const sorted = [...months].sort((a, b) => a.periodMonth.localeCompare(b.periodMonth));
+  const out: DatedAnomaly[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const curr = sorted[i];
+    const prev = i > 0 ? sorted[i - 1] : null;
+    for (const anomaly of reconcile(prev, curr)) {
+      out.push({ anomaly, periodMonth: curr.periodMonth, periodKey: curr.periodKey });
+    }
+  }
   return out;
 }

@@ -7,7 +7,7 @@ import { fetchActivePlants } from '../../lib/plants';
 import { humanizeError } from '../../lib/errors';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
 import { insertRows, updateRows, callRpc } from '../../lib/db';
-import { createLogin, updateLogin } from '../../lib/adminUsers';
+import { createLogin, updateLogin, deleteLoginIdentity } from '../../lib/adminUsers';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { useRoleContext } from '../../contexts/RoleContext';
@@ -324,6 +324,27 @@ export function UserManagement() {
       });
       if (error) throw new Error(describeDeleteUserError(error.message));
       if (!data?.ok) throw new Error(t('userMgmt.deleteFailed', 'User could not be deleted.'));
+
+      // The directory row is flagged FIRST (above): that is what hides the person
+      // and strips their data scope, and it must land even if the auth call then
+      // fails. Now destroy the auth identity — without this they stay signed in
+      // until their JWT expires, their reset links and OTPs keep working, and
+      // their email stays claimed so no replacement account can reuse it.
+      if (deleteUser.auth_user_id) {
+        const authRes = await deleteLoginIdentity(deleteUser.auth_user_id, deleteUser.id);
+        if (authRes.error) {
+          // Deliberately not thrown: the profile IS deleted and hidden. But the
+          // sign-in was not revoked, and saying so is the difference between an
+          // admin knowing to retry and quietly believing access was removed.
+          toast.error(t('userMgmt.deleteAuthFailed', {
+            defaultValue: 'Profile deleted, but their sign-in could not be revoked ({{msg}}). They may stay logged in until it expires, and their email cannot be reused yet — retry the delete.',
+            msg: authRes.error,
+          }));
+          setDeleteUser(null);
+          await loadData();
+          return;
+        }
+      }
       toast.success(t('userMgmt.deleteOk', 'User deleted successfully.'));
       setDeleteUser(null);
       await loadData();           // the list refreshes itself on success

@@ -2739,6 +2739,7 @@ const en = {
     "deleteConfirm": "Confirm Delete",
     "deleting": "Deleting…",
     "deleteOk": "User deleted successfully.",
+    "deleteAuthFailed": "Profile deleted, but their sign-in could not be revoked ({{msg}}). They may stay logged in until it expires, and their email cannot be reused yet — retry the delete.",
     "deleteFailed": "User could not be deleted.",
     "viewHistory": "View change history",
     "history": "History",

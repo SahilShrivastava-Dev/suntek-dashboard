@@ -69,6 +69,20 @@ export function updateLogin(input: UpdateLoginInput) {
   return invoke({ action: 'update', ...input });
 }
 
+/**
+ * Destroy the auth identity behind a deleted profile.
+ *
+ * Soft-deleting the directory row hides the person but leaves them signed in
+ * (their JWT is valid until it expires), keeps their reset links and OTPs live,
+ * and keeps their email claimed in auth.users — so a replacement account cannot
+ * reuse that address. This is the call that actually revokes access.
+ *
+ * Idempotent server-side: an identity that has already gone returns ok.
+ */
+export function deleteLoginIdentity(auth_user_id: string, user_account_id?: string) {
+  return invoke({ action: 'delete_identity', auth_user_id, user_account_id });
+}
+
 export function setLoginEnabled(auth_user_id: string, enabled: boolean, user_account_id?: string) {
   return invoke({ action: enabled ? 'enable' : 'disable', auth_user_id, user_account_id });
 }

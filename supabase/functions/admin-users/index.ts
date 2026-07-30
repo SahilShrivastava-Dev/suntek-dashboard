@@ -96,6 +96,8 @@ serve(async (req: Request) => {
         return await handleBan(admin, body, true);
       case 'enable':
         return await handleBan(admin, body, false);
+      case 'delete_identity':
+        return await handleDeleteIdentity(admin, body);
       default:
         return json({ error: `Unknown action: ${action}` }, 400);
     }
@@ -301,6 +303,51 @@ async function handleUpdate(admin: Admin, body: Record<string, unknown>, caller:
 }
 
 /** Ban (disable) or unban (enable) a login without deleting it. */
+/**
+ * Destroy a user's auth identity when their profile is deleted.
+ *
+ * The directory row is soft-deleted by soft_delete_user() and hidden by RLS, but
+ * that leaves auth.users untouched — which means three things stay true that
+ * should not:
+ *   • their CURRENT SESSION keeps working until its JWT expires. They are hidden
+ *     from the app and still signed in.
+ *   • refresh tokens, password-reset links and OTPs remain valid.
+ *   • their email stays CLAIMED in auth.users, so creating a replacement account
+ *     with the same address fails at the auth layer no matter what the directory
+ *     indexes allow.
+ *
+ * deleteUser() settles all three at once: Supabase cascades to sessions and
+ * refresh tokens, so every issued credential dies with the identity, and the
+ * address is freed. Tokens are bound to the auth user id, never to the email, so
+ * nothing issued to the old identity can ever authenticate as the new one.
+ *
+ * Idempotent: an identity that is already gone is reported as success, because
+ * the caller's goal — "this identity must not exist" — is satisfied. A delete
+ * retried after a partial failure must not dead-end on "user not found".
+ */
+async function handleDeleteIdentity(admin: Admin, body: Record<string, unknown>) {
+  const authId = requireStr(body.auth_user_id, 'auth_user_id');
+  const { error } = await admin.auth.admin.deleteUser(authId);
+  if (error) {
+    const msg = error.message ?? '';
+    if (/not found|does not exist/i.test(msg)) {
+      return json({ ok: true, auth_user_id: authId, already_gone: true });
+    }
+    return json({ error: msg }, 400);
+  }
+  // login_email is released on the directory row too, so the partial unique
+  // index in migration 76 cannot be tripped by a value that no longer
+  // corresponds to any identity. The row itself is kept — it is the audit
+  // record — and name/mobile/email stay on it for history.
+  if (typeof body.user_account_id === 'string' && body.user_account_id) {
+    await admin
+      .from('user_accounts')
+      .update({ login_email: null, login_enabled: false })
+      .eq('id', body.user_account_id);
+  }
+  return json({ ok: true, auth_user_id: authId });
+}
+
 async function handleBan(admin: Admin, body: Record<string, unknown>, ban: boolean) {
   const authId = requireStr(body.auth_user_id, 'auth_user_id');
   const { error } = await admin.auth.admin.updateUserById(authId, {

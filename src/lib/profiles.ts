@@ -72,6 +72,7 @@ export const CAPABILITIES: { key: string; label: string; description: string }[]
   // nobody by default. Admin roles hold it implicitly via is_admin (see
   // profileHasCapability / has_capability), which is what the client asked for:
   // "restricted to authorised administrator accounts".
+  { key: 'delete_user', label: 'Delete user profiles', description: 'Delete a user from User Management. The profile is hidden from the app and the person can no longer log in; the record is retained for audit and can be restored. Cannot delete yourself or the last remaining administrator.' },
   { key: 'delete_import_batch', label: 'Delete uploaded data', description: 'Delete the records imported through an incorrect CSV / Excel upload, so a corrected file can be uploaded. Only rows from that file are removed; manual entries are never touched. Every deletion is audited.' },
 ];
 

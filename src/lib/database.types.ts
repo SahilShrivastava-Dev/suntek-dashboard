@@ -194,6 +194,12 @@ export interface Database {
       // Directory of real users for the profile switcher + User Management. See migration 0006.
       user_accounts: {
         Row: {
+          /** Soft delete (migration 75). RLS hides these rows from every API
+           *  read, including the pre-auth login lookup, so a deleted user
+           *  cannot sign in. The record is retained for audit/recovery. */
+          is_deleted: boolean;
+          deleted_at: string | null;
+          deleted_by: string | null;
           id: string;
           name: string;
           mobile: string | null;
@@ -214,7 +220,9 @@ export interface Database {
           is_global: boolean | null;     // true = sees every plant (Owner/Admin, all-India accountant)
           preferred_language: string | null;
         };
-        Insert: OptionalNulls<Omit<Database['public']['Tables']['user_accounts']['Row'], 'id' | 'created_at'>>;
+        // is_deleted is DB-defaulted (false) and only ever written by
+        // soft_delete_user(), so it must not be required on a client insert.
+        Insert: OptionalNulls<Omit<Database['public']['Tables']['user_accounts']['Row'], 'id' | 'created_at' | 'is_deleted'>> & { is_deleted?: boolean };
         Update: Partial<Database['public']['Tables']['user_accounts']['Insert']>;
       };
 

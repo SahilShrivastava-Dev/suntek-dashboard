@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Users, UserCheck, Shield } from 'lucide-react';
+import { Users, UserCheck, Shield, Settings, Pencil, History as HistoryIcon, Trash2, UserX, UserPlus } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { fetchActivePlants } from '../../lib/plants';
 import { humanizeError } from '../../lib/errors';
 import { usePlantScope } from '../../contexts/PlantScopeContext';
-import { insertRows, updateRows } from '../../lib/db';
+import { insertRows, updateRows, callRpc } from '../../lib/db';
 import { createLogin, updateLogin } from '../../lib/adminUsers';
 import { useMentionNotifier } from '../../lib/mentions';
 import { useBlacklistGuard } from '../../lib/blacklist/guard';
 import { useRoleContext } from '../../contexts/RoleContext';
-import { CAPABILITIES } from '../../lib/profiles';
+import { CAPABILITIES, profileHasCapability } from '../../lib/profiles';
 import type { RoleRow } from '../../lib/profiles';
 import { useStepUp } from '../../lib/useStepUp';
 import { logUserAccountEvent, LANGUAGE_OPTIONS } from '../../lib/userEvents';
@@ -152,6 +153,62 @@ const BLANK_FORM = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+/** One row of the Actions dropdown. `tone` colours the destructive and
+ *  status-changing entries so Delete is never mistaken for Edit. */
+function MenuItem({ icon, label, onClick, tone = 'plain' }: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  tone?: 'plain' | 'danger' | 'warn' | 'good';
+}) {
+  const colour = tone === 'danger' ? '#DC2626' : tone === 'warn' ? '#B45309' : tone === 'good' ? '#16A34A' : '#334155';
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        padding: '7px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+        background: hover ? (tone === 'danger' ? '#FEF2F2' : '#F8FAFC') : 'transparent',
+        color: colour, fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', textAlign: 'left',
+      }}
+    >
+      <span style={{ display: 'inline-flex', flexShrink: 0 }}>{icon}</span>
+      {label}
+    </button>
+  );
+}
+
+/**
+ * Turn soft_delete_user()'s tagged exceptions into something an admin can act
+ * on. Shown raw they read as Postgres noise — the same problem humanizeError
+ * solves elsewhere.
+ */
+function describeDeleteUserError(message: string): string {
+  if (message.includes('missing capability delete_user')) {
+    return 'You do not have permission to delete users. This is restricted to administrators.';
+  }
+  if (message.includes('self_delete')) {
+    return 'You cannot delete your own profile.';
+  }
+  if (message.includes('last_admin')) {
+    return 'This is the only administrator left — deleting them would lock everyone out of User Management.';
+  }
+  if (message.includes('already_deleted')) {
+    return 'This user has already been deleted. Refresh the list.';
+  }
+  if (message.includes('unknown_user')) {
+    return 'That user no longer exists. Refresh the list.';
+  }
+  if (message.includes('not_authenticated')) {
+    return 'Your session has expired — sign in again.';
+  }
+  return message;
+}
+
 export function UserManagement() {
   const { t } = useTranslation();
   const toast = useToast();
@@ -173,6 +230,89 @@ export function UserManagement() {
   const [editingUser, setEditingUser] = useState<DisplayUser | null>(null);
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM });
+
+  // ── Actions menu + delete ─────────────────────────────────────────────────
+  // The three buttons (Edit / Deactivate / History) were widening the Actions
+  // column past the edge of the table; a fourth would have made it worse. One
+  // gear opens all of them and leaves room for whatever comes next.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  /** Viewport coordinates for the open menu. The menu is PORTALLED to
+   *  document.body and positioned `fixed`, because the table sits inside a
+   *  horizontally scrollable wrapper — an absolutely positioned child cannot
+   *  escape an `overflow` ancestor, so the menu was being clipped at the edge of
+   *  the card and the lower items were unreachable without scrolling. */
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [deleteUser, setDeleteUser] = useState<DisplayUser | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const canDeleteUser = profileHasCapability(activeProfile, 'delete_user');
+
+  // Close on any outside click or Escape — an open menu must never be something
+  // you have to click again to dismiss.
+  useEffect(() => {
+    if (!menuFor) return;
+    const close = () => { setMenuFor(null); setMenuPos(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    // `capture` so the handler runs before a click inside another row's gear,
+    // which would otherwise reopen it in the same tick.
+    document.addEventListener('click', close, true);
+    document.addEventListener('keydown', onKey);
+    // A fixed-position menu is anchored to coordinates captured when it opened,
+    // so any scroll would leave it floating away from its row. Close instead of
+    // trying to track it — `capture` catches the table's own scroll container,
+    // not just the window.
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('click', close, true);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [menuFor]);
+
+  /** Menu box size, used to decide whether it fits below the gear. Approximate
+   *  is fine — it only picks a side; the browser draws the real height. */
+  const MENU_W = 186;
+  const MENU_H = 200;
+
+  function openActionsMenu(e: React.MouseEvent<HTMLButtonElement>, id: string) {
+    e.stopPropagation();               // or the document close handler fires on this same click
+    if (menuFor === id) { setMenuFor(null); setMenuPos(null); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    // Flip above the gear when there isn't room below — the last row of the
+    // table is right at the bottom of the viewport, which is exactly where a
+    // downward menu ran off screen.
+    const top = (window.innerHeight - r.bottom < MENU_H)
+      ? Math.max(8, r.top - MENU_H - 4)
+      : r.bottom + 4;
+    // Right-aligned to the gear, clamped so it never leaves the viewport.
+    const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+    setMenuPos({ top, left });
+    setMenuFor(id);
+  }
+
+  /** Soft delete. No password step-up — the client asked for the confirmation
+   *  dialog NOT to require one; the capability gate and the audit row are the
+   *  controls. The RPC refuses self-deletion and the last remaining admin. */
+  async function confirmDeleteUser() {
+    if (!deleteUser || deleting) return;
+    setDeleting(true);
+    try {
+      const { data, error } = await callRpc<{ ok: boolean }>('soft_delete_user', {
+        p_user_id: deleteUser.id, p_actor_name: activeProfile.name,
+      });
+      if (error) throw new Error(describeDeleteUserError(error.message));
+      if (!data?.ok) throw new Error(t('userMgmt.deleteFailed', 'User could not be deleted.'));
+      toast.success(t('userMgmt.deleteOk', 'User deleted successfully.'));
+      setDeleteUser(null);
+      await loadData();           // the list refreshes itself on success
+    } catch (e) {
+      // On failure the user stays visible and the row is untouched.
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   // History panel — per-profile action log
   const [historyUser, setHistoryUser] = useState<DisplayUser | null>(null);
@@ -306,7 +446,10 @@ export function UserManagement() {
   const loadData = useCallback(async () => {
     setLoading(true);
     const [usersRes, { data: plantsData }, { data: unitsData }, { data: tiersData }] = await Promise.all([
-      supabase.from('user_accounts').select('*, plants(name)').order('created_at', { ascending: false }).returns<DisplayUser[]>(),
+      // RLS already hides soft-deleted rows (migration 75), so this filter is
+      // belt-and-braces — it also makes the intent obvious to the next reader,
+      // and keeps the list correct if that policy is ever relaxed.
+      supabase.from('user_accounts').select('*, plants(name)').or('is_deleted.is.null,is_deleted.eq.false').order('created_at', { ascending: false }).returns<DisplayUser[]>(),
       fetchActivePlants<{ id: string; name: string }>('id, name'),
       supabase.from('units').select('id, plant_id, name').order('name').returns<{ id: string; plant_id: string; name: string }[]>(),
       supabase.from('tiers').select('id, label, rank').order('rank').returns<{ id: string; label: string; rank: number }[]>(),
@@ -778,21 +921,16 @@ export function UserManagement() {
                       {u._isSystem ? (
                         <span className="text-[11px] text-slate-400 italic">{t('userMgmt.systemProfile')}</span>
                       ) : (
-                        <div className="flex gap-2">
-                          <button onClick={() => openEdit(u)}
-                            style={{ padding: '5px 12px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#475569' }}>
-                            {t('userMgmt.edit')}
-                          </button>
-                          <button onClick={() => toggleStatus(u)}
-                            style={{ padding: '5px 12px', borderRadius: 10, border: `1px solid ${u.is_active ? '#FECACA' : '#BBF7D0'}`, background: u.is_active ? '#FEF2F2' : '#F0FDF4', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: u.is_active ? '#DC2626' : '#16A34A' }}>
-                            {u.is_active ? t('userMgmt.deactivate') : t('userMgmt.activate')}
-                          </button>
-                          <button onClick={() => openHistory(u)} title={t('userMgmt.viewHistory')}
-                            style={{ padding: '5px 12px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, color: '#64748B', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
-                            {t('userMgmt.history')}
-                          </button>
-                        </div>
+                        <button
+                          aria-label={t('userMgmt.actions', 'Actions')}
+                          aria-haspopup="menu"
+                          aria-expanded={menuFor === u.id}
+                          title={t('userMgmt.actions', 'Actions')}
+                          onClick={e => openActionsMenu(e, u.id)}
+                          style={{ padding: 6, borderRadius: 9, border: '1px solid #E2E8F0', background: menuFor === u.id ? '#F1F5F9' : '#fff', cursor: 'pointer', color: '#475569', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <Settings size={15} />
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -1059,6 +1197,98 @@ export function UserManagement() {
           requiredHint={t('userMgmt.requiredHint')}
         />
       </SlidePanel>
+
+      {/* ── Actions menu ──────────────────────────────────────────────────────
+          Rendered through a PORTAL onto document.body. Kept inside the table
+          cell it was clipped by the horizontally scrollable wrapper, so the
+          lower items (History, Delete) were cut off and unreachable. A portal
+          plus fixed positioning escapes every overflow ancestor. */}
+      {menuFor && menuPos && (() => {
+        const u = usersPg.pageRows.find(r => r.id === menuFor);
+        if (!u) return null;
+        return createPortal(
+          <div
+            role="menu"
+            onClick={e => e.stopPropagation()}
+            style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_W, zIndex: 1200, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12, boxShadow: '0 12px 32px rgba(15,23,42,0.18)', padding: 5 }}
+          >
+            <MenuItem icon={<Pencil size={13} />} label={t('userMgmt.edit')}
+              onClick={() => { setMenuFor(null); openEdit(u); }} />
+            <MenuItem
+              icon={u.is_active ? <UserX size={13} /> : <UserPlus size={13} />}
+              label={u.is_active ? t('userMgmt.deactivate') : t('userMgmt.activate')}
+              tone={u.is_active ? 'warn' : 'good'}
+              onClick={() => { setMenuFor(null); toggleStatus(u); }} />
+            <MenuItem icon={<HistoryIcon size={13} />} label={t('userMgmt.history')}
+              onClick={() => { setMenuFor(null); openHistory(u); }} />
+            {canDeleteUser && (
+              <>
+                <div style={{ height: 1, background: '#F1F5F9', margin: '4px 2px' }} />
+                <MenuItem icon={<Trash2 size={13} />} label={t('userMgmt.delete', 'Delete')} tone="danger"
+                  onClick={() => { setMenuFor(null); setDeleteUser(u); }} />
+              </>
+            )}
+          </div>,
+          document.body,
+        );
+      })()}
+
+      {/* ── Delete confirmation ──────────────────────────────────────────────
+          Deliberately NO password step-up: the client asked for this dialog not
+          to require one. The capability gate, the RPC's self-delete and
+          last-admin guards, and the audit row are the controls instead. */}
+      {deleteUser && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+          onClick={() => !deleting && setDeleteUser(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 440, background: '#fff', borderRadius: 16, border: '1px solid #E2E8F0', boxShadow: '0 24px 60px rgba(0,0,0,0.28)', padding: 22 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <span style={{ width: 38, height: 38, borderRadius: '50%', background: '#FEE2E2', color: '#DC2626', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Trash2 size={18} />
+              </span>
+              <div>
+                <div className="font-heading font-semibold" style={{ fontSize: 17 }}>
+                  {t('userMgmt.deleteTitle', 'Delete this user?')}
+                </div>
+                <div style={{ fontSize: 12.5, color: '#64748B', marginTop: 2 }}>
+                  {deleteUser.name}{deleteUser.email ? ` · ${deleteUser.email}` : ''}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 14, background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 12, padding: '12px 14px', fontSize: 13.5, lineHeight: 1.5, color: '#7F1D1D' }}>
+              {t('userMgmt.deleteBody', 'You are about to delete this user profile. The user will no longer appear in the User Management interface. Do you want to continue?')}
+            </div>
+
+            {/* Said plainly, because "delete" and "recoverable" rarely go together
+                and an admin should know which one this is. */}
+            <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 10 }}>
+              {t('userMgmt.deleteNote', 'The record is retained in the database for audit and can be restored by a developer if this was a mistake. The user is signed out and cannot log in again.')}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+              <button
+                onClick={() => setDeleteUser(null)} disabled={deleting}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: '1.5px solid #E2E8F0', background: '#fff', color: '#475569', fontWeight: 600, fontSize: 13, cursor: deleting ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
+              >
+                {t('common.cancel', 'Cancel')}
+              </button>
+              <button
+                onClick={confirmDeleteUser} disabled={deleting}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', background: '#DC2626', color: '#fff', fontWeight: 700, fontSize: 13, cursor: deleting ? 'not-allowed' : 'pointer', opacity: deleting ? 0.6 : 1, fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                {deleting
+                  ? t('userMgmt.deleting', 'Deleting…')
+                  : <><Trash2 size={14} />{t('userMgmt.deleteConfirm', 'Confirm Delete')}</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── History panel: who changed what on this profile ─────────────────── */}
       <SlidePanel

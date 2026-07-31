@@ -142,7 +142,23 @@ export function RepairScrapPanel() {
   const scrap = useMemo(() => filteredItems.filter(i => Number(i.part.scrap_qty) > 0), [filteredItems]);
 
   if (loading) return <div className="card2 p-6" style={{ marginTop: 20 }}><SkeletonRows rows={4} /></div>;
-  if (rows.length === 0) return null; // nothing sent to repair/scrap yet → hide the panel entirely
+  // Nothing sent to repair or scrap yet. This used to `return null`, which hid
+  // the panel completely — clicking the Repair/Scrap tab gave a blank page with
+  // no heading and no message, indistinguishable from the screen being broken.
+  // An empty state says which it is, and explains how rows get here.
+  if (rows.length === 0) {
+    return (
+      <div className="card2 p-6" style={{ marginTop: 20 }}>
+        <div className="text-base font-bold font-heading">{t('repairScrap.title', 'Repair & scrap tracking')}</div>
+        <div className="text-xs text-slate-500 mb-3">{t('repairScrap.subtitle', 'Assets sent for repair or scrapped at the end of a maintenance job — with photo proof and a link to the ticket.')}</div>
+        <div className="text-center text-slate-400 py-10 text-sm">
+          {t('repairScrap.emptyTitle', 'Nothing has been sent for repair or scrap yet.')}
+          <br />
+          {t('repairScrap.emptyBody', 'When a maintenance job is closed, any parts marked for repair or scrap appear here with their photo proof and a link back to the ticket.')}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="card2 p-6" style={{ marginTop: 20, position: 'relative' }}>

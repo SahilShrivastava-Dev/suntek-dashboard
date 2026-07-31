@@ -3008,6 +3008,8 @@ const en = {
 
   // ── Repair & Scrap panel ─────────────────────────────────────────────────────
   repairScrap: {
+    "emptyTitle": "Nothing has been sent for repair or scrap yet.",
+    "emptyBody": "When a maintenance job is closed, any parts marked for repair or scrap appear here with their photo proof and a link back to the ticket.",
     colPart: "Part",
     colScrapped: "Scrapped",
     title: "Repair & scrap tracking",

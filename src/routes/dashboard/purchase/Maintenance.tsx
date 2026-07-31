@@ -9,6 +9,7 @@ import { resizeImageToDataUrl, extractSupplierBill, type SupplierBillLine } from
 import { useRoleContext } from '../../../contexts/RoleContext';
 import { usePlantScope } from '../../../contexts/PlantScopeContext';
 import { withEmbedFallback } from '../../../lib/scopedList';
+import { fetchAllRows } from '../../../lib/fetchAll';
 import type { RoleRow } from '../../../lib/profiles';
 import { useBlacklist } from '../../../contexts/BlacklistContext';
 import { uploadMaintenancePhoto } from '../../../lib/cloudinary';
@@ -636,8 +637,15 @@ export function Maintenance() {
     try {
       const [tRes, sRes, pRes] = await Promise.all([
         withEmbedFallback(
-          scopeQuery(supabase.from('maintenance_tickets').select('*, plants(name)'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<TicketRow[]>(),
-          () => scopeQuery(supabase.from('maintenance_tickets').select('*'), { unitCol: 'unit_id' }).order('created_at', { ascending: false }).returns<TicketRow[]>(),
+          // PAGED: this factory already holds ~1,300 tickets and PostgREST caps a
+          // response at 1000 SILENTLY — which is why the OVERDUE card could never
+          // read above 1000 and the oldest tickets were invisible entirely.
+          fetchAllRows<TicketRow>((from, to) =>
+            scopeQuery(supabase.from('maintenance_tickets').select('*, plants(name)'), { unitCol: 'unit_id' })
+              .order('created_at', { ascending: false }).range(from, to).returns<TicketRow[]>()),
+          () => fetchAllRows<TicketRow>((from, to) =>
+            scopeQuery(supabase.from('maintenance_tickets').select('*'), { unitCol: 'unit_id' })
+              .order('created_at', { ascending: false }).range(from, to).returns<TicketRow[]>()),
           'Maintenance.tickets',
         ),
         withEmbedFallback(

@@ -20,6 +20,7 @@ import { uploadWorkflowFile } from '../../../lib/cloudinary';
 import { parseStockFile, reconcile, reconcileAll, labelForPeriod, type StockParseResult, type MonthParse, type MonthItem, type Anomaly } from '../../../lib/store/parseStockFile';
 import { indexResolutions, joinAnomalies, type AnomalyResolutionRow, type ReviewedAnomaly } from '../../../lib/store/anomalyKeys';
 import { registerIdOf } from '../../../lib/store/registers';
+import { fetchAllRows } from '../../../lib/fetchAll';
 import { createImportBatch, setImportBatchRowCount, buildItemOwnerMap, resolveItemOwner } from '../../../lib/imports/batches';
 import { AddPurchaseModal } from './AddPurchaseModal';
 import { AnomalyReviewModal } from './AnomalyReviewModal';
@@ -149,7 +150,14 @@ export function StockRegister() {
         'StockRegister.items',
       );
       setItems(si || []);
-      const { data: sm } = await scopeQuery(supabase.from('store_stock_months').select('*')).returns<StockMonthRow[]>();
+      // PAGED: ~1,791 snapshot rows already, and PostgREST caps a response at
+      // 1000 silently. A truncated read here does not error — it just makes the
+      // reconciler compare months it only partially loaded, which is the worst
+      // possible failure for anomaly detection.
+      const { data: sm } = await fetchAllRows<StockMonthRow>((from, to) =>
+        scopeQuery(supabase.from('store_stock_months').select('*'))
+          .order('period_month', { ascending: true }).order('id', { ascending: true })
+          .range(from, to).returns<StockMonthRow[]>());
       setMonths(sm || []);
       // Persisted anomaly review state (best-effort — table arrives with migration 54).
       try {

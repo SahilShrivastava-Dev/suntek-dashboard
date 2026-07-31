@@ -432,6 +432,8 @@ const en = {
     outsideZoneLabel: 'Outside zone — {{dist}}m from centre (limit: {{radius}}m)',
   },
   batch: {
+    "noActive": "No batches are running right now.",
+    "noActiveHint": "Start one with “+ Start batch” — live readings and oil-ratio variance appear here as it runs.",
     batchNoRequired: "Batch number is required.",
     errResolveBatchId: "Could not resolve batch ID",
     blacklistHit: "⚠ \"{{value}}\" ≈ blacklisted {{type}} \"{{name}}\" ({{pct}}%). Admin notified.",
@@ -3008,6 +3010,8 @@ const en = {
 
   // ── Repair & Scrap panel ─────────────────────────────────────────────────────
   repairScrap: {
+    "emptyTitle": "Nothing has been sent for repair or scrap yet.",
+    "emptyBody": "When a maintenance job is closed, any parts marked for repair or scrap appear here with their photo proof and a link back to the ticket.",
     colPart: "Part",
     colScrapped: "Scrapped",
     title: "Repair & scrap tracking",

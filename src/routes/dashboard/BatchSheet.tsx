@@ -180,6 +180,16 @@ export function BatchSheet() {
               </tr>
             </thead>
             <tbody>
+              {/* Without this the table renders its headings above nothing when
+                  no batch is running — which reads as broken rather than idle,
+                  the same way the Repair/Scrap tab did. */}
+              {batchSort.sorted.length === 0 && (
+                <tr><td colSpan={9} className="text-center text-slate-400 py-10 text-sm">
+                  {t('batch.noActive', 'No batches are running right now.')}
+                  <br />
+                  {t('batch.noActiveHint', 'Start one with “+ Start batch” — live readings and oil-ratio variance appear here as it runs.')}
+                </td></tr>
+              )}
               {batchSort.sorted.map(b => {
                 const qc = QC_BADGE[b.qc] || QC_BADGE.awaiting;
                 const isFlashing = updateFlash === b.id;

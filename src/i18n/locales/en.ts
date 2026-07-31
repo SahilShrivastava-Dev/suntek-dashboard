@@ -432,6 +432,8 @@ const en = {
     outsideZoneLabel: 'Outside zone — {{dist}}m from centre (limit: {{radius}}m)',
   },
   batch: {
+    "noActive": "No batches are running right now.",
+    "noActiveHint": "Start one with “+ Start batch” — live readings and oil-ratio variance appear here as it runs.",
     batchNoRequired: "Batch number is required.",
     errResolveBatchId: "Could not resolve batch ID",
     blacklistHit: "⚠ \"{{value}}\" ≈ blacklisted {{type}} \"{{name}}\" ({{pct}}%). Admin notified.",

@@ -436,6 +436,8 @@ const hi: Translations = {
     outsideZoneLabel: 'आउटसाइड ज़ोन — {{dist}}m फ्रॉम सेंटर (लिमिट: {{radius}}m)',
   },
   batch: {
+    "noActive": "अभी कोई बैच नहीं चल रहा है।",
+    "noActiveHint": "“+ Start batch” से शुरू करें — लाइव रीडिंग्स और ऑयल-रेशियो वेरिएंस यहाँ दिखेंगे।",
     batchNoRequired: "बैच नंबर इज़ रिक्वायर्ड।",
     errResolveBatchId: "कुड नॉट रिज़ॉल्व बैच ID",
     blacklistHit: "⚠ \"{{value}}\" ≈ ब्लैकलिस्टेड {{type}} \"{{name}}\" ({{pct}}%)। एडमिन नोटिफाइड।",

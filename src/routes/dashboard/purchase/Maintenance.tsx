@@ -721,7 +721,32 @@ export function Maintenance() {
     const tid = searchParams.get('ticket');
     if (!tid) return;
     const t = tickets.find((x) => x.id === tid);
-    if (!t) return; // tickets may still be loading; this effect re-runs when they arrive
+    if (!t) {
+      // NOT NECESSARILY STILL LOADING. PostgREST caps a response at 1000 rows by
+      // default, and this factory already has ~1,300 tickets — so an older one
+      // simply is not in `tickets` and never will be, however long we wait.
+      // Returning here is what made a To-Do link dump the user on the full list
+      // with 1,000 overdue rows to search by hand.
+      //
+      // Fetch the one ticket directly instead. Deep-linking must not depend on
+      // the row happening to fall inside the first page of an unrelated query.
+      let cancelled = false;
+      (async () => {
+        const { data } = await withEmbedFallback(
+          supabase.from('maintenance_tickets').select('*, plants(name)').eq('id', tid).limit(1).returns<TicketRow[]>(),
+          () => supabase.from('maintenance_tickets').select('*').eq('id', tid).limit(1).returns<TicketRow[]>(),
+          'Maintenance.ticketDeepLink',
+        );
+        const found = data?.[0];
+        if (cancelled || !found) return;   // genuinely gone, or scoped out
+        setSelectedTicket(found);
+        setTab(found.type === 'periodic' ? 'periodic' : 'emergency');
+        const next = new URLSearchParams(searchParams);
+        next.delete('ticket');
+        setSearchParams(next, { replace: true });
+      })();
+      return () => { cancelled = true; };
+    }
     setSelectedTicket(t);
     setTab(t.type === 'periodic' ? 'periodic' : 'emergency');
     const next = new URLSearchParams(searchParams);

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useRoleContext } from './RoleContext';
+import { storeScopeFilter } from '../lib/store/registers';
 
 /**
  * PlantScopeContext — the logged-in user's DATA scope (Phase 1, app-layer).
@@ -67,10 +68,17 @@ interface PlantScopeValue {
   /** Stores the user may act on: granted directly, or via a factory they belong to. */
   allowedStores: StoreRow[];
   /**
-   * Apply the store scope to a Supabase query, mirroring scopeQuery(). No-op
-   * for global users. Falls back to plant scoping when 59 has not been applied.
+   * Apply the STORE scope to a Supabase query. Use this — never scopeQuery() —
+   * for any table carrying a store id: store_items, store_stock_months,
+   * store_stock_events, store_stock_anomalies, stock_purchase_receipts,
+   * repair_return_receipts, maintenance_store_requests, import_batches.
+   *
+   * A ticked store means the whole store, whatever the user's role and whoever
+   * owns the stock. Rows with no store still answer to the factory grant, so
+   * pre-migration-59 data and factory-owned records (FAR / PM batches) keep
+   * working. No-op for global users; fails closed when the user has neither.
    */
-  storeQuery: <T>(query: T, opts?: { storeCol?: string }) => T;
+  storeQuery: <T>(query: T, opts?: { storeCol?: string; plantCol?: string | null }) => T;
   /** Plants the user may pick when creating a record (all if global). */
   allowedPlants: PlantRow[];
   /** Units within one plant the user may pick (respects unit restriction). */
@@ -286,15 +294,16 @@ export function PlantScopeProvider({ children }: { children: React.ReactNode }) 
   );
 
   const storeQuery = useCallback(
-    <T,>(query: T, opts?: { storeCol?: string }): T => {
+    <T,>(query: T, opts?: { storeCol?: string; plantCol?: string | null }): T => {
       if (isGlobal) return query;
-      const col = opts?.storeCol ?? 'store_id';
-      const ids = [...allowedStoreIds];
+      const filter = storeScopeFilter([...allowedStoreIds], plantIds, opts);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const q: any = query;
-      return (ids.length ? q.in(col, ids) : q.eq(col, NIL_UUID)) as T;
+      // No grant of either kind → match nothing, rather than everything.
+      if (!filter) return q.eq(opts?.storeCol ?? 'store_id', NIL_UUID) as T;
+      return q.or(filter) as T;
     },
-    [isGlobal, allowedStoreIds],
+    [isGlobal, allowedStoreIds, plantIds],
   );
 
   const value: PlantScopeValue = {

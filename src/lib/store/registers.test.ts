@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   registerIdOf, buildStoreByPlant, storeIdForPlant, factoriesForStore,
-  sharedStoreIds, freeQty, canDrawFrom, type FactoryStoreLink,
+  sharedStoreIds, freeQty, canDrawFrom, storeScopeFilter, type FactoryStoreLink,
 } from './registers';
 
 // The client's actual shape: three factories at Rehla on ONE store; Sikandrabad
@@ -214,5 +214,68 @@ describe('buildStoreByPlant', () => {
   it('keeps one store per factory even if links repeat', () => {
     const m = buildStoreByPlant([...LINKS, { plant_id: GANJAM, store_id: 's-other' }]);
     expect(storeIdForPlant(m, GANJAM)).toBe(GANJAM_STORE);
+  });
+});
+
+// The regression that produced an empty register for a real store keeper:
+// migration 60 stamps every Rehla row with ONE anchor factory, so filtering the
+// shared register by the factories a user belongs to matches almost nothing.
+describe('storeScopeFilter — a ticked store means the WHOLE store', () => {
+  it('filters on the store, never on the anchor factory', () => {
+    // Amresh: granted the common store + two of the three factories on it.
+    const f = storeScopeFilter([REHLA_COMMON], [SPPL_REHLA, SPPLK_REHLA])!;
+    expect(f).toContain(`store_id.in.(${REHLA_COMMON})`);
+    // The rows are stamped SCPL – Rehla. If the factory list were applied to
+    // rows that HAVE a store, he would see none of them.
+    expect(f).not.toContain(`plant_id.in.(${SCPL_REHLA}`);
+  });
+
+  it('reaches store rows the user has no factory grant for at all', () => {
+    // Store-only grant: no plants ticked. This is the shared-store keeper who
+    // must not inherit any factory's assets or maintenance.
+    const f = storeScopeFilter([REHLA_COMMON], [])!;
+    expect(f).toBe(`store_id.in.(${REHLA_COMMON})`);
+  });
+
+  it('still honours the factory grant for rows that carry no store', () => {
+    // Pre-migration-59 rows, and factory-owned records (FAR / PM batches).
+    const f = storeScopeFilter([REHLA_COMMON], [SPPL_REHLA])!;
+    expect(f).toContain(`and(store_id.is.null,plant_id.in.(${SPPL_REHLA}))`);
+  });
+
+  it('never lets a factory grant reach another store\'s stock', () => {
+    // The factory fallback is gated on store_id IS NULL, so a Ganjam user can
+    // never pick up a Rehla row by way of plant_id.
+    const f = storeScopeFilter([GANJAM_STORE], [GANJAM])!;
+    expect(f).toBe(`store_id.in.(${GANJAM_STORE}),and(store_id.is.null,plant_id.in.(${GANJAM}))`);
+    expect(f).not.toContain(REHLA_COMMON);
+  });
+
+  it('keeps the Drum Plant separate despite sharing the Rehla site', () => {
+    const f = storeScopeFilter([DRUM_STORE], [DRUM_REHLA])!;
+    expect(f).toContain(DRUM_STORE);
+    expect(f).not.toContain(REHLA_COMMON);
+  });
+
+  it('returns null — not an empty filter — when the user can reach nothing', () => {
+    // An empty filter string would be an unfiltered read of every store.
+    expect(storeScopeFilter([], [])).toBeNull();
+  });
+
+  it('honours a table whose store column is named differently', () => {
+    // maintenance_store_requests keys on source_store_id (migration 59).
+    const f = storeScopeFilter([REHLA_COMMON], [SPPL_REHLA], { storeCol: 'source_store_id' })!;
+    expect(f).toContain(`source_store_id.in.(${REHLA_COMMON})`);
+    expect(f).toContain('and(source_store_id.is.null,plant_id.in.');
+  });
+
+  it('can drop the factory fallback for a store-only table', () => {
+    const f = storeScopeFilter([REHLA_COMMON], [SPPL_REHLA], { plantCol: null })!;
+    expect(f).toBe(`store_id.in.(${REHLA_COMMON})`);
+  });
+
+  it('lists every granted store when a user runs several', () => {
+    const f = storeScopeFilter([REHLA_COMMON, GANJAM_STORE], [])!;
+    expect(f).toBe(`store_id.in.(${REHLA_COMMON},${GANJAM_STORE})`);
   });
 });

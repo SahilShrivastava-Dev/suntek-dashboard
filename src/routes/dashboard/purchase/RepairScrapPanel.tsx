@@ -55,7 +55,7 @@ export function RepairScrapPanel() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const toast = useToast();
-  const { scopeQuery } = usePlantScope();
+  const { scopeQuery, storeQuery } = usePlantScope();
   const { activeProfile } = useRoleContext();
   const [rows, setRows] = useState<TicketRow[]>([]);
   const [parts, setParts] = useState<DefectivePartRow[]>([]);
@@ -90,10 +90,14 @@ export function RepairScrapPanel() {
     } catch { setParts([]); }
     // Return history (best-effort — tables arrive with migration 55).
     try {
+      // Receipts are STORE-keyed — a repaired part comes back into the store,
+      // not into the factory that sent it out. The defective-parts list above
+      // stays factory-scoped: that is maintenance, which a store grant does not
+      // carry.
       const { data: rc, error: rcErr } = await withEmbedFallback(
-        scopeQuery(supabase.from('repair_return_receipts').select('*, plants(name)'))
+        storeQuery(supabase.from('repair_return_receipts').select('*, plants(name)'))
           .order('created_at', { ascending: false }).limit(200).returns<ReceiptRow[]>(),
-        () => scopeQuery(supabase.from('repair_return_receipts').select('*'))
+        () => storeQuery(supabase.from('repair_return_receipts').select('*'))
           .order('created_at', { ascending: false }).limit(200).returns<ReceiptRow[]>(),
         'RepairScrap.receipts',
       );
@@ -106,7 +110,7 @@ export function RepairScrapPanel() {
       } else setAllocs([]);
     } catch { setReceipts([]); setAllocs([]); }
     setLoading(false);
-  }, [scopeQuery]);
+  }, [scopeQuery, storeQuery]);
 
   useEffect(() => { load(); }, [load]);
 

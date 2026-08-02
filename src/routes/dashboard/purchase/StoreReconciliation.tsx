@@ -62,7 +62,7 @@ const CSV_COLUMNS: CsvColumn[] = [
 
 export function StoreReconciliation() {
   const { t } = useTranslation();
-  const { plants, stores, storeIdFor, scopeQuery } = usePlantScope();
+  const { plants, stores, storeIdFor, storeQuery } = usePlantScope();
   const [events, setEvents] = useState<EventLite[]>([]);
   const [receipts, setReceipts] = useState<ReceiptLite[]>([]);
   const [partCosts, setPartCosts] = useState<PartCostLite[]>([]);
@@ -74,15 +74,20 @@ export function StoreReconciliation() {
     let alive = true;
     (async () => {
       setLoading(true);
+      // STORE-scoped: this panel exists to show a shared store's buyers against
+      // its consumers, which are DIFFERENT factories. Scoping it to the reader's
+      // own factories showed a keeper only the slice he happens to belong to —
+      // i.e. it hid the divergence the whole panel is here to surface.
       const [ev, rc, pc] = await Promise.all([
-        scopeQuery(supabase.from('store_stock_events')
+        storeQuery(supabase.from('store_stock_events')
           .select('store_id, plant_id, requesting_plant_id, event_type, qty_delta, created_at'))
           .returns<EventLite[]>(),
-        scopeQuery(supabase.from('stock_purchase_receipts')
+        storeQuery(supabase.from('stock_purchase_receipts')
           .select('plant_id, store_id, amount, purchase_date'))
           .returns<ReceiptLite[]>(),
-        scopeQuery(supabase.from('maintenance_store_requests')
-          .select('plant_id, total_price'))
+        // Part spend is keyed on the store the part came OUT of (migration 59).
+        storeQuery(supabase.from('maintenance_store_requests')
+          .select('plant_id, total_price'), { storeCol: 'source_store_id' })
           .returns<PartCostLite[]>(),
       ]);
       if (!alive) return;
@@ -92,7 +97,7 @@ export function StoreReconciliation() {
       setLoading(false);
     })();
     return () => { alive = false; };
-  }, [open, scopeQuery]);
+  }, [open, storeQuery]);
 
   const rows = useMemo<Row[]>(() => {
     const byPlant = new Map<string, Row>();

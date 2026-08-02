@@ -93,3 +93,43 @@ export function canDrawFrom(
   if (!plantId || !storeId) return false;
   return links.some(l => l.plant_id === plantId && l.store_id === storeId);
 }
+
+/**
+ * The PostgREST filter answering "may this user see this row?" on a store-keyed
+ * table. Feed it to `.or()`.
+ *
+ * Store access is its OWN grant, and it is total: tick a store and you see
+ * everything that happened in it, whichever factory owns the stock, whatever
+ * your role. That is the entire point of a shared store — the Rehla keeper
+ * serves three factories, so scoping his register by the factories he happens
+ * to belong to hides the very rows he is responsible for. Migration 60 stamps
+ * every Rehla row with ONE anchor plant_id (SCPL – Rehla), so a plant filter
+ * there matches at most one of the three grants and usually none.
+ *
+ * A factory grant is the wider one — it carries assets and maintenance too —
+ * and it reaches this table through the store the factory draws from, which
+ * PlantScopeContext folds into `storeIds` before calling here.
+ *
+ * The second clause is the legacy/factory-owned tail: rows written before
+ * store_id existed, and records that belong to a factory rather than a store
+ * (a FAR or PM import batch, which never carries one). A row that HAS a store
+ * is never reached this way, so a factory grant can never pull in the stock of
+ * a store it was not given.
+ *
+ * Returns null when the user can reach nothing — callers MUST fail closed.
+ */
+export function storeScopeFilter(
+  storeIds: string[],
+  plantIds: string[],
+  opts?: { storeCol?: string; plantCol?: string | null },
+): string | null {
+  const storeCol = opts?.storeCol ?? 'store_id';
+  // `null` opts a store-only table out of the factory fallback entirely.
+  const plantCol = opts?.plantCol === undefined ? 'plant_id' : opts.plantCol;
+  const clauses: string[] = [];
+  if (storeIds.length) clauses.push(`${storeCol}.in.(${storeIds.join(',')})`);
+  if (plantCol && plantIds.length) {
+    clauses.push(`and(${storeCol}.is.null,${plantCol}.in.(${plantIds.join(',')}))`);
+  }
+  return clauses.length ? clauses.join(',') : null;
+}

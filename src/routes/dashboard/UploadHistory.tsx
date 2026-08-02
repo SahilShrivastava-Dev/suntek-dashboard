@@ -81,7 +81,7 @@ const RANGES = [
 export function UploadHistory() {
   const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
-  const { plants, stores, scopeQuery, ready } = usePlantScope();
+  const { plants, stores, storeQuery, ready } = usePlantScope();
   const toast = useToast();
   const { stepUp, modal: stepUpModal } = useStepUp();
 
@@ -130,10 +130,16 @@ export function UploadHistory() {
   const load = useCallback(async () => {
     setLoading(true); setErr(null); setLoadedAt(Date.now());
     try {
+      // A stock batch belongs to a STORE; FAR and PM batches carry no store and
+      // stay factory-owned, which storeQuery's null-store clause handles. Before
+      // this, the keeper who uploaded a shared store's file could not see it in
+      // his own history — so he could not delete it either.
       const [b, d] = await Promise.all([
-        scopeQuery(supabase.from('import_batches').select('*'))
+        storeQuery(supabase.from('import_batches').select('*'))
           .order('created_at', { ascending: false }).returns<ImportBatchRow[]>(),
-        scopeQuery(supabase.from('import_batch_deletions').select('*'))
+        // store_id arrives on the audit table with migration 80; until it is
+        // applied every row reads null and falls back to the factory grant.
+        storeQuery(supabase.from('import_batch_deletions').select('*'))
           .order('deleted_at', { ascending: false }).returns<DeletionRow[]>(),
       ]);
       // Migration 70 may not have been applied yet (the frontend ships first in
@@ -150,7 +156,7 @@ export function UploadHistory() {
     } finally {
       setLoading(false);
     }
-  }, [scopeQuery]);
+  }, [storeQuery]);
 
   useEffect(() => { if (ready) load(); }, [ready, load]);
 

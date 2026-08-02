@@ -47,7 +47,7 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
 }) {
   const { t } = useTranslation();
   const { activeProfile } = useRoleContext();
-  const { scopeQuery, allowedPlants } = usePlantScope();
+  const { storeQuery, allowedPlants } = usePlantScope();
   const actorName = activeProfile.name;
 
   const [plants, setPlants] = useState<Plant[]>([]);
@@ -93,7 +93,7 @@ export function AddPurchaseModal({ open, onClose, onApplied }: {
       // store_id comes along so the item list can be narrowed to the register
       // the selected factory actually draws from — at Rehla that is the one
       // shared store, not a per-factory slice.
-      const { data: si } = await scopeQuery(supabase.from('store_items').select('id, item_name, on_hand, unit, plant_id, store_id')).returns<StockItem[]>();
+      const { data: si } = await storeQuery(supabase.from('store_items').select('id, item_name, on_hand, unit, plant_id, store_id')).returns<StockItem[]>();
       if (!alive) return;
       setPlants(base);
       setPlantId(prev => prev || base[0]?.id || '');

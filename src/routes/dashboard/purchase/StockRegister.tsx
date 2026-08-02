@@ -104,7 +104,7 @@ export function StockRegister() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const toast = useToast();
-  const { scopeQuery, allowedPlants, stores, allowedStores, storeIdFor } = usePlantScope();
+  const { storeQuery, allowedPlants, stores, allowedStores, storeIdFor } = usePlantScope();
   const { activeProfile } = useRoleContext();
 
   const [items, setItems] = useState<(StockItem & { plants?: { name: string | null } | null })[]>([]);
@@ -144,9 +144,13 @@ export function StockRegister() {
     try {
       const { data: pl } = await fetchActivePlants<Plant>('id, name');
       setPlants(pl || []);
+      // STORE-scoped, not plant-scoped. Migration 60 stamps every Rehla row
+      // with one anchor factory (SCPL – Rehla), so a plant filter showed the
+      // shared register as empty to a keeper granted the store and the other
+      // two factories — the exact case this screen exists for.
       const { data: si } = await withEmbedFallback(
-        scopeQuery(supabase.from('store_items').select('*, plants(name)')).order('item_name').returns<(StockItem & { plants?: { name: string | null } | null })[]>(),
-        () => scopeQuery(supabase.from('store_items').select('*')).order('item_name').returns<(StockItem & { plants?: { name: string | null } | null })[]>(),
+        storeQuery(supabase.from('store_items').select('*, plants(name)')).order('item_name').returns<(StockItem & { plants?: { name: string | null } | null })[]>(),
+        () => storeQuery(supabase.from('store_items').select('*')).order('item_name').returns<(StockItem & { plants?: { name: string | null } | null })[]>(),
         'StockRegister.items',
       );
       setItems(si || []);
@@ -155,13 +159,13 @@ export function StockRegister() {
       // reconciler compare months it only partially loaded, which is the worst
       // possible failure for anomaly detection.
       const { data: sm } = await fetchAllRows<StockMonthRow>((from, to) =>
-        scopeQuery(supabase.from('store_stock_months').select('*'))
+        storeQuery(supabase.from('store_stock_months').select('*'))
           .order('period_month', { ascending: true }).order('id', { ascending: true })
           .range(from, to).returns<StockMonthRow[]>());
       setMonths(sm || []);
       // Persisted anomaly review state (best-effort — table arrives with migration 54).
       try {
-        const { data: ar, error: arErr } = await scopeQuery(
+        const { data: ar, error: arErr } = await storeQuery(
           supabase.from('store_stock_anomalies')
             .select('id, plant_id, store_id, period_month, item_name, anomaly_type, status, action, corrected_value, resolution_comment, resolved_by_name, resolved_at, version'),
         ).returns<AnomalyResolutionRow[]>();
@@ -173,7 +177,7 @@ export function StockRegister() {
       setLoading(false);
     }
   }
-  useEffect(() => { load(); }, [scopeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [storeQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // (No plantOptions here: this screen is keyed on STORES, not factories — see
   // storeChips below. A factory list was left over from before the store split.)

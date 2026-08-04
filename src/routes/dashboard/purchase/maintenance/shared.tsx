@@ -50,14 +50,17 @@ export const STAGE_LABEL_KEYS: Record<string, string> = {
 };
 
 // In-house repairs (no store part requested) never touch the procurement pipeline,
-// so their timeline is just: raise → upload the completion photo → close. Showing the
-// full approval strip for these only confuses users.
-export const INHOUSE_STAGES = ['open', 'in_progress', 'closed'];
+// so their timeline skips store/purchase entirely: raise → upload the completion
+// photo → unit head verifies → close. The unit-head step is a *work* check, not a
+// spend check — without it a technician could self-certify any repair, since no
+// part request ever puts the ticket in front of a reviewer.
+export const INHOUSE_STAGES = ['open', 'in_progress', 'pending_unit_head', 'closed'];
 export const INHOUSE_STAGE_LABELS: Record<string, string> = {
-  open: 'Raised', in_progress: 'Completion Photo', closed: 'Closed',
+  open: 'Raised', in_progress: 'Completion Photo', pending_unit_head: 'Unit Head', closed: 'Closed',
 };
 export const INHOUSE_STAGE_LABEL_KEYS: Record<string, string> = {
-  open: 'maint.stageRaised', in_progress: 'maint.stageCompletionPhoto', closed: 'maint.stageClosed',
+  open: 'maint.stageRaised', in_progress: 'maint.stageCompletionPhoto',
+  pending_unit_head: 'maint.stageUnitHead', closed: 'maint.stageClosed',
 };
 
 // Part needed but AVAILABLE in store → no procurement, so the Purchase / Purchase Mgr

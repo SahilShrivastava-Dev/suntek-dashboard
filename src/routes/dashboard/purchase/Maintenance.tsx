@@ -17,6 +17,7 @@ import { SlidePanel, PanelField, PanelInput, PanelSelect, PanelTextarea, PanelRo
 import { MentionText, NotesButton, ReadReceipt } from '../../../components/mentions';
 import { useToast } from '../../../components/ui/toast';
 import { SkeletonRows, ErrorState } from '../../../components/ui/states';
+import { ImageLightbox, type LightboxImage } from '../../../components/ui/ImageLightbox';
 import { useTranslation } from 'react-i18next';
 import { useDirectory, useMentionNotifier, notifyWatchers, postNote, extractMentionIds, getNotes, getReceipts, seenProfileIds, tickState } from '../../../lib/mentions';
 import { useBlacklistGuard } from '../../../lib/blacklist/guard';
@@ -527,6 +528,8 @@ export function Maintenance() {
   // Panel state
   const [completingSchedule, setCompletingSchedule] = useState<ScheduleRow | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<TicketRow | null>(null);
+  // Evidence photos opened from the ticket panel's thumbnail strip.
+  const [ticketLightbox, setTicketLightbox] = useState<{ images: LightboxImage[]; index: number } | null>(null);
   // All store-request rows (items) for the selected ticket. A ticket can need
   // several parts at once; each row is one item with its own per-item lifecycle.
   const [storeReqs, setStoreReqs] = useState<StoreReqRow[]>([]);
@@ -1143,7 +1146,12 @@ export function Maintenance() {
     setSavingRevision(true);
     try {
       const nowIso = new Date().toISOString();
-      const prevStatus = selectedTicket.status;
+      // Rejecting a *completed in-house repair* must send it back to the work
+      // itself, not to the review point — the technician redoes the repair and
+      // uploads a fresh completion photo. Every other stage resumes where it paused.
+      const isInhouseVerify = selectedTicket.status === 'pending_unit_head'
+        && ticketDecision(selectedTicket.title, storeReqs.length > 0) === 'inhouse';
+      const prevStatus = isInhouseVerify ? 'in_progress' : selectedTicket.status;
       await updateRows('maintenance_tickets', {
         status: 'changes_requested',
         revision_prev_status: prevStatus,
@@ -1506,6 +1514,10 @@ export function Maintenance() {
     await loadData();
   }
 
+  // Technician finishes an in-house repair. This does NOT close the ticket: the
+  // completion photo goes to the unit head, who is the only one who can close it.
+  // Previously this wrote 'closed' directly, so an in-house repair was the one path
+  // in the module that no reviewer ever saw.
   async function closeInHouse() {
     if (!selectedTicket || !completionBlob) return;
     setUploading(true);
@@ -1514,22 +1526,51 @@ export function Maintenance() {
         ticketId: selectedTicket.id, plantName: selectedTicket.plants?.name || 'Plant',
         photoType: 'completion', creator: activeProfile.name, onProgress: setUploadPct,
       });
-      await updateTicketStatus(selectedTicket.id, 'closed', {
-        completion_photo_url: result.secure_url, closed_at: new Date().toISOString(),
+      await updateTicketStatus(selectedTicket.id, 'pending_unit_head', {
+        completion_photo_url: result.secure_url,
       });
       notify({
-        target_roles: ['admin', 'unit_head'],
-        title: `Ticket closed: ${selectedTicket.equipment}`,
-        body: `Fixed in-house by ${activeProfile.name}`,
+        target_roles: ['unit_head', 'admin'],
+        title: `Verify repair: ${selectedTicket.equipment}`,
+        body: `Fixed in-house by ${activeProfile.name} · awaiting your verification`,
+        type: 'warning', route: maintRoute(selectedTicket?.id),
+        actor_name: activeProfile.name, actor_role: role, read_by: [],
+        plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
+      });
+      await notifyTicketWatchers(selectedTicket, `Awaiting verification: ${selectedTicket.equipment}`, `${activeProfile.name} finished the in-house repair — sent to the unit head to verify.`, 'warning');
+      setSelectedTicket((tk) => tk ? { ...tk, status: 'pending_unit_head', completion_photo_url: result.secure_url } : tk);
+      setCompletionBlob(null); setUploadPct(0);
+      toast.success(t('maint.sentForVerification', 'Sent for verification'));
+      await loadData();
+    } catch (err) { toast.error(t('maint.uploadFailedMsg', { defaultValue: 'Upload failed: {{message}}', message: err instanceof Error ? err.message : String(err) })); }
+    finally { setUploading(false); }
+  }
+
+  // Unit head / admin verifies a completed in-house repair. Approving is what
+  // finally closes the ticket; sending back reuses the Request Changes form so
+  // the rejection carries a written reason (submitRequestChanges rewinds an
+  // in-house ticket to 'in_progress', i.e. redo the work + new photo).
+  async function verifyInHouse() {
+    if (!selectedTicket || actionBusyRef.current) return;
+    actionBusyRef.current = true;
+    try {
+      const closedAt = new Date().toISOString();
+      await updateTicketStatus(selectedTicket.id, 'closed', { closed_at: closedAt });
+      await auditNote(selectedTicket, `✅ In-house repair verified & closed by ${activeProfile.name}`);
+      notify({
+        target_roles: ['technician_shd', 'admin'],
+        title: `Repair verified: ${selectedTicket.equipment}`,
+        body: `Verified & closed by ${activeProfile.name}`,
         type: 'info', route: maintRoute(selectedTicket?.id),
         actor_name: activeProfile.name, actor_role: role, read_by: [],
         plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id,
       });
-      await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `Fixed in-house by ${activeProfile.name}.`);
-      setSelectedTicket(null); setCompletionBlob(null); setUploadPct(0);
+      await notifyTicketWatchers(selectedTicket, `Ticket closed: ${selectedTicket.equipment}`, `In-house repair verified by ${activeProfile.name}.`);
+      setSelectedTicket((tk) => tk ? { ...tk, status: 'closed', closed_at: closedAt } : tk);
+      toast.success(t('maint.verifiedClosed', 'Verified & closed'));
       await loadData();
-    } catch (err) { toast.error(t('maint.uploadFailedMsg', { defaultValue: 'Upload failed: {{message}}', message: err instanceof Error ? err.message : String(err) })); }
-    finally { setUploading(false); }
+    } catch (e) { toast.error(t('maint.failedMsg', { defaultValue: 'Failed: {{message}}', message: e instanceof Error ? e.message : String(e) })); }
+    finally { actionBusyRef.current = false; }
   }
 
   // Store manager submits availability decision with full part details
@@ -2155,7 +2196,10 @@ export function Maintenance() {
         if (sr) body = <>{line(t('maint.partRequested', 'Part requested'), sr.part_name)}{line(t('maint.qtyLabel', 'Qty'), sr.quantity)}{line(t('maint.specificationLabel', 'Specification'), sr.specification)}{line(t('maint.storeDecisionLabel', 'Store decision'), sr.store_decision)}{line(t('maint.qtyInStoreLabel', 'Qty in store'), sr.qty_in_store)}{line(t('maint.shelfLabel', 'Shelf'), sr.shelf_location)}{line(t('maint.conditionLabel', 'Condition'), sr.part_condition)}</>;
         break;
       case 'pending_unit_head':
+        // Two meanings on this stage: approve a part request (store path) or
+        // verify finished work (in-house path, which has no store request).
         if (sr) body = <>{line(t('maint.unitHeadDecision', 'Unit head decision'), sr.unit_head_approval)}{line(t('maint.partAvailability', 'Part availability'), sr.store_decision)}</>;
+        else body = <>{line(t('maint.handledBy', 'Handled by'), tk.assigned_to || tk.raised_by)}{line(t('maint.unitHeadDecision', 'Unit head decision'), tk.status === 'closed' ? t('maint.verifiedClosed', 'Verified & closed') : t('maint.awaitingVerification', 'Awaiting verification'))}{photo(tk.completion_photo_url, t('maint.completionPhoto', 'Completion photo'))}</>;
         break;
       case 'pending_purchase': {
         const pr = storeReqs.find(r => r.store_decision === 'unavailable' || r.purchase_required) ?? sr;
@@ -2296,16 +2340,54 @@ export function Maintenance() {
       );
     }
 
-    // ── in_progress: technician closes with photo ──
+    // ── in_progress: technician submits the completion photo for verification ──
     if (status === 'in_progress' && (isTechnician || isAdmin)) {
       return (
         <div>
-          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 12 }}>{t('maint.uploadPhotoProofClose', 'Upload photo proof to close ticket')}</div>
+          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 12 }}>{t('maint.uploadPhotoProofVerify', 'Upload photo proof — the unit head verifies before the ticket closes')}</div>
           <PhotoUploader onBlobReady={setCompletionBlob} label={t('maint.completionPhoto', 'Completion photo')} hint={t('maint.completionPhotoHint', 'Photo of the fixed equipment / completed repair')} />
           {uploading && <UploadBar pct={uploadPct} color="#F47651" />}
           <button onClick={closeInHouse} disabled={!completionBlob || uploading} style={{ width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: (!completionBlob || uploading) ? 0.5 : 1 }}>
-            {uploading ? t('maint.uploadingEllipsis', 'Uploading…') : t('maint.closeTicketRepairComplete', 'Close ticket — repair complete')}
+            {uploading ? t('maint.uploadingEllipsis', 'Uploading…') : t('maint.sendToUnitHeadVerify', 'Send to unit head for verification')}
           </button>
+        </div>
+      );
+    }
+
+    // ── in-house repair completed → unit head verifies, and only they can close ──
+    // Guarded on "no store request rows" so this never shadows the part-approval
+    // meaning of pending_unit_head on the procurement path.
+    if (status === 'pending_unit_head' && decision !== 'store' && storeReqs.length === 0) {
+      const canVerify = isUnitHead || isAdmin;
+      return (
+        <div style={{ border: '1px solid #DDD6FE', background: '#F5F3FF', borderRadius: 14, padding: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: '#5B21B6' }}>{t('maint.verifyInhouseTitle', 'In-house repair — awaiting unit head verification')}</div>
+          <div style={{ fontSize: 12, color: '#64748B', marginTop: 4, lineHeight: 1.5 }}>
+            {t('maint.verifyInhouseSub', { defaultValue: '{{name}} completed the repair and uploaded proof. It stays open until the unit head verifies it.', name: tk.assigned_to || tk.raised_by || '—' })}
+          </div>
+          {tk.completion_photo_url && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{t('maint.completionPhoto', 'Completion photo')}</div>
+              <img
+                src={tk.completion_photo_url}
+                alt={t('maint.completionPhoto', 'Completion photo')}
+                onClick={() => setTicketLightbox({ images: [{ url: tk.completion_photo_url!, label: t('maint.completionPhoto', 'Completion photo') }], index: 0 })}
+                style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10, border: '1px solid #E2E8F0', cursor: 'zoom-in', display: 'block' }}
+              />
+            </div>
+          )}
+          {canVerify ? (
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button onClick={() => { setChangeTags([]); setChangeReason(''); setRequestingChanges(true); }} style={{ flex: 1, padding: '11px', borderRadius: 12, border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#DC2626', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {t('maint.sendBack', '↩ Send back')}
+              </button>
+              <button onClick={verifyInHouse} style={{ flex: 2, padding: '11px', borderRadius: 12, border: 'none', background: '#16A34A', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {t('maint.verifyAndClose', '✓ Verify & close')}
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: '#7C3AED', fontWeight: 600, marginTop: 14 }}>{t('maint.awaitingUnitHead', 'Waiting on the unit head — you will be notified when it is closed.')}</div>
+          )}
         </div>
       );
     }
@@ -3101,7 +3183,7 @@ export function Maintenance() {
       {/* ── PANEL: Ticket detail ─────────────────────────────────────────── */}
       <SlidePanel
         open={!!selectedTicket}
-        onClose={() => { setSelectedTicket(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); setRequestingChanges(false); setResubmitting(false); setChangeReason(''); setChangeTags([]); setResubmitPhotoBlob(null); setRejectReason(''); }}
+        onClose={() => { setSelectedTicket(null); setTicketLightbox(null); setEditingTicket(false); setViewStage(null); setShowStoreForm(false); setStoreItems([{ ...BLANK_ITEM }]); setActingReqId(null); setPmForm({ itemsCount: '', billTotal: '' }); setCompletionBlob(null); setDefectiveBlob(null); setHandoverInvoiceBlob(null); setHandoverPhotoBlob(null); setDispatchBlob(null); setBusyRef(''); setUnitPrice(''); setSupplierName(''); setDefectiveDecision(''); setStoreDecisionForm({ ...BLANK_STORE_DECISION }); setRequestingChanges(false); setResubmitting(false); setChangeReason(''); setChangeTags([]); setResubmitPhotoBlob(null); setRejectReason(''); }}
         title={selectedTicket?.equipment || t('maint.ticketDetail', 'Ticket detail')}
         subtitle={`${t('maint.emergency')} · ${selectedTicket?.plants?.name || t('nav.maintenance')}`}
         locked={uploading}
@@ -3131,6 +3213,39 @@ export function Maintenance() {
                 {selectedTicket.unit && <> · <span style={{ color: '#A21CAF', fontWeight: 700 }}>{selectedTicket.unit}</span></>}
               </div>
               {selectedTicket.description && <div style={{ fontSize: 13, color: '#0F172A', marginTop: 4 }}><TicketDescription entityId={selectedTicket.id} text={selectedTicket.description} /></div>}
+              {/* Evidence photos inline. The defect photo the technician attaches at
+                  raise time used to live only in the Activity Log, so a reviewer had
+                  to leave the ticket to see what actually broke. */}
+              {(() => {
+                const shots: LightboxImage[] = [];
+                const add = (url: string | null | undefined, label: string) => { if (url) shots.push({ url, label }); };
+                add(selectedTicket.defective_raise_photo_url, t('maint.reportedDefectPhoto', 'Reported defect'));
+                add(selectedStoreReq?.handover_photo_url, t('maint.partReceivedPhoto', 'Part received photo'));
+                add(selectedTicket.defective_part_photo_url, t('maint.defectivePartPhoto', 'Defective part photo'));
+                add(selectedTicket.completion_photo_url, t('maint.completionPhoto', 'Completion photo'));
+                if (!shots.length) return null;
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                      {t('maint.photosOnTicket', 'Photos on this ticket')}
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {shots.map((s, i) => (
+                        <button
+                          key={s.url}
+                          type="button"
+                          onClick={() => setTicketLightbox({ images: shots, index: i })}
+                          title={t('activity.viewPhotos', 'View photo(s)')}
+                          style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in', fontFamily: 'inherit', textAlign: 'left', maxWidth: 108 }}
+                        >
+                          <img src={s.url} alt={s.label} loading="lazy" style={{ width: 96, height: 72, objectFit: 'cover', borderRadius: 10, border: '1px solid #E2E8F0', display: 'block', background: '#F1F5F9' }} />
+                          <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 4, lineHeight: 1.3 }}>{s.label}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Notes are visible to everyone on the ticket; edit/delete are admin-only.
@@ -3381,6 +3496,14 @@ export function Maintenance() {
           </button>
         </div>
       </SlidePanel>
+
+      {/* Mounted outside the panels so closing a panel can't strand an open viewer. */}
+      <ImageLightbox
+        images={ticketLightbox?.images ?? []}
+        startIndex={ticketLightbox?.index ?? 0}
+        open={!!ticketLightbox}
+        onClose={() => setTicketLightbox(null)}
+      />
     </>
   );
 }

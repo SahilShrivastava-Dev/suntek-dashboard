@@ -294,7 +294,7 @@ export const TODO_SECTIONS: TodoSectionDef[] = [
     icon: '🔧',
     tone: 'blue',
     columns: TICKET_COLS('todo.col.status'),
-    appliesTo: (ctx) => hasRole(ctx, 'technician_shd', 'factory_operator'),
+    appliesTo: (ctx) => hasRole(ctx, 'technician_shd', 'factory_operator', 'cap:perform_maintenance'),
     fetch: async (ctx) => {
       if (!ctx.personName) return [];
       const { data } = await ctx.scopeQuery(
@@ -341,7 +341,7 @@ export const TODO_SECTIONS: TodoSectionDef[] = [
       { key: 'due', labelKey: 'todo.col.due' },
       { key: 'status', labelKey: 'todo.col.overdue', align: 'right' },
     ],
-    appliesTo: (ctx) => hasRole(ctx, 'technician_shd', 'factory_operator'),
+    appliesTo: (ctx) => hasRole(ctx, 'technician_shd', 'factory_operator', 'cap:perform_maintenance'),
     fetch: async (ctx) => {
       if (!ctx.personName) return [];
       const { data } = await ctx.scopeQuery(

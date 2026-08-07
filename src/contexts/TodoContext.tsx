@@ -71,8 +71,11 @@ export function TodoProvider({ children }: { children: React.ReactNode }) {
     if (activeProfile.baseRoleId) set.add(activeProfile.baseRoleId);
     // A built-in archetype's id IS the role slug (provisioned users use db_<uuid>).
     if (roles.some((r) => r.id === activeProfile.id)) set.add(activeProfile.id);
+    // Granted special allowances ride along as `cap:<key>` so a section can apply
+    // to "whoever holds this capability" instead of an enumerated slug list.
+    for (const c of activeProfile.capabilities ?? []) set.add(`cap:${c}`);
     return [...set].sort().join(',');
-  }, [activeProfile.id, activeProfile.baseRoleId, activeProfile.allowedDashboardRoutes, roles]);
+  }, [activeProfile.id, activeProfile.baseRoleId, activeProfile.allowedDashboardRoutes, activeProfile.capabilities, roles]);
 
   const personName = activeProfile.name || '';
 

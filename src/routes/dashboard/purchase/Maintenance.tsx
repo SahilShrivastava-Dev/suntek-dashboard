@@ -299,6 +299,7 @@ async function updateTicketStatus(ticketId: string, status: TicketStatus, extra?
 // actual people are resolved from the directory (allProfiles) inside the
 // component. Name-based so the blacklist guard (which matches on person name)
 // can flag a restricted assignee.
+// Any role granted 'perform_maintenance' is added to this list at runtime.
 const ASSIGNABLE_ROLE_IDS = ['technician_shd', 'store_manager_maint', 'factory_operator', 'unit_head'];
 
 // Common deficiencies a reviewer can tick when sending a ticket back for changes.
@@ -465,7 +466,7 @@ function ScheduleRowMenu({ isActive, deleting, onRevise, onToggle, onDuplicate, 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function Maintenance() {
-  const { activeProfile, allProfiles, roles } = useRoleContext();
+  const { activeProfile, allProfiles, roles, can } = useRoleContext();
   const { scopeQuery, units: scopeUnits, allowedPlants, storeIdFor } = usePlantScope();
   const { isPersonBlacklisted, notifyActivity, tableReady: blacklistReady } = useBlacklist();
   const toast = useToast();
@@ -486,10 +487,16 @@ export function Maintenance() {
   const trStageLabels = (labels: Record<string, string>, keys: Record<string, string>) =>
     Object.fromEntries(Object.entries(labels).map(([k, v]) => [k, keys[k] ? t(keys[k], v) : v]));
 
-  // Real people (from the DB directory) an admin can assign a task to — those
-  // whose role is in ASSIGNABLE_ROLE_IDS. baseRoleId is the directory entry's role.
+  // Real people (from the DB directory) an admin can assign a task to — those whose
+  // role is in ASSIGNABLE_ROLE_IDS, plus anyone holding 'perform_maintenance', so a
+  // newly created role becomes assignable the moment it is granted the allowance.
+  // baseRoleId is the directory entry's role.
+  const assignableRoleIds = useMemo(
+    () => new Set([...ASSIGNABLE_ROLE_IDS, ...roles.filter(r => (r.capabilities ?? []).includes('perform_maintenance')).map(r => r.id)]),
+    [roles],
+  );
   const ASSIGNABLE_STAFF = allProfiles
-    .filter((p) => ASSIGNABLE_ROLE_IDS.includes(p.baseRoleId ?? p.id))
+    .filter((p) => assignableRoleIds.has(p.baseRoleId ?? p.id))
     .map((p) => ({ name: p.name, label: `${p.name} · ${p.roleLabel}` }));
 
   // ── @-mention / watcher plumbing for tickets ────────────────────────────────
@@ -511,11 +518,25 @@ export function Maintenance() {
     await notifyWatchers({ ref: ticketRef(t), actor: actorObj(), title, body, type, addNotification: addNote });
   }
 
-  const isTechnician = role === 'technician_shd';
   const isAdmin = role === 'admin';
+  // "Does the shop-floor work on a ticket." The seeded Technician role has it by
+  // birth; any other role (Operator / Technical Team / a role the client invents
+  // next month) earns it through the grantable 'perform_maintenance' allowance.
+  // Gating on the capability instead of the 'technician_shd' slug is what makes
+  // this work for multi-role users too — RoleContext unions capabilities across
+  // every role a person holds, but activeProfile.id is only their PRIMARY role.
+  // Admin is excluded so the capability (which admins hold implicitly) doesn't
+  // demote them into a technician view and hide Schedule Setup from them.
+  const isTechnician = role === 'technician_shd' || (!isAdmin && can('perform_maintenance'));
   const isUnitHead = role === 'unit_head';
   const isStoreManager = ALL_STORE_MANAGER_IDS.includes(role);
   const isPurchaseManager = role === 'purchase_manager';
+  // Every role slug that does maintenance work, resolved from the live catalog so
+  // role-targeted notifications reach capability-holders and not just technicians.
+  const maintenanceRoleIds = useMemo(
+    () => [...new Set(['technician_shd', ...roles.filter(r => (r.capabilities ?? []).includes('perform_maintenance')).map(r => r.id)])],
+    [roles],
+  );
 
   // Data
   const [tab, setTab] = useState<'periodic' | 'emergency' | 'schedule'>('periodic');
@@ -700,7 +721,7 @@ export function Maintenance() {
         if (toCreate.length) {
           for (let i = 0; i < toCreate.length; i += 200) await insertRows('maintenance_tickets', toCreate.slice(i, i + 200) as never);
           notify({
-            target_roles: ['admin', 'unit_head', 'technician_shd'],
+            target_roles: ['admin', 'unit_head', ...maintenanceRoleIds],
             title: `${toCreate.length} periodic maintenance task${toCreate.length === 1 ? '' : 's'} due`,
             body: `Auto-generated from the maintenance schedule — open the Periodic tab.`,
             type: 'warning', route: '/dashboard/purchase/maint',
@@ -713,7 +734,7 @@ export function Maintenance() {
         }
       } catch (e) { console.error('[Maintenance] periodic generation failed', e); }
     }
-  }, [scopeQuery]);
+  }, [scopeQuery, maintenanceRoleIds]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -1161,7 +1182,7 @@ export function Maintenance() {
         revision_count: (selectedTicket.revision_count ?? 0) + 1,
       }).eq('id', selectedTicket.id);
       await auditNote(selectedTicket, `🔁 Changes requested by ${activeProfile.name}: ${reason}`);
-      notify({ target_roles: ['technician_shd', 'admin'], title: `Changes requested: ${selectedTicket.equipment}`, body: reason, type: 'warning', route: maintRoute(selectedTicket.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id ?? null, unit_id: selectedTicket.unit_id ?? null });
+      notify({ target_roles: [...maintenanceRoleIds, 'admin'], title: `Changes requested: ${selectedTicket.equipment}`, body: reason, type: 'warning', route: maintRoute(selectedTicket.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id ?? null, unit_id: selectedTicket.unit_id ?? null });
       await notifyTicketWatchers(selectedTicket, `Changes requested: ${selectedTicket.equipment}`, reason, 'warning');
       setSelectedTicket((t) => t ? { ...t, status: 'changes_requested', revision_prev_status: prevStatus, revision_reason: reason, revision_requested_by: activeProfile.name, revision_requested_at: nowIso, revision_count: (t.revision_count ?? 0) + 1 } : t);
       setRequestingChanges(false); setChangeReason(''); setChangeTags([]);
@@ -1445,11 +1466,11 @@ export function Maintenance() {
       if (approve) {
         await updateRows('maintenance_tickets', { status: 'closed', closed_at: new Date().toISOString() }).eq('id', ticket.id);
         if (sched) await advanceSchedule(sched);
-        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance verified: ${ticket.title}`, body: `${ticket.equipment} · verified by ${activeProfile.name}`, type: 'info', route: maintRoute(ticket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
+        notify({ target_roles: [...maintenanceRoleIds, 'admin'], title: `Maintenance verified: ${ticket.title}`, body: `${ticket.equipment} · verified by ${activeProfile.name}`, type: 'info', route: maintRoute(ticket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
         toast.success(t('maint.verifiedClosed', 'Verified & closed'));
       } else {
         await updateRows('maintenance_tickets', { status: 'open' }).eq('id', ticket.id);
-        notify({ target_roles: ['technician_shd', 'admin'], title: `Maintenance sent back: ${ticket.title}`, body: `${ticket.equipment} · ${activeProfile.name} asked for rework`, type: 'warning', route: maintRoute(ticket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
+        notify({ target_roles: [...maintenanceRoleIds, 'admin'], title: `Maintenance sent back: ${ticket.title}`, body: `${ticket.equipment} · ${activeProfile.name} asked for rework`, type: 'warning', route: maintRoute(ticket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: ticket.plant_id ?? null, unit_id: null });
         toast.success(t('maint.sentBackForRework', 'Sent back for rework'));
       }
       setVerifyingTicket(null);
@@ -1558,7 +1579,7 @@ export function Maintenance() {
       await updateTicketStatus(selectedTicket.id, 'closed', { closed_at: closedAt });
       await auditNote(selectedTicket, `✅ In-house repair verified & closed by ${activeProfile.name}`);
       notify({
-        target_roles: ['technician_shd', 'admin'],
+        target_roles: [...maintenanceRoleIds, 'admin'],
         title: `Repair verified: ${selectedTicket.equipment}`,
         body: `Verified & closed by ${activeProfile.name}`,
         type: 'info', route: maintRoute(selectedTicket?.id),
@@ -1720,11 +1741,11 @@ export function Maintenance() {
     }
 
     if (approved && partAvailable) {
-      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', 'technician_shd'], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+      notify({ target_roles: ['store_manager_maint', 'warehouse_manager', ...maintenanceRoleIds], title: `Approved: hand over ${req.part_name}`, body: `Unit head approved. Store manager to hand part to technician.`, type: 'info', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else if (approved && !partAvailable) {
       notify({ target_roles: ['admin', 'unit_head'], title: `Procurement approved: ${req.part_name}`, body: `${selectedTicket.equipment} — procure from market. Enter BUSY ref when done.`, type: 'warning', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
     } else {
-      notify({ target_roles: ['technician_shd', 'admin'], title: `Item rejected: ${req.part_name}`, body: reason ? `Unit head rejected this item: ${reason}` : `Unit head rejected this item.`, type: 'warning', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
+      notify({ target_roles: [...maintenanceRoleIds, 'admin'], title: `Item rejected: ${req.part_name}`, body: reason ? `Unit head rejected this item: ${reason}` : `Unit head rejected this item.`, type: 'warning', route: maintRoute(selectedTicket?.id), actor_name: activeProfile.name, actor_role: role, read_by: [], plant_id: selectedTicket.plant_id, unit_id: selectedTicket.unit_id });
       // Keep the reason on the ticket's audit thread.
       await auditNote(selectedTicket, `⛔ Part rejected by ${activeProfile.name}: "${req.part_name}"${reason ? ` — ${reason}` : ''}`);
     }
@@ -1931,7 +1952,7 @@ export function Maintenance() {
         }
       }
       notify({
-        target_roles: ['technician_shd', 'admin', 'unit_head'],
+        target_roles: [...maintenanceRoleIds, 'admin', 'unit_head'],
         title: `Part handed over: ${req.part_name}`,
         body: `${activeProfile.name} confirmed handover of "${req.part_name}".`,
         type: 'info', route: maintRoute(selectedTicket?.id),
